@@ -21,11 +21,12 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ### Changed
 
-- Reworked the public response API to a render-first model built around `Contract(...)`, `Status(...)`, `Render(...)`, `RenderWithMeta(...)`, `RenderEmpty(...)`, and `RenderError(...)`.
-- Simplified the business-boundary runtime so `Contract(...)` now carries route-scoped mapper / reporter configuration and shared request state, without wrapping `http.ResponseWriter`.
+- Reworked the public response API to a render-first model built around `WithResponses(...)`, `Status(...)`, `Render(...)`, `RenderWithMeta(...)`, `RenderEmpty(...)`, and `RenderError(...)`.
+- Simplified the business-boundary runtime so `WithResponses(...)` now carries route-scoped mapper / reporter configuration, minimal success-status defaults, and shared request state, without wrapping `http.ResponseWriter`.
 - Kept request-scoped error reporting and request-id reuse semantics while redefining `ResponseStarted` to mean "a hah-managed render path has already begun".
 - Updated examples, tests, and user-facing docs to use the new render-first flow instead of the previous `WriteError(...)` / `Respond*` model.
 - Narrowed the public response surface to the common JSON API path instead of exposing less-common streaming / upgrade render helpers up front.
+- Added `SuccessStatus(...)` as the first route-scoped success-side default so `WithResponses(...)` can predeclare common success status codes without hiding explicit `Render*` calls.
 
 ### Removed
 

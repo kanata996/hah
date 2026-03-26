@@ -13,26 +13,37 @@ type ErrorReport struct {
 	ResponseStarted bool
 }
 
-// ErrorReporter receives centralized observations for errors handled by hah.
-type ErrorReporter func(ErrorReport)
+// ErrorReportHandler receives centralized observations for errors handled by
+// hah.
+type ErrorReportHandler func(ErrorReport)
 
 // ErrorMapper maps an application error into a standardized boundary error.
 type ErrorMapper func(err error) *HTTPError
 
+// ScopeOption customizes route-scoped hah response behavior.
+type ScopeOption interface {
+	applyScope(*scopeConfig)
+}
+
 type writeErrorConfig struct {
 	mappers     []ErrorMapper
-	reporter    ErrorReporter
+	reporter    ErrorReportHandler
 	reporterSet bool
 }
 
 // ErrorOption customizes how hah maps, reports, and writes boundary errors.
-type ErrorOption func(*writeErrorConfig)
+// Error options also satisfy ScopeOption, so they can be reused inside
+// WithResponses.
+type ErrorOption interface {
+	ScopeOption
+	applyError(*writeErrorConfig)
+}
 
 func buildWriteErrorConfig(opts ...ErrorOption) writeErrorConfig {
 	cfg := writeErrorConfig{}
 	for _, opt := range opts {
 		if opt != nil {
-			opt(&cfg)
+			opt.applyError(&cfg)
 		}
 	}
 	if !cfg.reporterSet {
@@ -41,21 +52,41 @@ func buildWriteErrorConfig(opts ...ErrorOption) writeErrorConfig {
 	return cfg
 }
 
-// WithErrorReporter overrides error reporting for errors rendered by hah.
-// Passing nil disables reporting for hah error handling.
-func WithErrorReporter(reporter ErrorReporter) ErrorOption {
-	return func(cfg *writeErrorConfig) {
-		cfg.reporter = reporter
-		cfg.reporterSet = true
-	}
+type errorReporterOption struct {
+	reporter ErrorReportHandler
 }
 
-// WithErrorMappers appends mappers to a RenderError call or reusable
-// ErrorOption fragment.
-func WithErrorMappers(mappers ...ErrorMapper) ErrorOption {
+func (o errorReporterOption) applyScope(cfg *scopeConfig) {
+	o.applyError(&cfg.writeError)
+}
+
+func (o errorReporterOption) applyError(cfg *writeErrorConfig) {
+	cfg.reporter = o.reporter
+	cfg.reporterSet = true
+}
+
+// ErrorReporter overrides error reporting for a WithResponses subtree or a
+// RenderError call. Passing nil disables reporting for that scope.
+func ErrorReporter(reporter ErrorReportHandler) ErrorOption {
+	return errorReporterOption{reporter: reporter}
+}
+
+type errorMappersOption struct {
+	mappers []ErrorMapper
+}
+
+func (o errorMappersOption) applyScope(cfg *scopeConfig) {
+	o.applyError(&cfg.writeError)
+}
+
+func (o errorMappersOption) applyError(cfg *writeErrorConfig) {
+	cfg.mappers = append(cfg.mappers, o.mappers...)
+}
+
+// ErrorMappers appends mappers to a WithResponses subtree, a RenderError call,
+// or a reusable ErrorOption fragment.
+func ErrorMappers(mappers ...ErrorMapper) ErrorOption {
 	filtered := filterErrorMappers(mappers...)
 
-	return func(cfg *writeErrorConfig) {
-		cfg.mappers = append(cfg.mappers, filtered...)
-	}
+	return errorMappersOption{mappers: filtered}
 }

@@ -10,9 +10,9 @@ import (
 	"github.com/kanata996/hah/internal/reqid"
 )
 
-func TestWithContractConfigStoresConfigAndSharedRequestState(t *testing.T) {
+func TestWithScopeConfigStoresConfigAndSharedRequestState(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	cfg := contractConfig{
+	cfg := scopeConfig{
 		writeError: writeErrorConfig{
 			mappers: []ErrorMapper{
 				func(err error) *HTTPError { return nil },
@@ -20,16 +20,16 @@ func TestWithContractConfigStoresConfigAndSharedRequestState(t *testing.T) {
 		},
 	}
 
-	got := withContractConfig(req, cfg)
+	got := withScopeConfig(req, cfg)
 	if got == nil {
-		t.Fatal("withContractConfig(req, cfg) = nil")
+		t.Fatal("withScopeConfig(req, cfg) = nil")
 	}
 	if got == req {
-		t.Fatal("withContractConfig(req, cfg) returned original request")
+		t.Fatal("withScopeConfig(req, cfg) returned original request")
 	}
 
-	if state := contractStateFrom(got); state == nil {
-		t.Fatal("contractStateFrom(got) = nil")
+	if state := scopeStateFrom(got); state == nil {
+		t.Fatal("scopeStateFrom(got) = nil")
 	} else if len(state.config.writeError.mappers) != 1 {
 		t.Fatalf("len(state.config.writeError.mappers) = %d, want 1", len(state.config.writeError.mappers))
 	}
@@ -50,25 +50,25 @@ func TestWithContractConfigStoresConfigAndSharedRequestState(t *testing.T) {
 	}
 }
 
-func TestContractStateFromMissingState(t *testing.T) {
+func TestScopeStateFromMissingState(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	if got := contractStateFrom(req); got != nil {
-		t.Fatalf("contractStateFrom(req) = %#v, want nil", got)
+	if got := scopeStateFrom(req); got != nil {
+		t.Fatalf("scopeStateFrom(req) = %#v, want nil", got)
 	}
 }
 
-func TestWithContractConfigReusesExistingRequestState(t *testing.T) {
+func TestWithScopeConfigReusesExistingRequestState(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req = reqid.Set(req, "req_upstream")
 
-	got := withContractConfig(req, contractConfig{})
+	got := withScopeConfig(req, scopeConfig{})
 	if got == nil {
-		t.Fatal("withContractConfig(req, cfg) = nil")
+		t.Fatal("withScopeConfig(req, cfg) = nil")
 	}
 
 	current := reqid.StateFrom(got)
 	if current != reqid.StateFrom(req) {
-		t.Fatal("withContractConfig(req, cfg) did not reuse existing request state")
+		t.Fatal("withScopeConfig(req, cfg) did not reuse existing request state")
 	}
 	if id := reqid.EnsureID(current); id != "req_upstream" {
 		t.Fatalf("reqid.EnsureID(current) = %q, want req_upstream", id)
@@ -96,7 +96,7 @@ func TestMergeWriteErrorConfigCoversAllBranches(t *testing.T) {
 		base            writeErrorConfig
 		override        writeErrorConfig
 		wantMapperCount int
-		wantReporter    ErrorReporter
+		wantReporter    ErrorReportHandler
 		wantReporterSet bool
 	}{
 		{
@@ -178,7 +178,29 @@ func TestMergeWriteErrorConfigCoversAllBranches(t *testing.T) {
 	}
 }
 
-func sameReporter(a, b ErrorReporter) bool {
+func TestMergeSuccessConfigPrefersOverrideWhenSet(t *testing.T) {
+	got := mergeSuccessConfig(
+		successConfig{status: http.StatusAccepted},
+		successConfig{status: http.StatusCreated},
+	)
+
+	if got.status != http.StatusCreated {
+		t.Fatalf("mergeSuccessConfig(...).status = %d, want %d", got.status, http.StatusCreated)
+	}
+}
+
+func TestMergeSuccessConfigPreservesBaseWhenOverrideUnset(t *testing.T) {
+	got := mergeSuccessConfig(
+		successConfig{status: http.StatusAccepted},
+		successConfig{},
+	)
+
+	if got.status != http.StatusAccepted {
+		t.Fatalf("mergeSuccessConfig(...).status = %d, want %d", got.status, http.StatusAccepted)
+	}
+}
+
+func sameReporter(a, b ErrorReportHandler) bool {
 	switch {
 	case a == nil && b == nil:
 		return true

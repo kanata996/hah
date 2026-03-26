@@ -58,6 +58,25 @@ func TestStatusWrapperInfluencesRender(t *testing.T) {
 	}
 }
 
+func TestWithResponsesSuccessStatusInfluencesRender(t *testing.T) {
+	rr := newResponseRecorder()
+	req := newRequest()
+
+	handler := hah.WithResponses(
+		hah.SuccessStatus(http.StatusCreated),
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := hah.Render(w, r, map[string]any{"ok": true}); err != nil {
+			t.Fatalf("Render() error = %v", err)
+		}
+	}))
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusCreated)
+	}
+}
+
 func TestRenderWithMetaWritesEnvelope(t *testing.T) {
 	rr := newResponseRecorder()
 	req := newRequest()

@@ -8,23 +8,23 @@ import (
 	"github.com/kanata996/hah/internal/reqid"
 )
 
-func TestSetRequestIDUsesSharedRequestStateInsideContract(t *testing.T) {
-	req := withContractConfig(httptest.NewRequest(http.MethodGet, "/", nil), contractConfig{})
+func TestSetRequestIDUsesSharedRequestStateInsideWithResponses(t *testing.T) {
+	req := withScopeConfig(httptest.NewRequest(http.MethodGet, "/", nil), scopeConfig{})
 	if req == nil {
-		t.Fatal("withContractConfig(req, cfg) = nil")
+		t.Fatal("withScopeConfig(req, cfg) = nil")
 	}
 
-	got := SetRequestID(req, "req_contract")
+	got := SetRequestID(req, "req_wrap")
 	if got != req {
-		t.Fatal("SetRequestID(reqWithContract, id) returned different request")
+		t.Fatal("SetRequestID(reqWithResponses, id) returned different request")
 	}
 
 	if current := reqid.StateFrom(req); current == nil {
 		t.Fatal("reqid.StateFrom(req) = nil")
-	} else if id := reqid.EnsureID(current); id != "req_contract" {
-		t.Fatalf("reqid.EnsureID(current) = %q, want req_contract", id)
+	} else if id := reqid.EnsureID(current); id != "req_wrap" {
+		t.Fatalf("reqid.EnsureID(current) = %q, want req_wrap", id)
 	}
-	if state := contractStateFrom(req); state == nil {
-		t.Fatal("contractStateFrom(req) = nil")
+	if state := scopeStateFrom(req); state == nil {
+		t.Fatal("scopeStateFrom(req) = nil")
 	}
 }

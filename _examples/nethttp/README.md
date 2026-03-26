@@ -4,7 +4,7 @@
 
 核心关注点：
 
-- 不使用 `Contract(...)`，也不使用 mapper
+- 不使用 `WithResponses(...)`，也不使用 mapper
 - handler 只负责 `DecodeAndValidate*`、调用 service、再用 `hah.RenderError(...)` / `Render*`
 - service / repository 直接返回公开 HTTP 错误，例如 `hah.NotFound(...)`、`hah.Conflict(...)`
 - 成功响应统一走 `Render(...)` / `RenderWithMeta(...)`

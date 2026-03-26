@@ -8,11 +8,11 @@ import (
 	"github.com/kanata996/hah"
 )
 
-func TestContractAppliesRouteScopedMappers(t *testing.T) {
+func TestWithResponsesAppliesRouteScopedMappers(t *testing.T) {
 	target := errors.New("target")
 
-	handler := hah.Contract(
-		hah.WithContractErrorMappers(func(err error) *hah.HTTPError {
+	handler := hah.WithResponses(
+		hah.ErrorMappers(func(err error) *hah.HTTPError {
 			if errors.Is(err, target) {
 				return hah.NotFound("user_not_found", "user not found")
 			}
@@ -31,33 +31,33 @@ func TestContractAppliesRouteScopedMappers(t *testing.T) {
 	assertErrorResponse(t, rr, http.StatusNotFound, "user_not_found", "user not found")
 }
 
-func TestContractPanicsOnNilNext(t *testing.T) {
+func TestWithResponsesPanicsOnNilNext(t *testing.T) {
 	defer func() {
 		recovered := recover()
 		if recovered == nil {
-			t.Fatal("Contract(...)(nil) did not panic")
+			t.Fatal("WithResponses(...)(nil) did not panic")
 		}
-		if got := recovered.(string); got != "hah: Contract requires a non-nil next handler" {
-			t.Fatalf("panic = %q, want %q", got, "hah: Contract requires a non-nil next handler")
+		if got := recovered.(string); got != "hah: WithResponses requires a non-nil next handler" {
+			t.Fatalf("panic = %q, want %q", got, "hah: WithResponses requires a non-nil next handler")
 		}
 	}()
 
-	hah.Contract()(nil)
+	hah.WithResponses()(nil)
 }
 
-func TestContractPrefersInnerMapperOverOuterAndCallSiteOverContract(t *testing.T) {
+func TestWithResponsesPrefersInnerMapperOverOuterAndCallSiteOverWithResponses(t *testing.T) {
 	target := errors.New("target")
 
-	handler := hah.Contract(
-		hah.WithContractErrorMappers(func(err error) *hah.HTTPError {
+	handler := hah.WithResponses(
+		hah.ErrorMappers(func(err error) *hah.HTTPError {
 			if errors.Is(err, target) {
 				return hah.NewHTTPError(http.StatusBadRequest, "outer", "outer")
 			}
 			return nil
 		}),
 	)(
-		hah.Contract(
-			hah.WithContractErrorMappers(func(err error) *hah.HTTPError {
+		hah.WithResponses(
+			hah.ErrorMappers(func(err error) *hah.HTTPError {
 				if errors.Is(err, target) {
 					return hah.NewHTTPError(http.StatusConflict, "inner", "inner")
 				}
@@ -68,7 +68,7 @@ func TestContractPrefersInnerMapperOverOuterAndCallSiteOverContract(t *testing.T
 				w,
 				r,
 				target,
-				hah.WithErrorMappers(func(err error) *hah.HTTPError {
+				hah.ErrorMappers(func(err error) *hah.HTTPError {
 					if errors.Is(err, target) {
 						return hah.NewHTTPError(http.StatusGone, "call", "call")
 					}
@@ -88,11 +88,11 @@ func TestContractPrefersInnerMapperOverOuterAndCallSiteOverContract(t *testing.T
 	assertErrorResponse(t, rr, http.StatusGone, "call", "call")
 }
 
-func TestContractAppliesRouteScopedReporter(t *testing.T) {
+func TestWithResponsesAppliesRouteScopedReporter(t *testing.T) {
 	var report hah.ErrorReport
 
-	handler := hah.Contract(
-		hah.WithContractErrorReporter(func(r hah.ErrorReport) {
+	handler := hah.WithResponses(
+		hah.ErrorReporter(func(r hah.ErrorReport) {
 			report = r
 		}),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -111,20 +111,20 @@ func TestContractAppliesRouteScopedReporter(t *testing.T) {
 	}
 }
 
-func TestRenderErrorReporterOverridesContractReporter(t *testing.T) {
-	var contractReport hah.ErrorReport
+func TestRenderErrorReporterOverridesWithResponsesReporter(t *testing.T) {
+	var withResponsesReport hah.ErrorReport
 	var writeReport hah.ErrorReport
 
-	handler := hah.Contract(
-		hah.WithContractErrorReporter(func(r hah.ErrorReport) {
-			contractReport = r
+	handler := hah.WithResponses(
+		hah.ErrorReporter(func(r hah.ErrorReport) {
+			withResponsesReport = r
 		}),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		err := hah.RenderError(
 			w,
 			r,
 			hah.NewHTTPError(http.StatusUnauthorized, "unauthorized", "unauthorized"),
-			hah.WithErrorReporter(func(r hah.ErrorReport) {
+			hah.ErrorReporter(func(r hah.ErrorReport) {
 				writeReport = r
 			}),
 		)
@@ -138,19 +138,19 @@ func TestRenderErrorReporterOverridesContractReporter(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 
 	assertErrorResponse(t, rr, http.StatusUnauthorized, "unauthorized", "unauthorized")
-	if contractReport.PublicError != nil {
-		t.Fatalf("contract report = %#v, want zero value because RenderError reporter overrides it", contractReport)
+	if withResponsesReport.PublicError != nil {
+		t.Fatalf("withResponses report = %#v, want zero value because RenderError reporter overrides it", withResponsesReport)
 	}
 	if writeReport.PublicError == nil || writeReport.PublicError.Code() != "unauthorized" {
 		t.Fatalf("write report = %#v, want unauthorized", writeReport)
 	}
 }
 
-func TestContractReportsStartedAfterRender(t *testing.T) {
+func TestWithResponsesReportsStartedAfterRender(t *testing.T) {
 	var report hah.ErrorReport
 
-	handler := hah.Contract(
-		hah.WithContractErrorReporter(func(r hah.ErrorReport) {
+	handler := hah.WithResponses(
+		hah.ErrorReporter(func(r hah.ErrorReport) {
 			report = r
 		}),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -174,11 +174,11 @@ func TestContractReportsStartedAfterRender(t *testing.T) {
 	}
 }
 
-func TestContractReusesGeneratedRequestIDAcrossMultipleRenderErrors(t *testing.T) {
+func TestWithResponsesReusesGeneratedRequestIDAcrossMultipleRenderErrors(t *testing.T) {
 	var reports []hah.ErrorReport
 
-	handler := hah.Contract(
-		hah.WithContractErrorReporter(func(r hah.ErrorReport) {
+	handler := hah.WithResponses(
+		hah.ErrorReporter(func(r hah.ErrorReport) {
 			reports = append(reports, r)
 		}),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -209,11 +209,11 @@ func TestContractReusesGeneratedRequestIDAcrossMultipleRenderErrors(t *testing.T
 	}
 }
 
-func TestContractReusesExplicitRequestIDAcrossMultipleRenderErrors(t *testing.T) {
+func TestWithResponsesReusesExplicitRequestIDAcrossMultipleRenderErrors(t *testing.T) {
 	var reports []hah.ErrorReport
 
-	handler := hah.Contract(
-		hah.WithContractErrorReporter(func(r hah.ErrorReport) {
+	handler := hah.WithResponses(
+		hah.ErrorReporter(func(r hah.ErrorReport) {
 			reports = append(reports, r)
 		}),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,5 +238,82 @@ func TestContractReusesExplicitRequestIDAcrossMultipleRenderErrors(t *testing.T)
 	}
 	if reports[1].RequestID != "req_explicit" {
 		t.Fatalf("reports[1].RequestID = %q, want req_explicit", reports[1].RequestID)
+	}
+}
+
+func TestWithResponsesAppliesDefaultSuccessStatus(t *testing.T) {
+	handler := hah.WithResponses(
+		hah.SuccessStatus(http.StatusCreated),
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := hah.Render(w, r, map[string]any{"id": "u_1"}); err != nil {
+			t.Fatalf("Render() error = %v", err)
+		}
+	}))
+
+	rr := newResponseRecorder()
+	req := newRequest()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusCreated)
+	}
+}
+
+func TestWithResponsesInnerSuccessStatusOverridesOuter(t *testing.T) {
+	handler := hah.WithResponses(
+		hah.SuccessStatus(http.StatusAccepted),
+	)(
+		hah.WithResponses(
+			hah.SuccessStatus(http.StatusCreated),
+		)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := hah.Render(w, r, map[string]any{"id": "u_1"}); err != nil {
+				t.Fatalf("Render() error = %v", err)
+			}
+		})),
+	)
+
+	rr := newResponseRecorder()
+	req := newRequest()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusCreated)
+	}
+}
+
+func TestStatusOverridesWithResponsesSuccessStatus(t *testing.T) {
+	handler := hah.WithResponses(
+		hah.SuccessStatus(http.StatusCreated),
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hah.Status(r, http.StatusAccepted)
+		if err := hah.Render(w, r, map[string]any{"id": "u_1"}); err != nil {
+			t.Fatalf("Render() error = %v", err)
+		}
+	}))
+
+	rr := newResponseRecorder()
+	req := newRequest()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
+	}
+}
+
+func TestWithResponsesSuccessStatusAppliesToRenderEmptyDefault(t *testing.T) {
+	handler := hah.WithResponses(
+		hah.SuccessStatus(http.StatusAccepted),
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := hah.RenderEmpty(w, r, 0); err != nil {
+			t.Fatalf("RenderEmpty() error = %v", err)
+		}
+	}))
+
+	rr := newResponseRecorder()
+	req := newRequest()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
 	}
 }

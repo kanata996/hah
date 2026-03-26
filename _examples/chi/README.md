@@ -4,7 +4,7 @@
 
 核心关注点：
 
-- `Contract(hah.WithContractErrorMappers(...))` 挂在 `/users` feature 边界
+- `WithResponses(hah.ErrorMappers(...))` 挂在 `/users` feature 边界
 - handler 只负责 `DecodeAndValidate*`、调用 service、再用 `hah.RenderError(...)` / `Render*`
 - service / repository 返回内部错误语义，mapper 统一转成公开 HTTP 错误
 - 成功响应统一走 `Render(...)` / `RenderWithMeta(...)`
@@ -21,7 +21,7 @@
 2. handler 调用 service，service 再调用 repository。
 3. repository / service 返回内部错误语义，例如 `errUserNotFound`、`errUserConflict`。
 4. handler 在失败点统一调用 `hah.RenderError(w, r, err)`。
-5. `/users` 上挂载的 `Contract(...)` 通过 mapper 把内部错误转成统一 JSON HTTP 错误响应。
+5. `/users` 上挂载的 `WithResponses(...)` 通过 mapper 把内部错误转成统一 JSON HTTP 错误响应。
 6. 成功路径统一走 `Render(...)` 或 `RenderWithMeta(...)`。
 
 入口文件：

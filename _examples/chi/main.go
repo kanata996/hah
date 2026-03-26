@@ -58,8 +58,8 @@ func newRouter() http.Handler {
 
 	r := chi.NewRouter()
 	r.Route("/users", func(r chi.Router) {
-		// Contract 挂在 feature 边界，负责把内部错误语义映射成公开 HTTP 错误。
-		r.Use(hah.Contract(hah.WithContractErrorMappers(mapUserError)))
+		// WithResponses 挂在 feature 边界，负责把内部错误语义映射成公开 HTTP 错误。
+		r.Use(hah.WithResponses(hah.ErrorMappers(mapUserError)))
 
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			var query listUsersQuery

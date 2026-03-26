@@ -8,7 +8,7 @@ import (
 )
 
 // RenderError immediately maps, reports, and writes err at the business
-// boundary. When the current request entered via Contract, route-scoped
+// boundary. When the current request entered via WithResponses, route-scoped
 // configuration is applied before any call-site options.
 func RenderError(w http.ResponseWriter, r *http.Request, err error, opts ...ErrorOption) error {
 	if err == nil {
@@ -17,7 +17,7 @@ func RenderError(w http.ResponseWriter, r *http.Request, err error, opts ...Erro
 
 	cfg := buildWriteErrorConfig(opts...)
 	if r != nil {
-		if state := contractStateFrom(r); state != nil {
+		if state := scopeStateFrom(r); state != nil {
 			cfg = mergeWriteErrorConfig(state.config.writeError, cfg)
 		}
 	}

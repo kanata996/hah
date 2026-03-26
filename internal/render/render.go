@@ -25,7 +25,7 @@ func RenderWithMeta(w http.ResponseWriter, r *http.Request, data any, meta any) 
 
 func RenderEmpty(w http.ResponseWriter, r *http.Request, status int) error {
 	if status == 0 {
-		status = http.StatusNoContent
+		status = statusOrDefault(r, http.StatusNoContent)
 	}
 	return WriteEmpty(w, r, status)
 }

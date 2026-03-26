@@ -91,7 +91,7 @@ func TestRenderErrorWithNilReporterDisablesDefaultLogging(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	if err := RenderError(rr, req, errors.New("boom"), WithErrorReporter(nil)); err != nil {
+	if err := RenderError(rr, req, errors.New("boom"), ErrorReporter(nil)); err != nil {
 		t.Fatalf("RenderError() error = %v", err)
 	}
 

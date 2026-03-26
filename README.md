@@ -36,18 +36,19 @@
 推荐接法很简单：
 
 1. 外层 middleware 继续处理接入层职责
-2. 在业务边界 route group 上可选地挂 `Contract(...)`
+2. 在业务边界 route group 上可选地挂 `WithResponses(...)`
 3. 用 `Decode*` / `Validate` 处理输入
 4. 成功路径用 `Render(...)` / `RenderWithMeta(...)` / `RenderEmpty(...)`
 5. 失败路径在发生点调用 `RenderError(...)`
 
 最重要的 API：
 
-- `Contract(...)`
+- `WithResponses(...)`
 - `Render(...)`
 - `RenderWithMeta(...)`
 - `RenderEmpty(...)`
 - `RenderError(...)`
+- `SuccessStatus(...)`
 - `Status(...)`
 - `DecodeJSON(...)` / `DecodeQuery(...)` / `Validate(...)`
 
@@ -85,7 +86,7 @@ func main() {
 	r := chi.NewRouter()
 
 	r.Route("/users", func(r chi.Router) {
-		r.Use(hah.Contract(hah.WithContractErrorMappers(mapUserError)))
+		r.Use(hah.WithResponses(hah.ErrorMappers(mapUserError)))
 
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			var query struct {
@@ -186,17 +187,18 @@ func main() {
 
 推荐实践：
 
-- feature / route 级 mapper 放在 `Contract(...)`
-- 单个调用点的 one-shot 覆盖放在 `RenderError(..., WithErrorMappers(...))`
+- feature / route 级 mapper 放在 `WithResponses(...)`
+- 单个调用点的 one-shot 覆盖放在 `RenderError(..., ErrorMappers(...))`
 - 业务错误码自己定义稳定字符串常量；通用 code 可复用 [`errcode`](./errcode)
 
-## `Contract(...)`
+## `WithResponses(...)`
 
-`Contract(...)` 是一个很薄的业务边界 middleware。
+`WithResponses(...)` 是一个很薄的业务边界 middleware。
 
 它当前只负责：
 
 - 提供 route-scoped error mapper / reporter 配置
+- 提供最小的 route-scoped 成功响应默认值
 - 复用 request-scoped state
 - 让同一请求中的多次 `RenderError(...)` 共享 request id 和响应开始状态
 
@@ -206,6 +208,11 @@ func main() {
 - 接管整个 HTTP 生命周期
 - 自动写成功响应
 - 在请求结束时延迟回收错误
+
+目前唯一的 success-side 默认能力是：
+
+- `SuccessStatus(status)`：为 `Render(...)`、`RenderWithMeta(...)` 和 `RenderEmpty(..., 0)` 提供默认成功状态码
+- handler 内显式调用 `Status(r, status)` 仍然优先
 
 ## 错误观测
 
@@ -223,8 +230,9 @@ type ErrorReport struct {
 
 使用方式：
 
-- `WithContractErrorReporter(...)` 为整个 `Contract(...)` 子树设置 reporter
-- `WithErrorReporter(...)` 为单次 `RenderError(...)` 调用覆盖 reporter
+- `ErrorMappers(...)` 可用于整个 `WithResponses(...)` 子树，也可用于单次 `RenderError(...)` 调用
+- `ErrorReporter(...)` 可用于整个 `WithResponses(...)` 子树，也可用于单次 `RenderError(...)` 调用
+- `SuccessStatus(...)` 只用于 `WithResponses(...)`
 - 传 `nil` 可关闭 `hah` 默认 reporter
 
 默认 reporter 会记录：

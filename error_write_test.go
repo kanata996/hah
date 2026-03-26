@@ -66,7 +66,7 @@ func TestRenderErrorAllowsNilRequest(t *testing.T) {
 		rr,
 		nil,
 		hah.NewHTTPError(http.StatusConflict, "conflict", "conflict"),
-		hah.WithErrorReporter(func(r hah.ErrorReport) {
+		hah.ErrorReporter(func(r hah.ErrorReport) {
 			report = r
 		}),
 	)
@@ -92,7 +92,7 @@ func TestRenderErrorAppliesMappersImmediately(t *testing.T) {
 		rr,
 		req,
 		target,
-		hah.WithErrorMappers(func(err error) *hah.HTTPError {
+		hah.ErrorMappers(func(err error) *hah.HTTPError {
 			if errors.Is(err, target) {
 				return hah.NewHTTPError(http.StatusNotFound, "route_not_found", "route not found")
 			}
@@ -135,7 +135,7 @@ func TestRenderErrorDoesNotRewriteAfterRender(t *testing.T) {
 		rr,
 		req,
 		hah.NewHTTPError(http.StatusUnauthorized, "unauthorized", "unauthorized"),
-		hah.WithErrorReporter(func(r hah.ErrorReport) {
+		hah.ErrorReporter(func(r hah.ErrorReport) {
 			report = r
 		}),
 	)
@@ -203,7 +203,7 @@ func TestRenderErrorReportsReqxDecodeObservation(t *testing.T) {
 		Name string `json:"name"`
 	}
 	err := hah.DecodeJSON(req, &input)
-	if renderErr := hah.RenderError(rr, req, err, hah.WithErrorReporter(func(r hah.ErrorReport) {
+	if renderErr := hah.RenderError(rr, req, err, hah.ErrorReporter(func(r hah.ErrorReport) {
 		report = r
 	})); renderErr != nil {
 		t.Fatalf("RenderError() error = %v", renderErr)
@@ -222,7 +222,7 @@ func TestRenderErrorReportsRenderFailureObservation(t *testing.T) {
 	req := newRequest()
 
 	err := hah.Render(rr, req, map[string]any{"bad": func() {}})
-	if renderErr := hah.RenderError(rr, req, err, hah.WithErrorReporter(func(r hah.ErrorReport) {
+	if renderErr := hah.RenderError(rr, req, err, hah.ErrorReporter(func(r hah.ErrorReport) {
 		report = r
 	})); renderErr != nil {
 		t.Fatalf("RenderError() error = %v", renderErr)
@@ -249,7 +249,7 @@ func TestRenderErrorDropsInvalidDetailsWithoutExtraObservation(t *testing.T) {
 			"request is invalid",
 			func() {},
 		),
-		hah.WithErrorReporter(func(r hah.ErrorReport) {
+		hah.ErrorReporter(func(r hah.ErrorReport) {
 			reports = append(reports, r)
 		}),
 	)
@@ -279,7 +279,7 @@ func TestRenderErrorReportsWriteFailureAsSecondObservation(t *testing.T) {
 		rw,
 		req,
 		hah.NewHTTPError(http.StatusBadRequest, "invalid_request", "request is invalid"),
-		hah.WithErrorReporter(func(r hah.ErrorReport) {
+		hah.ErrorReporter(func(r hah.ErrorReport) {
 			reports = append(reports, r)
 		}),
 	)
@@ -329,7 +329,7 @@ func TestRenderErrorUsesExplicitRequestIDWithoutMiddleware(t *testing.T) {
 		rr,
 		req,
 		hah.NewHTTPError(http.StatusConflict, "conflict", "conflict"),
-		hah.WithErrorReporter(func(r hah.ErrorReport) {
+		hah.ErrorReporter(func(r hah.ErrorReport) {
 			report = r
 		}),
 	)
@@ -343,7 +343,7 @@ func TestRenderErrorUsesExplicitRequestIDWithoutMiddleware(t *testing.T) {
 	}
 }
 
-func TestWithErrorMappersUsesFirstMatchInOrder(t *testing.T) {
+func TestErrorMappersUsesFirstMatchInOrder(t *testing.T) {
 	target := errors.New("target")
 	rr := newResponseRecorder()
 	req := newRequest()
@@ -352,7 +352,7 @@ func TestWithErrorMappersUsesFirstMatchInOrder(t *testing.T) {
 		rr,
 		req,
 		target,
-		hah.WithErrorMappers(
+		hah.ErrorMappers(
 			func(err error) *hah.HTTPError { return nil },
 			func(err error) *hah.HTTPError {
 				if errors.Is(err, target) {
@@ -375,7 +375,7 @@ func TestWithErrorMappersUsesFirstMatchInOrder(t *testing.T) {
 	assertErrorResponse(t, rr, http.StatusConflict, "conflict", "conflict")
 }
 
-func TestWithErrorMappersIgnoresNil(t *testing.T) {
+func TestErrorMappersIgnoresNil(t *testing.T) {
 	target := errors.New("target")
 	rr := newResponseRecorder()
 	req := newRequest()
@@ -384,8 +384,8 @@ func TestWithErrorMappersIgnoresNil(t *testing.T) {
 		rr,
 		req,
 		target,
-		hah.WithErrorMappers(nil),
-		hah.WithErrorReporter(nil),
+		hah.ErrorMappers(nil),
+		hah.ErrorReporter(nil),
 	)
 	if err != nil {
 		t.Fatalf("RenderError() error = %v", err)

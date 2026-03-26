@@ -25,7 +25,7 @@
 推荐模型如下：
 
 1. 外层 middleware 处理 request id、日志、auth、rate limit、recover 等接入层职责
-2. 在业务边界 route group 上可选地挂 `hah.Contract(...)`
+2. 在业务边界 route group 上可选地挂 `hah.WithResponses(...)`
 3. handler 内用 `hah.Decode*` / `hah.Validate` 处理输入
 4. 成功路径显式调用 `hah.Render(...)` / `hah.RenderWithMeta(...)` / `hah.RenderEmpty(...)`
 5. 失败路径在发生点显式调用 `hah.RenderError(...)`
@@ -59,13 +59,14 @@ func(w http.ResponseWriter, r *http.Request) {
 - 策略集中
 - 控制流透明
 
-## 3. `Contract(...)` 的职责
+## 3. `WithResponses(...)` 的职责
 
-`Contract(...)` 现在是一个很薄的边界 middleware。
+`WithResponses(...)` 现在是一个很薄的边界 middleware。
 
 它负责：
 
 - 注入 route-scoped mapper / reporter 配置
+- 注入最小的 route-scoped 成功响应默认值
 - 复用 request-scoped state
 - 和 request id state 协同工作
 
@@ -77,7 +78,7 @@ func(w http.ResponseWriter, r *http.Request) {
 - 在请求结束时统一回收错误
 - 自动决定成功响应
 
-如果未来某个改动开始让 `Contract(...)` 看起来像隐藏 runtime，应优先拒绝。
+如果未来某个改动开始让 `WithResponses(...)` 看起来像隐藏 runtime，应优先拒绝。
 
 ## 4. 为什么删除 tracking writer
 
@@ -101,6 +102,7 @@ func(w http.ResponseWriter, r *http.Request) {
 
 - request context 里只保存很薄的 render state
 - `Status(r, status)` 只是写一个 status hint
+- `SuccessStatus(status)` 只是给 subtree 预置一个默认 success status hint
 - `Render(...)` / `RenderWithMeta(...)` / `RenderEmpty(...)` 才是真正的写回入口
 - `RenderError(...)` 负责 mapper、reporter 和统一错误响应
 
@@ -139,11 +141,12 @@ func(w http.ResponseWriter, r *http.Request) {
 
 当前公开 API 故意收得很窄，保持接近 `chi/render` 的主叙事：
 
-- `Contract(...)`
+- `WithResponses(...)`
 - `Render(...)`
 - `RenderWithMeta(...)`
 - `RenderEmpty(...)`
 - `RenderError(...)`
+- `SuccessStatus(...)`
 - `Status(...)`
 
 不要轻易新增这些类别的 API：

@@ -58,7 +58,7 @@ func ExampleRenderError_withErrorMappers() {
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = hah.RenderError(w, r, errUserNotFound, hah.WithErrorMappers(mapUserError))
+		_ = hah.RenderError(w, r, errUserNotFound, hah.ErrorMappers(mapUserError))
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/users/missing", nil)
@@ -72,7 +72,7 @@ func ExampleRenderError_withErrorMappers() {
 	// {"error":{"code":"user_not_found","message":"user not found","details":[]}}
 }
 
-func ExampleContract() {
+func ExampleWithResponses() {
 	errUserNotFound := errors.New("user not found")
 	const codeUserNotFound = "user_not_found"
 	mapUserError := func(err error) *hah.HTTPError {
@@ -82,7 +82,7 @@ func ExampleContract() {
 		return nil
 	}
 
-	handler := hah.Contract(hah.WithContractErrorMappers(mapUserError))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := hah.WithResponses(hah.ErrorMappers(mapUserError))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = hah.RenderError(w, r, errUserNotFound)
 	}))
 
