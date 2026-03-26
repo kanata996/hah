@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/kanata996/hah/internal/errx"
 	"github.com/kanata996/hah/reqx"
 )
 
@@ -14,7 +13,7 @@ import (
 // import surface, for example via hah.DecodeJSON/hah.DecodeQuery/hah.Validate.
 // reqx remains the implementation package for request decoding and validation,
 // while hah adapts reqx.Problem into boundary errors that can be written via
-// WriteError and observed with internal stage metadata.
+// RenderError like any other public HTTP error.
 
 // DecodeOption customizes JSON decoding behavior.
 type DecodeOption = reqx.DecodeOption
@@ -52,7 +51,7 @@ func AllowUnknownQueryFields() QueryOption {
 // DecodeJSON decodes a JSON request body into dst and returns hah-compatible
 // public errors for request-shape failures.
 func DecodeJSON[T any](r *http.Request, dst *T, opts ...DecodeOption) error {
-	return adaptReqxProblem(reqx.DecodeJSON(r, dst, opts...), errx.StageDecode)
+	return adaptReqxProblem(reqx.DecodeJSON(r, dst, opts...))
 }
 
 // DecodeAndValidateJSON decodes a JSON request body, then runs validation.
@@ -66,7 +65,7 @@ func DecodeAndValidateJSON[T any](r *http.Request, dst *T, fn ValidateFunc[T], o
 // DecodeQuery decodes URL query parameters into `query`-tagged struct fields in
 // dst and returns hah-compatible public errors for request-shape failures.
 func DecodeQuery[T any](r *http.Request, dst *T, opts ...QueryOption) error {
-	return adaptReqxProblem(reqx.DecodeQuery(r, dst, opts...), errx.StageDecode)
+	return adaptReqxProblem(reqx.DecodeQuery(r, dst, opts...))
 }
 
 // DecodeAndValidateQuery decodes URL query parameters, then runs validation.
@@ -78,25 +77,30 @@ func DecodeAndValidateQuery[T any](r *http.Request, dst *T, fn ValidateFunc[T], 
 }
 
 // Validate applies a validation function and returns a standardized 422
-// error when violations are present.
+// error when violations are present. The supplied fn owns the validation
+// logic; reqx only normalizes returned violations into a public boundary error.
 func Validate[T any](dst *T, fn ValidateFunc[T]) error {
-	return adaptReqxProblem(reqx.Validate(dst, reqx.ValidateFunc[T](fn)), errx.StageValidate)
+	return adaptReqxProblem(reqx.Validate(dst, reqx.ValidateFunc[T](fn)))
+}
+
+// InvalidRequest constructs a standardized 422 invalid_request boundary error
+// from one or more violations. This is the lowest-level helper for adapters
+// that already have validation results and only need hah's public error shape.
+func InvalidRequest(violations ...Violation) error {
+	return adaptReqxProblem(reqx.InvalidRequest(violations...))
 }
 
 // adaptReqxProblem keeps the root-package facade thin: reqx owns request
 // decoding/validation, while hah turns reqx.Problem into a boundary error that
-// flows through WriteError like any other public HTTP error.
-func adaptReqxProblem(err error, stage errx.Stage) error {
+// flows through RenderError like any other public HTTP error.
+func adaptReqxProblem(err error) error {
 	if err == nil {
 		return nil
 	}
 
 	var problem *reqx.Problem
 	if errors.As(err, &problem) && problem != nil {
-		return errx.WithStage(
-			NewHTTPError(problem.Status(), problem.Code(), problem.Message(), problem.Details()...),
-			stage,
-		)
+		return NewHTTPError(problem.Status(), problem.Code(), problem.Message(), problem.Details()...)
 	}
 
 	return err

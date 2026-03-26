@@ -82,7 +82,7 @@ func TestMapBoundaryErrorRecognizesReqxProblem(t *testing.T) {
 	}
 }
 
-func TestWriteErrorWithNilReporterDisablesDefaultLogging(t *testing.T) {
+func TestRenderErrorWithNilReporterDisablesDefaultLogging(t *testing.T) {
 	var logs bytes.Buffer
 	previousWriter := errorLogger.Writer()
 	errorLogger.SetOutput(&logs)
@@ -91,7 +91,9 @@ func TestWriteErrorWithNilReporterDisablesDefaultLogging(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
-	WriteError(rr, req, errors.New("boom"), WithErrorReporter(nil))
+	if err := RenderError(rr, req, errors.New("boom"), ErrorReporter(nil)); err != nil {
+		t.Fatalf("RenderError() error = %v", err)
+	}
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)

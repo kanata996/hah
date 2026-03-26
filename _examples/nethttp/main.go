@@ -52,43 +52,52 @@ func newRouter() http.Handler {
 
 	mux.HandleFunc("GET /users", func(w http.ResponseWriter, r *http.Request) {
 		var query listUsersQuery
-		if hah.WriteError(w, r, hah.DecodeAndValidateQuery(r, &query, validateListUsersQuery)) {
+		if err := hah.DecodeAndValidateQuery(r, &query, validateListUsersQuery); err != nil {
+			_ = hah.RenderError(w, r, err)
 			return
 		}
 
 		users, meta, err := service.List(query)
-		if hah.WriteError(w, r, err) {
+		if err != nil {
+			_ = hah.RenderError(w, r, err)
 			return
 		}
 
-		if err := hah.RespondWithMeta(w, http.StatusOK, users, meta); hah.WriteError(w, r, err) {
+		if err := hah.RenderWithMeta(w, r, users, meta); err != nil {
+			_ = hah.RenderError(w, r, err)
 			return
 		}
 	})
 
 	mux.HandleFunc("GET /users/{userID}", func(w http.ResponseWriter, r *http.Request) {
 		item, err := service.Get(r.PathValue("userID"))
-		if hah.WriteError(w, r, err) {
+		if err != nil {
+			_ = hah.RenderError(w, r, err)
 			return
 		}
 
-		if err := hah.Respond(w, http.StatusOK, item); hah.WriteError(w, r, err) {
+		if err := hah.Render(w, r, item); err != nil {
+			_ = hah.RenderError(w, r, err)
 			return
 		}
 	})
 
 	mux.HandleFunc("POST /users", func(w http.ResponseWriter, r *http.Request) {
 		var req createUserRequest
-		if hah.WriteError(w, r, hah.DecodeAndValidateJSON(r, &req, validateCreateUserRequest)) {
+		if err := hah.DecodeAndValidateJSON(r, &req, validateCreateUserRequest); err != nil {
+			_ = hah.RenderError(w, r, err)
 			return
 		}
 
 		item, err := service.Create(req)
-		if hah.WriteError(w, r, err) {
+		if err != nil {
+			_ = hah.RenderError(w, r, err)
 			return
 		}
 
-		if err := hah.Respond(w, http.StatusCreated, item); hah.WriteError(w, r, err) {
+		hah.Status(r, http.StatusCreated)
+		if err := hah.Render(w, r, item); err != nil {
+			_ = hah.RenderError(w, r, err)
 			return
 		}
 	})

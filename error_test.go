@@ -1,11 +1,8 @@
 package hah
 
 import (
-	"errors"
 	"net/http"
 	"testing"
-
-	"github.com/kanata996/hah/internal/errx"
 )
 
 func TestNewErrorDefaultsClientResponses(t *testing.T) {
@@ -109,24 +106,5 @@ func TestNilErrorAccessorsUseInternalDefaults(t *testing.T) {
 	}
 	if got := err.Details(); got != nil {
 		t.Fatalf("details = %#v, want nil", got)
-	}
-}
-
-func TestWithStageWrapsBoundaryErrorWithoutChangingPublicError(t *testing.T) {
-	base := NewHTTPError(http.StatusConflict, "conflict", "conflict")
-	tagged := errx.WithStage(base, errx.StageProcessing)
-
-	var boundaryErr *HTTPError
-	if !errors.As(tagged, &boundaryErr) {
-		t.Fatalf("errors.As(tagged, *HTTPError) = false, want true")
-	}
-	if boundaryErr != base {
-		t.Fatalf("boundaryErr = %#v, want original error %#v", boundaryErr, base)
-	}
-	if got := errx.From(tagged).Stage; got != errx.StageProcessing {
-		t.Fatalf("observed stage = %q, want processing", got)
-	}
-	if got := errx.From(base).Stage; got != "" {
-		t.Fatalf("base stage = %q, want empty", got)
 	}
 }

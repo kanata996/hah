@@ -58,48 +58,57 @@ func newRouter() http.Handler {
 
 	r := chi.NewRouter()
 	r.Route("/users", func(r chi.Router) {
-		// Contract 挂在 feature 边界，负责把内部错误语义映射成公开 HTTP 错误。
-		r.Use(hah.Contract(hah.WithContractErrorMappers(mapUserError)))
+		// WithResponses 挂在 feature 边界，负责把内部错误语义映射成公开 HTTP 错误。
+		r.Use(hah.WithResponses(hah.ErrorMappers(mapUserError)))
 
 		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 			var query listUsersQuery
-			if hah.WriteError(w, r, hah.DecodeAndValidateQuery(r, &query, validateListUsersQuery)) {
+			if err := hah.DecodeAndValidateQuery(r, &query, validateListUsersQuery); err != nil {
+				_ = hah.RenderError(w, r, err)
 				return
 			}
 
 			users, meta, err := service.List(query)
-			if hah.WriteError(w, r, err) {
+			if err != nil {
+				_ = hah.RenderError(w, r, err)
 				return
 			}
 
-			if err := hah.RespondWithMeta(w, http.StatusOK, users, meta); hah.WriteError(w, r, err) {
+			if err := hah.RenderWithMeta(w, r, users, meta); err != nil {
+				_ = hah.RenderError(w, r, err)
 				return
 			}
 		})
 
 		r.Get("/{userID}", func(w http.ResponseWriter, r *http.Request) {
 			item, err := service.Get(chi.URLParam(r, "userID"))
-			if hah.WriteError(w, r, err) {
+			if err != nil {
+				_ = hah.RenderError(w, r, err)
 				return
 			}
 
-			if err := hah.Respond(w, http.StatusOK, item); hah.WriteError(w, r, err) {
+			if err := hah.Render(w, r, item); err != nil {
+				_ = hah.RenderError(w, r, err)
 				return
 			}
 		})
 
 		r.Post("/", func(w http.ResponseWriter, r *http.Request) {
 			var req createUserRequest
-			if hah.WriteError(w, r, hah.DecodeAndValidateJSON(r, &req, validateCreateUserRequest)) {
+			if err := hah.DecodeAndValidateJSON(r, &req, validateCreateUserRequest); err != nil {
+				_ = hah.RenderError(w, r, err)
 				return
 			}
 
 			item, err := service.Create(req)
-			if hah.WriteError(w, r, err) {
+			if err != nil {
+				_ = hah.RenderError(w, r, err)
 				return
 			}
 
-			if err := hah.Respond(w, http.StatusCreated, item); hah.WriteError(w, r, err) {
+			hah.Status(r, http.StatusCreated)
+			if err := hah.Render(w, r, item); err != nil {
+				_ = hah.RenderError(w, r, err)
 				return
 			}
 		})

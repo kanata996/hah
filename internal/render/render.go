@@ -1,22 +1,11 @@
-package core
+package render
 
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 )
-
-type errorEnvelope struct {
-	Error errorBody `json:"error"`
-}
-
-type errorBody struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Details []any  `json:"details"`
-}
 
 type ErrorPayload struct {
 	Status  int
@@ -25,26 +14,32 @@ type ErrorPayload struct {
 	Details []any
 }
 
-type ErrorWriteDegraded struct {
-	Cause                   error
-	PreservedPublicResponse bool
+func Render(w http.ResponseWriter, r *http.Request, data any) error {
+	return RenderWithMeta(w, r, data, nil)
 }
 
-func (e *ErrorWriteDegraded) Error() string {
-	if e == nil || e.Cause == nil {
-		return "hah: error response details were dropped"
+func RenderWithMeta(w http.ResponseWriter, r *http.Request, data any, meta any) error {
+	status := statusOrDefault(r, http.StatusOK)
+	return WriteSuccess(w, r, status, data, meta, meta != nil)
+}
+
+func RenderEmpty(w http.ResponseWriter, r *http.Request, status int) error {
+	if status == 0 {
+		status = statusOrDefault(r, http.StatusNoContent)
 	}
-	return "hah: error response details were dropped: " + e.Cause.Error()
+	return WriteEmpty(w, r, status)
 }
 
-func (e *ErrorWriteDegraded) Unwrap() error {
-	if e == nil {
-		return nil
+func RenderErrorPayload(w http.ResponseWriter, r *http.Request, payload ErrorPayload) error {
+	body, err := marshalErrorEnvelope(payload.Code, payload.Message, normalizeDetails(payload.Details))
+	if err != nil {
+		body, _ = marshalErrorEnvelope(payload.Code, payload.Message, []any{})
 	}
-	return e.Cause
+
+	return WriteJSONBytes(w, r, payload.Status, body, "application/json")
 }
 
-func WriteSuccess(w http.ResponseWriter, status int, data any, meta any, includeMeta bool) error {
+func WriteSuccess(w http.ResponseWriter, r *http.Request, status int, data any, meta any, includeMeta bool) error {
 	if err := ValidateSuccessBodyStatus(status); err != nil {
 		return err
 	}
@@ -74,53 +69,29 @@ func WriteSuccess(w http.ResponseWriter, status int, data any, meta any, include
 	}
 
 	body := buildSuccessBody(dataJSON, metaJSON)
-	return WriteJSONBytes(w, status, body)
+	return WriteJSONBytes(w, r, status, body, "application/json")
 }
 
-func WriteEmpty(w http.ResponseWriter, status int) error {
+func WriteEmpty(w http.ResponseWriter, r *http.Request, status int) error {
 	if err := ValidateSuccessStatus(status); err != nil {
 		return err
 	}
 
+	MarkResponseStarted(r)
+	contentType := contentTypeOrDefault(r, "")
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
 	w.WriteHeader(status)
 	return nil
 }
 
-func WriteError(w http.ResponseWriter, payload ErrorPayload) error {
-	body, err := marshalErrorEnvelope(payload.Code, payload.Message, normalizeDetails(payload.Details))
-	if err != nil {
-		degradedBody, _ := marshalErrorEnvelope(payload.Code, payload.Message, []any{})
-		if writeErr := WriteJSONBytes(w, payload.Status, degradedBody); writeErr != nil {
-			return errors.Join(&ErrorWriteDegraded{Cause: err}, writeErr)
-		}
-		return &ErrorWriteDegraded{
-			Cause:                   err,
-			PreservedPublicResponse: true,
-		}
-	}
-
-	if writeErr := WriteJSONBytes(w, payload.Status, body); writeErr != nil {
-		return writeErr
-	}
-
-	return nil
-}
-
-func marshalErrorEnvelope(code, message string, details []any) ([]byte, error) {
-	return json.Marshal(errorEnvelope{
-		Error: errorBody{
-			Code:    code,
-			Message: message,
-			Details: details,
-		},
-	})
-}
-
-func normalizeDetails(details []any) []any {
-	if len(details) == 0 {
-		return []any{}
-	}
-	return details
+func WriteJSONBytes(w http.ResponseWriter, r *http.Request, status int, body []byte, fallbackContentType string) error {
+	MarkResponseStarted(r)
+	w.Header().Set("Content-Type", contentTypeOrDefault(r, fallbackContentType))
+	w.WriteHeader(status)
+	_, err := w.Write(body)
+	return err
 }
 
 func ValidateSuccessBodyStatus(status int) error {
@@ -147,6 +118,33 @@ func ValidateSuccessStatus(status int) error {
 	return nil
 }
 
+type errorEnvelope struct {
+	Error errorBody `json:"error"`
+}
+
+type errorBody struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details []any  `json:"details"`
+}
+
+func marshalErrorEnvelope(code, message string, details []any) ([]byte, error) {
+	return json.Marshal(errorEnvelope{
+		Error: errorBody{
+			Code:    code,
+			Message: message,
+			Details: details,
+		},
+	})
+}
+
+func normalizeDetails(details []any) []any {
+	if len(details) == 0 {
+		return []any{}
+	}
+	return details
+}
+
 func buildSuccessBody(dataJSON []byte, metaJSON []byte) []byte {
 	body := make([]byte, 0, len(dataJSON)+len(metaJSON)+24)
 	body = append(body, `{"data":`...)
@@ -157,13 +155,6 @@ func buildSuccessBody(dataJSON []byte, metaJSON []byte) []byte {
 	}
 	body = append(body, '}')
 	return body
-}
-
-func WriteJSONBytes(w http.ResponseWriter, status int, body []byte) error {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_, err := w.Write(body)
-	return err
 }
 
 func isJSONNullBytes(body []byte) bool {

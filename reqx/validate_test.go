@@ -52,3 +52,32 @@ func TestValidateNormalizesDefaultViolationFields(t *testing.T) {
 		Violation{Field: "name", Code: "invalid", Message: "is invalid"},
 	)
 }
+
+func TestInvalidRequestNormalizesViolations(t *testing.T) {
+	err := InvalidRequest(
+		Violation{Field: "name"},
+		Violation{Field: "age", Code: "required"},
+	)
+
+	assertProblem(
+		t,
+		err,
+		422,
+		"invalid_request",
+		"request contains invalid fields",
+		Violation{Field: "name", Code: "invalid", Message: "is invalid"},
+		Violation{Field: "age", Code: "required", Message: "is required"},
+	)
+}
+
+func TestInvalidRequestAllowsEmptyDetails(t *testing.T) {
+	err := InvalidRequest()
+
+	assertProblem(
+		t,
+		err,
+		422,
+		"invalid_request",
+		"request contains invalid fields",
+	)
+}

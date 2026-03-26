@@ -72,12 +72,12 @@ func TestDecodeAndValidateFacadeReturnsDecodeErrorWithoutValidation(t *testing.T
 	})
 }
 
-func TestWriteErrorAdaptsReqxProblem(t *testing.T) {
+func TestRenderErrorAdaptsReqxProblem(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/users", nil)
 
-	if ok := hah.WriteError(rr, req, reqxpkg.NewProblem(http.StatusBadRequest, "invalid_request", "invalid request")); !ok {
-		t.Fatal("WriteError() = false, want true")
+	if err := hah.RenderError(rr, req, reqxpkg.NewProblem(http.StatusBadRequest, "invalid_request", "invalid request")); err != nil {
+		t.Fatalf("RenderError() error = %v", err)
 	}
 
 	assertErrorResponse(t, rr, http.StatusBadRequest, "invalid_request", "invalid request")

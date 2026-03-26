@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -25,15 +27,16 @@ func TestSetGuardsAndTrim(t *testing.T) {
 	if got == req {
 		t.Fatal("Set(req, id) returned original request without state")
 	}
-	if current := stateFrom(got); current == nil || current.get() != "req_123" {
+	if current := StateFrom(got); current == nil || current.Get() != "req_123" {
 		t.Fatalf("stored request id = %#v, want req_123", current)
 	}
 }
 
 func TestSetUpdatesExistingSharedState(t *testing.T) {
-	req := EnsureState(httptest.NewRequest(http.MethodGet, "/", nil))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req = withState(req, NewState())
 	if req == nil {
-		t.Fatal("EnsureState(req) = nil")
+		t.Fatal("withState(req, NewState()) = nil")
 	}
 
 	got := Set(req, "req_updated")
@@ -41,13 +44,13 @@ func TestSetUpdatesExistingSharedState(t *testing.T) {
 		t.Fatal("Set(reqWithState, id) should reuse existing request")
 	}
 
-	if current := stateFrom(req); current == nil || current.get() != "req_updated" {
+	if current := StateFrom(req); current == nil || current.Get() != "req_updated" {
 		t.Fatalf("stored request id = %#v, want req_updated", current)
 	}
 }
 
 func TestWithStateGuards(t *testing.T) {
-	current := &state{}
+	current := NewState()
 	if got := withState(nil, current); got != nil {
 		t.Fatalf("withState(nil, state) = %#v, want nil", got)
 	}
@@ -58,47 +61,78 @@ func TestWithStateGuards(t *testing.T) {
 	}
 }
 
-func TestStateGuards(t *testing.T) {
-	var nilState *state
-	nilState.set("req_ignored")
-	if got := nilState.get(); got != "" {
-		t.Fatalf("nilState.get() = %q, want empty", got)
+func TestEnsureState(t *testing.T) {
+	if got := EnsureState(nil); got != nil {
+		t.Fatalf("EnsureState(nil) = %#v, want nil", got)
 	}
 
-	if got := stateFrom(nil); got != nil {
-		t.Fatalf("stateFrom(nil) = %#v, want nil", got)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	got := EnsureState(req)
+	if got == nil {
+		t.Fatal("EnsureState(req) = nil")
+	}
+	if got == req {
+		t.Fatal("EnsureState(req) returned original request without state")
+	}
+	if current := StateFrom(got); current == nil {
+		t.Fatal("StateFrom(EnsureState(req)) = nil")
+	} else if id := current.Get(); id != "" {
+		t.Fatalf("StateFrom(EnsureState(req)).Get() = %q, want empty", id)
+	}
+
+	gotAgain := EnsureState(got)
+	if gotAgain != got {
+		t.Fatal("EnsureState(reqWithState) returned different request")
 	}
 }
 
-func TestEnsureStateAndEnsure(t *testing.T) {
+func TestStateGuards(t *testing.T) {
+	var nilState *State
+	nilState.Set("req_ignored")
+	if got := nilState.Get(); got != "" {
+		t.Fatalf("nilState.get() = %q, want empty", got)
+	}
+
+	if got := StateFrom(nil); got != nil {
+		t.Fatalf("StateFrom(nil) = %#v, want nil", got)
+	}
+
+	if got := EnsureID(nilState); got == "" {
+		t.Fatal("EnsureID(nilState) = empty, want generated id")
+	}
+}
+
+func TestStateSetIgnoresEmptyNormalizedValue(t *testing.T) {
+	current := NewState()
+	current.Set("req_keep")
+	current.Set("   ")
+
+	if got := current.Get(); got != "req_keep" {
+		t.Fatalf("current.Get() = %q, want req_keep", got)
+	}
+}
+
+func TestEnsureAndEnsureID(t *testing.T) {
 	previousGenerator := requestIDGenerator
 	requestIDGenerator = func() string { return "req_generated" }
 	defer func() {
 		requestIDGenerator = previousGenerator
 	}()
 
-	if got := EnsureState(nil); got != nil {
-		t.Fatalf("EnsureState(nil) = %#v, want nil", got)
-	}
-
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	stateful := EnsureState(req)
-	if stateful == nil {
-		t.Fatal("EnsureState(req) = nil")
-	}
-	if stateFrom(stateful) == nil {
-		t.Fatal("stateFrom(stateful) = nil")
-	}
-
-	ensured, id := Ensure(stateful)
-	if ensured != stateful {
-		t.Fatal("Ensure(stateful) returned different request")
+	ensured, id := Ensure(req)
+	if ensured == req {
+		t.Fatal("Ensure(req) returned original request, want request with state")
 	}
 	if id != "req_generated" {
-		t.Fatalf("Ensure(stateful) id = %q, want req_generated", id)
+		t.Fatalf("Ensure(req) id = %q, want req_generated", id)
 	}
-	if got := stateFrom(ensured).get(); got != "req_generated" {
+	if got := StateFrom(ensured).Get(); got != "req_generated" {
 		t.Fatalf("stored request id = %q, want req_generated", got)
+	}
+
+	if stateID := EnsureID(StateFrom(ensured)); stateID != "req_generated" {
+		t.Fatalf("EnsureID(state) = %q, want req_generated", stateID)
 	}
 
 	ensuredAgain, idAgain := Ensure(ensured)
@@ -115,6 +149,44 @@ func TestEnsureStateAndEnsure(t *testing.T) {
 	}
 	if nilID != "req_generated" {
 		t.Fatalf("Ensure(nil) id = %q, want req_generated", nilID)
+	}
+}
+
+func TestEnsureIDConcurrentInitialization(t *testing.T) {
+	previousGenerator := requestIDGenerator
+	var calls atomic.Int32
+	requestIDGenerator = func() string {
+		calls.Add(1)
+		return "req_generated"
+	}
+	defer func() {
+		requestIDGenerator = previousGenerator
+	}()
+
+	current := NewState()
+	const workers = 32
+
+	var wg sync.WaitGroup
+	results := make(chan string, workers)
+	wg.Add(workers)
+
+	for range workers {
+		go func() {
+			defer wg.Done()
+			results <- EnsureID(current)
+		}()
+	}
+
+	wg.Wait()
+	close(results)
+
+	for id := range results {
+		if id != "req_generated" {
+			t.Fatalf("EnsureID(current) = %q, want req_generated", id)
+		}
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("requestIDGenerator calls = %d, want 1", got)
 	}
 }
 

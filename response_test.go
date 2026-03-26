@@ -2,18 +2,22 @@ package hah_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/kanata996/hah"
 )
 
-func TestWriteSuccess(t *testing.T) {
+func TestRenderWritesEnvelope(t *testing.T) {
 	rr := newResponseRecorder()
+	req := newRequest()
+	hah.Status(req, http.StatusCreated)
 
-	err := hah.Respond(rr, http.StatusCreated, map[string]any{"id": "u_1"})
+	err := hah.Render(rr, req, map[string]any{"id": "u_1"})
 	if err != nil {
-		t.Fatalf("Respond() error = %v", err)
+		t.Fatalf("Render() error = %v", err)
 	}
 
 	if rr.Code != http.StatusCreated {
@@ -40,17 +44,51 @@ func TestWriteSuccess(t *testing.T) {
 	}
 }
 
-func TestWriteMetaSuccess(t *testing.T) {
+func TestStatusWrapperInfluencesRender(t *testing.T) {
 	rr := newResponseRecorder()
+	req := newRequest()
 
-	err := hah.RespondWithMeta(
+	hah.Status(req, http.StatusAccepted)
+	if err := hah.Render(rr, req, map[string]any{"ok": true}); err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
+	}
+}
+
+func TestWithResponsesSuccessStatusInfluencesRender(t *testing.T) {
+	rr := newResponseRecorder()
+	req := newRequest()
+
+	handler := hah.WithResponses(
+		hah.SuccessStatus(http.StatusCreated),
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := hah.Render(w, r, map[string]any{"ok": true}); err != nil {
+			t.Fatalf("Render() error = %v", err)
+		}
+	}))
+
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusCreated)
+	}
+}
+
+func TestRenderWithMetaWritesEnvelope(t *testing.T) {
+	rr := newResponseRecorder()
+	req := newRequest()
+
+	err := hah.RenderWithMeta(
 		rr,
-		http.StatusOK,
+		req,
 		[]string{"a", "b"},
 		map[string]any{"request_id": "req_1"},
 	)
 	if err != nil {
-		t.Fatalf("RespondWithMeta() error = %v", err)
+		t.Fatalf("RenderWithMeta() error = %v", err)
 	}
 
 	var payload map[string]any
@@ -70,12 +108,13 @@ func TestWriteMetaSuccess(t *testing.T) {
 	}
 }
 
-func TestWriteEmpty(t *testing.T) {
+func TestRenderEmptyWritesStatusWithoutBody(t *testing.T) {
 	rr := newResponseRecorder()
+	req := newRequest()
 
-	err := hah.RespondEmpty(rr, http.StatusNoContent)
+	err := hah.RenderEmpty(rr, req, http.StatusNoContent)
 	if err != nil {
-		t.Fatalf("RespondEmpty() error = %v", err)
+		t.Fatalf("RenderEmpty() error = %v", err)
 	}
 
 	if rr.Code != http.StatusNoContent {
@@ -86,5 +125,44 @@ func TestWriteEmpty(t *testing.T) {
 	}
 	if got := rr.Header().Get("Content-Type"); got != "" {
 		t.Fatalf("Content-Type = %q, want empty", got)
+	}
+}
+
+func TestRenderHEADUsesStandardServerSemantics(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := hah.Render(w, r, map[string]any{"ok": true}); err != nil {
+			t.Fatalf("Render() error = %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodHead, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Fatalf("resp.Body.Close() error = %v", closeErr)
+		}
+	}()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if len(body) != 0 {
+		t.Fatalf("body length = %d, want 0", len(body))
 	}
 }

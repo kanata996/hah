@@ -9,7 +9,7 @@ import (
 	"github.com/kanata996/hah"
 )
 
-func BenchmarkWriteErrorImmediate(b *testing.B) {
+func BenchmarkRenderErrorImmediate(b *testing.B) {
 	req := httptest.NewRequest(http.MethodGet, "/reports/heavy", nil)
 	err := hah.NewHTTPError(http.StatusTooManyRequests, "rate_limited", "rate limit exceeded")
 
@@ -18,7 +18,9 @@ func BenchmarkWriteErrorImmediate(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		rr := httptest.NewRecorder()
-		hah.WriteError(rr, req, err)
+		if renderErr := hah.RenderError(rr, req, err); renderErr != nil {
+			b.Fatalf("RenderError() error = %v", renderErr)
+		}
 	}
 }
 

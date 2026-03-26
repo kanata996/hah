@@ -18,7 +18,7 @@ var fallbackRequestIDCounter atomic.Uint64
 var requestIDGenerator = defaultRequestIDGenerator
 var requestIDEntropyRead = rand.Read
 
-type state struct {
+type State struct {
 	mu sync.Mutex
 	id string
 }
@@ -35,21 +35,18 @@ func Set(r *http.Request, id string) *http.Request {
 		return r
 	}
 
-	if current := stateFrom(r); current != nil {
-		current.set(id)
+	if current := StateFrom(r); current != nil {
+		current.Set(id)
 		return r
 	}
 
-	current := &state{}
-	current.set(id)
+	current := NewState()
+	current.Set(id)
 	return withState(r, current)
 }
 
-func EnsureState(r *http.Request) *http.Request {
-	if r == nil || stateFrom(r) != nil {
-		return r
-	}
-	return withState(r, &state{})
+func NewState() *State {
+	return &State{}
 }
 
 func Ensure(r *http.Request) (*http.Request, string) {
@@ -57,30 +54,53 @@ func Ensure(r *http.Request) (*http.Request, string) {
 		return nil, requestIDGenerator()
 	}
 
-	r = EnsureState(r)
-	current := stateFrom(r)
-	if id := current.get(); id != "" {
-		return r, id
+	if current := StateFrom(r); current != nil {
+		return r, EnsureID(current)
 	}
 
-	id := requestIDGenerator()
-	current.set(id)
-	return r, id
+	current := NewState()
+	return withState(r, current), EnsureID(current)
 }
 
-func withState(r *http.Request, current *state) *http.Request {
+func EnsureState(r *http.Request) *http.Request {
+	if r == nil {
+		return nil
+	}
+
+	if StateFrom(r) != nil {
+		return r
+	}
+
+	return withState(r, NewState())
+}
+
+func EnsureID(current *State) string {
+	if current == nil {
+		return requestIDGenerator()
+	}
+
+	current.mu.Lock()
+	defer current.mu.Unlock()
+
+	if current.id == "" {
+		current.id = requestIDGenerator()
+	}
+	return current.id
+}
+
+func withState(r *http.Request, current *State) *http.Request {
 	if r == nil || current == nil {
 		return r
 	}
 	return r.WithContext(context.WithValue(r.Context(), stateKey{}, current))
 }
 
-func stateFrom(r *http.Request) *state {
+func StateFrom(r *http.Request) *State {
 	if r == nil {
 		return nil
 	}
 
-	current, _ := r.Context().Value(stateKey{}).(*state)
+	current, _ := r.Context().Value(stateKey{}).(*State)
 	return current
 }
 
@@ -102,7 +122,7 @@ func defaultRequestIDGenerator() string {
 	)
 }
 
-func (s *state) get() string {
+func (s *State) Get() string {
 	if s == nil {
 		return ""
 	}
@@ -112,8 +132,13 @@ func (s *state) get() string {
 	return s.id
 }
 
-func (s *state) set(id string) {
+func (s *State) Set(id string) {
 	if s == nil {
+		return
+	}
+
+	id = normalize(id)
+	if id == "" {
 		return
 	}
 

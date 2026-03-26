@@ -29,7 +29,7 @@
 3. 让 `reqx` 统一把这些 violation 转成稳定的请求问题
 4. 让 service 层只处理业务规则
 
-配合 `hah.WriteError(...)` 使用时，`reqx` 返回的 `Problem` 可以直接进入统一错误响应。
+配合 `hah.RenderError(...)` 使用时，`reqx` 返回的 `Problem` 可以直接进入统一错误响应。
 
 ## 适用场景
 
@@ -75,6 +75,7 @@ type Violation struct {
 }
 
 func Validate[T any](dst *T, fn ValidateFunc[T]) error
+func InvalidRequest(violations ...Violation) error
 ```
 
 `Violation` 表示单个字段或单个输入项的问题。
@@ -91,6 +92,8 @@ func Validate[T any](dst *T, fn ValidateFunc[T]) error
 - 把你返回的 `[]Violation` 归一化为统一的 `422 invalid_request`
 
 如果你需要更专业的 DTO / schema 校验能力，应在上层接入第三方库，再把结果适配成 `[]Violation`。
+
+如果你已经拿到了第三方校验结果并完成了 `[]Violation` 适配，也可以直接调用 `InvalidRequest(...)` 构造标准 `422 invalid_request`，而不必再包一层 `ValidateFunc`。
 
 ### JSON Body Decode
 
@@ -231,6 +234,20 @@ func adaptFieldErrors(errs []FieldError) []reqx.Violation {
 
 func validateCreateUserWithExternal(value *CreateUserRequest) []reqx.Violation {
 	return adaptFieldErrors(externalValidateCreateUser(value))
+}
+
+func handleCreateUserWithExternal(w http.ResponseWriter, r *http.Request) error {
+	var req CreateUserRequest
+	if err := reqx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+
+	fieldErrs := externalValidateCreateUser(&req)
+	if len(fieldErrs) > 0 {
+		return reqx.InvalidRequest(adaptFieldErrors(fieldErrs)...)
+	}
+
+	return nil
 }
 ```
 
