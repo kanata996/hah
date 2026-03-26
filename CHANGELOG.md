@@ -18,10 +18,5 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 ### Highlights
 
 - First public release of `hah`.
-- Renamed the module path from `github.com/kanata996/chix` to `github.com/kanata996/hah`.
 - Positioned `hah` as a `net/http`-compatible business-boundary JSON API contract library that can be used directly or extended by framework-specific adapters.
 - Included the current explicit business-boundary model built around `Contract(...)`, immediate `WriteError(w, r, err)`, explicit `Respond*` success writes, route-scoped mappers/reporters, `reqx`, `errcode`, and request-id bridging.
-
-### Notes
-
-- This repository was reinitialized for `hah`; earlier `chix` tags and release history are not part of this Git history.
