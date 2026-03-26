@@ -4,61 +4,64 @@
 [![CI](https://github.com/kanata996/hah/workflows/CI/badge.svg)](https://github.com/kanata996/hah/actions/workflows/ci.yml)
 [![Codecov](https://codecov.io/github/kanata996/hah/graph/badge.svg)](https://codecov.io/github/kanata996/hah)
 
-`hah` 是一个保持 `net/http` 原生兼容、同时适配 `chi` 等路由栈的业务边界 JSON API 契约库，用来把进入业务边界后的请求解码、错误映射、响应写回和边界日志收敛成一套稳定约定。
+`hah` 是一个面向 `net/http` 生态的 JSON API 边界层。
 
-## 特性
+它不接管 router，不引入新的 framework runtime，也不要求你改写现有 middleware / handler 组织方式。它只聚焦进入业务边界之后的几件事：
 
-- 统一业务边界内成功响应与错误响应的 JSON 结构
-- 集中映射、观测并写回显式边界错误，错误观测关联 `request_id`
-- 兼容 `go-chi` 与标准 `http.Handler` 中间件链
-- 兼容原生 `net/http` / `ServeMux`，不依赖第三方框架运行时
-- 不接管 router，不绑定项目结构，也不引入新的框架 runtime
-- 提供请求体解码、query 解码和输入校验封装
-- 默认采用 fail-closed 策略，响应一旦开始写出就不再改写
+- 用统一的 JSON envelope 写成功响应和错误响应
+- 在失败点显式写回错误，而不是依赖隐式控制流
+- 把内部错误映射成稳定的公开 HTTP 错误
+- 处理 JSON / query 输入解码与校验
+- 在错误处理链路里附带可观测信息和 `request_id`
 
-## 适用场景
+如果你在用 `chi`、原生 `net/http`，或其他构建在 `http.Handler` 之上的路由栈，并且想统一 API 边界行为而不接受“再套一层框架”，`hah` 就是为这个场景设计的。
 
-- 你在使用 `chi`、原生 `net/http`，或其他构建在 `net/http` 之上的路由/中间件栈，想统一业务边界内的成功响应、错误响应和请求校验行为
-- 你希望 middleware、handler、service 继续沿用标准 `net/http` 风格
-- 你想把内部错误稳定地映射为公开错误，而不是在深层直接写 HTTP 响应
+## 定位
 
-## 边界
+可以把 `hah` 理解成一层很薄的 API 边界辅助层：
 
-`hah` 负责这些事：
+- 外层 middleware 继续做 auth、rate limit、CORS、recover、access log
+- 业务边界内的 handler 继续保持标准 `http.Handler`
+- `hah` 只负责输入解码、错误定型、统一写回和错误观测
 
-- 统一业务边界内成功响应和显式边界错误的 JSON 契约
-- 把 `WriteError(...)` 送进来的错误集中映射、观测和写回
-- 提供请求解码、查询参数解码和输入校验封装
+它适合：
 
-`hah` 不负责这些事：
+- 你想统一成功响应和错误响应的 JSON 结构
+- 你想把内部错误集中映射成稳定的公开错误码
+- 你想继续保留 `chi` / `net/http` 的原生写法
+- 你想要显式错误处理，而不是全局魔法式 runtime
+
+它不负责：
 
 - 接管或包装你的 router
-- 统一 auth、rate limit、CORS、redirect、challenge、router 级 `404/405` 等业务边界之前的响应
-- 接管系统级 panic recovery
-- 提供 body / query / header / path 的全量绑定运行时
-- 承诺所有 `500` 都返回统一 JSON，panic 或外层 recoverer 的行为不属于 `hah` 契约
+- 接管 auth、rate limit、redirect、challenge、panic recover
+- 统一 router 级 `404/405` 或框架级 `500`
+- 提供 path / header / form 的全量 binding runtime
+- 替代 tracing、access log、全局观测基础设施
 
-## 核心约定
+## 核心模型
 
-1. 外层 middleware 继续处理 auth、rate limit、CORS、recover、access log 等接入层职责
-2. 推荐在业务边界路由树上显式挂载 `Contract(...)`
-3. 用 `Decode*` / `Validate` 处理进入业务边界后的请求输入
-4. 用 `WriteError(...)` 在失败点显式写出统一错误响应
-5. 用 `Respond` / `RespondWithMeta` / `RespondEmpty` 显式写回成功结果
+`hah` 的接入可以压缩成 5 个动作：
 
-- `Contract(...)` 是推荐的边界挂载点，但不是 `WriteError(...)` 生效的前提
-- 直接返回 `*HTTPError`，或在调用点显式传入 `WithErrorMappers(...)` 时，不挂 `Contract(...)` 也能工作
-- `WriteError(...)` 负责立即映射、观测并写回错误响应
-- `Respond*` 只负责成功响应
-- panic 不属于 `hah` 的默认职责，应由外层 recoverer 处理
-- 如果响应已经开始写回，`hah` 不会为了“统一格式”去改写已经发出的结果
+1. 外层 middleware 继续处理接入层职责
+2. 在业务边界 route group 上可选地挂 `Contract(...)`
+3. 用 `Decode*` / `Validate` 处理输入
+4. 在失败点调用 `WriteError(...)`
+5. 在成功路径调用 `Respond*`
 
-如果你只记四组名字，记住这些就够了：
+最重要的几个 API：
 
-- `Contract`
-- `WriteError`
-- `Respond*`
-- `Decode*` / `Validate`
+- `Contract(...)`
+- `WriteError(...)`
+- `Respond(...)` / `RespondWithMeta(...)` / `RespondEmpty(...)`
+- `DecodeJSON(...)` / `DecodeQuery(...)` / `Validate(...)`
+
+几个需要提前知道的约束：
+
+- `Contract(...)` 是可选的，但当你需要按路由子树生效的 mapper / reporter，以及响应已开始写出的跟踪能力时，推荐显式挂载
+- `WriteError(...)` 收到 `nil` 时返回 `false`；收到非 `nil` 错误时会立即完成映射、观测和写回
+- 一旦响应已经开始写出，`hah` 不会为了“统一格式”再偷偷改写结果
+- `Respond*` 只负责成功响应，`WriteError(...)` 只负责错误响应
 
 ## 安装
 
@@ -68,9 +71,16 @@
 go get github.com/kanata996/hah
 ```
 
-## 快速开始
+## 推荐接法
 
-下面是推荐主路径的最小化 `chi` 接法：在业务边界子路由上显式挂载 `Contract(...)`，然后在 handler 内继续显式使用 `WriteError` + `Respond*`。auth、rate limit、recover 这类接入层职责按项目需要自行放在外层 middleware。
+推荐主路径是：
+
+- 外层继续用 `chi` / `net/http` middleware
+- 在 feature 或 route group 边界挂 `Contract(...)`
+- handler 内统一使用 `WriteError(...)` 和 `Respond*`
+- service / repository 保持内部错误语义，通过 mapper 转成公开 HTTP 错误
+
+下面是最小化的 `chi` 接法：
 
 ```go
 package main
@@ -85,11 +95,18 @@ import (
 )
 
 var errUserNotFound = errors.New("user not found")
-const codeUserNotFound = "user_not_found"
+
+func loadUser(id string) (map[string]any, error) {
+	if id == "missing" {
+		return nil, errUserNotFound
+	}
+
+	return map[string]any{"id": id}, nil
+}
 
 func mapUserError(err error) *hah.HTTPError {
 	if errors.Is(err, errUserNotFound) {
-		return hah.NotFound(codeUserNotFound, "user not found")
+		return hah.NotFound("user_not_found", "user not found")
 	}
 	return nil
 }
@@ -108,14 +125,13 @@ func main() {
 			if hah.WriteError(w, r, hah.DecodeQuery(r, &query)) {
 				return
 			}
-			if query.ID == "missing" {
-				hah.WriteError(w, r, errUserNotFound)
+
+			user, err := loadUser(query.ID)
+			if hah.WriteError(w, r, err) {
 				return
 			}
 
-			if err := hah.Respond(w, http.StatusOK, map[string]any{
-				"id": query.ID,
-			}); hah.WriteError(w, r, err) {
+			if err := hah.Respond(w, http.StatusOK, user); hah.WriteError(w, r, err) {
 				return
 			}
 		})
@@ -125,29 +141,47 @@ func main() {
 }
 ```
 
-接入建议：
+这条主路径的好处是：
 
-- 外层 middleware 继续处理 auth、rate limit、CORS、recover、access log 等职责
-- 推荐在进入业务边界的 route group 上挂一次 `r.Use(hah.Contract(...))`
-- 进入业务边界后的 handler 使用 `if hah.WriteError(w, r, err) { return }`
-- route 或 feature 级的业务 mapper 更推荐收敛到对应的 `Contract(...)`
-- 单个 handler 的 one-shot 覆盖更适合放在 `WriteError(..., hah.WithErrorMappers(...))` 调用点
-- `hah` 生成的兜底 request id 只保证错误链路内稳定，不替代外层 access log / tracing 的 request id 策略
-- 如果项目已经有 request id 机制，可通过 `hah.SetRequestID(...)` 注入给 `hah`
-- 如果 handler / service 已经直接返回 `*hah.HTTPError`，不挂 `Contract(...)` 也可以直接配合 `WriteError(...)` 使用
+- `chi` 继续负责路由和 middleware 组织
+- handler 里没有手写错误 JSON 的样板代码
+- service / repository 不需要直接依赖 HTTP 状态码
+- 错误映射收敛在业务边界，而不是散落在各层
 
-如果你继续使用标准库，也有 `ServeMux` 版本示例：
+## 另一种接法：直接返回 `*hah.HTTPError`
+
+如果你的项目规模较小，或者你接受内部层直接携带 HTTP 语义，也可以不挂 `Contract(...)`，直接在 handler 或 service 中构造 `*hah.HTTPError` 并交给 `WriteError(...)`：
+
+```go
+func getUser(w http.ResponseWriter, r *http.Request) {
+	user, err := loadUser(r.URL.Query().Get("id"))
+	if err != nil {
+		hah.WriteError(w, r, hah.NotFound("user_not_found", "user not found"))
+		return
+	}
+
+	_ = hah.Respond(w, http.StatusOK, user)
+}
+```
+
+这个模式更简单，但会让内部层更早感知公开 HTTP 语义。推荐把它留给：
+
+- 小型服务
+- 标准库直写项目
+- 明确接受“service 直接返回公开错误”的团队约定
+
+对应示例见：
 
 - [`_examples/chi`](./_examples/chi)
 - [`_examples/nethttp`](./_examples/nethttp)
 
 ## 响应契约
 
-`hah` 对外只定义三种由自身写出的响应形态：
+`hah` 只定义它自己写出的三种响应形态：
 
 1. 带响应体的成功响应
 2. 带响应体的错误响应
-3. 不带响应体的空响应
+3. 不带响应体的空成功响应
 
 成功响应：
 
@@ -172,109 +206,67 @@ func main() {
 
 约束：
 
-- `data` 必须存在，且不能编码成 `null`
-- `meta` 没内容时可省略，如果存在，必须编码成 JSON object
+- `Respond(...)` 输出 `{"data": ...}`
+- `RespondWithMeta(...)` 输出 `{"data": ..., "meta": ...}`
+- `RespondEmpty(...)` 只写状态码，不写响应体
+- `data` 必须存在，且不能编码成 JSON `null`
+- `meta` 可省略；如果存在，必须编码成 JSON object
 - `error.code` 必须是稳定机器码
-- `hah` 通过 `errcode` 子包公开了一组常见 code 常量，见下文；业务错误也可以继续使用你自己定义的稳定字符串常量
 - `error.message` 必须是可安全公开的文案
-- `error.details` 始终存在，没有内容时输出 `[]`
-- `Respond` / `RespondWithMeta` 只能用于允许携带响应体的成功状态码
-- `RespondEmpty` 用于不带响应体的成功响应
+- `error.details` 始终存在；没有内容时输出 `[]`
 
-这个契约只覆盖下面这些入口写出的响应：
+这个契约只覆盖这些入口：
 
 - `Respond(...)`
 - `RespondWithMeta(...)`
 - `RespondEmpty(...)`
 - `WriteError(...)`
 
-如果响应来自 auth、rate limit、CORS、redirect 这类外层 middleware，或 router 级 `404/405`、panic、router / framework 级 recoverer 返回的 `500`，是否带响应体、响应体长什么样，都不属于 `hah` 契约。
+如果响应来自 auth、rate limit、redirect、router 级 `404/405`、panic recover 或其他外层 middleware，它的响应体不属于 `hah` 契约。
 
 ## 错误处理与映射
 
-`hah` 的错误处理模型不是“在各处直接拼错误 JSON”，而是“让错误在业务边界发生点被显式写回，并由边界统一定型”。
+`hah` 的错误模型是“在失败点显式写回”，而不是“把错误状态藏在 runtime 里等待统一收尾”。
 
-核心 API：
+`WriteError(...)` 的处理顺序是：
 
-```go
-func Contract(opts ...ContractOption) func(http.Handler) http.Handler
-func WriteError(w http.ResponseWriter, r *http.Request, err error, opts ...ErrorOption) bool
-```
+1. 如果错误本身是 `*HTTPError`，直接写出
+2. 如果错误是 `reqx.Problem`，自动适配成 `hah` 的公开错误
+3. 否则按 mapper 顺序匹配
+4. 没命中时回退为 `500 internal_error`
 
-使用约束：
+常用入口：
 
-- `Contract(...)` 是可选但推荐的最里层边界 middleware，用来显式声明业务路由子树进入 `hah` 契约层
-- `Contract(...)` 会为 `WriteError(...)` 提供 route-scoped 配置，并安装 started-response tracking
-- `WriteError(...)` 接收任意 `error`；如果命中 `*HTTPError` 会直接写公开错误，否则再按 mapper 和默认规则归一化
-- 对 `WriteError(...)` 传入 `nil` 会返回 `false`
-- `WriteError(...)` 会立即完成映射、观测和写回
-- 当请求经过 `Contract(...)` 时，`WriteError(...)` 会先继承 route-scoped 配置，再叠加调用点 options
-- 如果响应已经开始写回，`WriteError(...)` 会尽量避免改写已发送结果
+- `Contract(hah.WithContractErrorMappers(...))`
+- `hah.WriteError(w, r, err, hah.WithErrorMappers(...))`
+- `hah.NewHTTPError(...)`
+- `hah.BadRequest(...)`
+- `hah.Unauthorized(...)`
+- `hah.Forbidden(...)`
+- `hah.NotFound(...)`
+- `hah.MethodNotAllowed(...)`
+- `hah.Conflict(...)`
+- `hah.Gone(...)`
+- `hah.UnprocessableEntity(...)`
+- `hah.TooManyRequests(...)`
 
-`Contract(...)` 与 `WriteError(...)` 故意使用两套 option 类型：
+推荐实践：
 
-- `ContractOption` 负责 route-level 的边界配置
-- `ErrorOption` 负责单次 `WriteError(...)` 调用的 one-shot 配置
-- 这样可以避免把“挂载边界”和“写一次错误”混成同一层语义
+- route / feature 级 mapper 放在 `Contract(...)`
+- 单个 handler 的 one-shot 覆盖放在 `WriteError(..., hah.WithErrorMappers(...))`
+- 业务错误码自己定义稳定字符串常量；公共可复用 code 放在 [`errcode`](./errcode) 子包
 
-公开用法上，`WriteError(...)` 支持两条都合法的路径：
+`Contract(...)` 不是 `WriteError(...)` 生效的前提，但在下面这些场景里很有价值：
 
-- 直接传 `*HTTPError` 或能被 `errors.As` 命中 `*HTTPError` 的错误；这时不强制依赖 `Contract(...)`
-- 传内部错误，再通过 `WithErrorMappers(...)` / `WithContractErrorMappers(...)` 把公开语义收敛到边界层
+- 你想在一个路由子树下集中挂 mapper
+- 你想挂按路由子树生效的 reporter
+- 你想获得响应开始写出后的跟踪能力
 
-公开错误类型：
+## 错误观测
 
-```go
-type HTTPError struct {
-	// unexported fields
-}
-
-func NewHTTPError(status int, code, message string, details ...any) *HTTPError
-func BadRequest(code, message string, details ...any) *HTTPError
-func Unauthorized(code, message string, details ...any) *HTTPError
-func Forbidden(code, message string, details ...any) *HTTPError
-func NotFound(code, message string, details ...any) *HTTPError
-func MethodNotAllowed(code, message string, details ...any) *HTTPError
-func Conflict(code, message string, details ...any) *HTTPError
-func Gone(code, message string, details ...any) *HTTPError
-func UnprocessableEntity(code, message string, details ...any) *HTTPError
-func TooManyRequests(code, message string, details ...any) *HTTPError
-
-func (e *HTTPError) Error() string
-func (e *HTTPError) Status() int
-func (e *HTTPError) Code() string
-func (e *HTTPError) Message() string
-func (e *HTTPError) Details() []any
-```
-
-常见公开 code 常量统一放在 `errcode` 子包：
+`hah` 在处理错误时会发出 `ErrorReport`：
 
 ```go
-import "github.com/kanata996/hah/errcode"
-```
-
-- `errcode` 可复用的公共 code，主要覆盖协议/边界错误、请求解码与校验错误，以及少量跨业务的泛语义错误
-- 为避免过早把完整枚举承诺成稳定契约，README 不再列出全部常量，请以当前版本的 `errcode` 包定义为准
-- 这些常量只是便捷入口，`NewHTTPError(...)`、`NotFound(...)` 等 helper 仍然接受任意自定义稳定字符串
-- 业务错误建议自己定义常量，只有像 `resource_not_found` 这类确实跨业务复用的语义，才值得回收到 `errcode`
-
-约束：
-
-- `4xx` 表达客户端侧失败
-- `5xx` 表达服务端侧失败
-- `NewHTTPError(...)` 会把非法状态码保守规范化为 `500`
-- 常见 `4xx` 可以直接用 helper：`BadRequest(...)`、`Unauthorized(...)`、`Forbidden(...)`、`NotFound(...)`、`MethodNotAllowed(...)`、`Conflict(...)`、`Gone(...)`、`UnprocessableEntity(...)`、`TooManyRequests(...)`
-- 当 `code` / `message` 为空时，会按状态码族补默认值
-- 未识别错误默认回退为 `500 internal_error`
-
-错误映射与观测：
-
-```go
-type ErrorMapper func(err error) *HTTPError
-
-func WithErrorMappers(mappers ...ErrorMapper) ErrorOption
-func WithContractErrorMappers(mappers ...ErrorMapper) ContractOption
-
 type ErrorReport struct {
 	Request         *http.Request
 	Error           error
@@ -283,103 +275,88 @@ type ErrorReport struct {
 	RequestID       string
 	ResponseStarted bool
 }
-
-type ErrorReporter func(ErrorReport)
-
-func WithErrorReporter(reporter ErrorReporter) ErrorOption
-func WithContractErrorReporter(reporter ErrorReporter) ContractOption
-func SetRequestID(r *http.Request, id string) *http.Request
 ```
 
-- `ErrorReport.Stage` 是内部观测字段，当前主路径稳定值包括 `decode`、`validate`、`processing`、`write_response`
-- `ErrorReport.RequestID` 表示当前错误观测实际使用的 request id；优先使用 `SetRequestID(...)` 注入的值
-- 如果调用方没有显式设置 request id，`hah` 会在第一次发送错误观测时自动生成一个，并在同一次错误处理链路里复用
-- `processing` 表示请求已进入业务处理链，覆盖 handler、service、repository 这段内部处理范围
-- 当错误响应在序列化或写回阶段再次失败时，`hah` 会额外发送一条 `Stage == "write_response"` 的内部观测，并保守回退为 `500 internal_error`
-- 默认结构化 stderr 日志会记录 `5xx` 与 `write_response` 失败；普通业务 `4xx` 默认不单独记错误日志
-- `WithErrorReporter(nil)` 会关闭 `hah` 的错误观测
+使用方式：
 
-`RequestID` 接入建议：
+- `WithContractErrorReporter(...)` 为整个 `Contract(...)` 子树设置 reporter
+- `WithErrorReporter(...)` 为单次 `WriteError(...)` 调用覆盖 reporter
+- 传 `nil` 可以关闭 `hah` 的错误观测
 
-- 默认不需要额外安装 request id middleware；缺失时 `hah` 会在错误路径内部自动生成并复用 request id
-- 如果项目已经有 request id 机制，可在应用层取出该值，再通过 `hah.SetRequestID(...)` 注入给 `hah`
-- `net/http` 项目可在自己的 middleware 里生成 request id，然后把返回的 `*http.Request` 继续向下传递
-- 不建议让 `hah` 根包直接依赖某个框架的 request id context 约定
-- `RequestID` 不是 `TraceID`，两者不应混用
+`Stage` 当前会落在这些位置：
 
-推荐做法：
+- `decode`
+- `validate`
+- `processing`
+- `write_response`
 
-- 如果你希望内部层不直接感知 HTTP 语义，就把内部业务错误通过 `ErrorMapper` 映射成公开边界错误
-- 如果 handler / service 已经直接返回 `*HTTPError`，`WriteError(...)` 也可以直接工作，不强制要求 `Contract(...)`
-- 在交付层定义局部 helper，把常用 mapper 显式传给 `WriteError(...)`
-- 单个 handler 的临时覆盖更适合放在 `WriteError(..., hah.WithErrorMappers(...))`
-- 如果少量 mapper 确实需要全局复用，可通过 `WithErrorMappers(...)` 复用配置片段
-- route 或 feature 级 mapper 更推荐通过 `WithContractErrorMappers(...)` 挂到 `Contract(...)`
-- 把鉴权失败、限流、参数错误这类边界错误优先写成 `hah.Unauthorized(...)`、`hah.TooManyRequests(...)`、`hah.BadRequest(...)` 这类 helper；不常见状态再回退到 `hah.NewHTTPError(...)`
-- 不再提供 runtime 风格的隐式错误状态传播；错误处理路径统一收敛为显式 `WriteError(...)`
-
-## 成功响应 API
-
-```go
-func Respond(w http.ResponseWriter, status int, data any) error
-func RespondWithMeta(w http.ResponseWriter, status int, data any, meta any) error
-func RespondEmpty(w http.ResponseWriter, status int) error
-```
-
-- `Respond(...)` 返回 `{"data": ...}`
-- `RespondWithMeta(...)` 返回 `{"data": ..., "meta": ...}`
-- `RespondEmpty(...)` 只写状态码，不写响应体
-- `RespondWithMeta(...)` 的 `meta` 如果存在，必须编码成 JSON object
+默认 reporter 会把内部错误和写响应退化记录到结构化 stderr；普通业务 `4xx` 默认不单独记错误日志。
 
 ## 请求解码与校验
 
-根包的请求输入 helper 是对 `reqx` 子包的一层轻量封装。推荐应用边界代码优先使用 `hah.Decode*` / `hah.Validate`，这样可以把依赖面收敛在 `hah` 根包。
+根包里的请求输入 helper 是对 [`reqx`](./reqx) 子包的轻量封装，推荐业务边界代码直接使用 `hah` 根包 API：
 
-公开 API：
+- `DecodeJSON(...)`
+- `DecodeAndValidateJSON(...)`
+- `DecodeQuery(...)`
+- `DecodeAndValidateQuery(...)`
+- `Validate(...)`
+
+JSON 解码特性：
+
+- 接受 `application/json` 和 `+json` Content-Type
+- 默认最大请求体大小为 `1 MiB`
+- 默认拒绝未知字段
+- 可通过 `AllowUnknownFields()` 放宽未知字段限制
+- 可通过 `AllowEmptyBody()` 接受空 body
+
+Query 解码特性：
+
+- 解码到带 `query:"..."` tag 的 struct 字段
+- 默认拒绝未知 query 参数
+- 支持标量、切片、指针，以及实现 `encoding.TextUnmarshaler` 的类型
+- 可通过 `AllowUnknownQueryFields()` 放宽未知字段限制
+
+校验特性：
+
+- 通过 `Validate(...)` 或 `DecodeAndValidate*` 返回 `[]hah.Violation`
+- 违反约束时统一写成 `422 invalid_request`
+- violation 结构包含 `field`、`code`、`message`
+
+如果你明确想依赖更窄的子包，也可以直接使用 `reqx`。`hah.WriteError(...)` 会自动把 `reqx.Problem` 归一化到 `hah` 的公开错误契约里。
+
+## Request ID
+
+`hah` 不要求你预先安装 request id middleware。
+
+默认行为是：
+
+- 第一次需要发送错误观测时，缺失的 request id 会被惰性生成
+- 同一次错误处理链路内会复用同一个 request id
+
+如果项目已经有 request id 机制，可以显式桥接给 `hah`：
 
 ```go
-type DecodeOption = reqx.DecodeOption
-type QueryOption = reqx.QueryOption
-type Violation = reqx.Violation
-type ValidateFunc[T any] func(*T) []Violation
-
-func WithMaxBodyBytes(limit int64) DecodeOption
-func AllowUnknownFields() DecodeOption
-func AllowEmptyBody() DecodeOption
-func AllowUnknownQueryFields() QueryOption
-
-func DecodeJSON[T any](r *http.Request, dst *T, opts ...DecodeOption) error
-func DecodeAndValidateJSON[T any](r *http.Request, dst *T, fn ValidateFunc[T], opts ...DecodeOption) error
-func DecodeQuery[T any](r *http.Request, dst *T, opts ...QueryOption) error
-func DecodeAndValidateQuery[T any](r *http.Request, dst *T, fn ValidateFunc[T], opts ...QueryOption) error
-func Validate[T any](dst *T, fn ValidateFunc[T]) error
+func bindChiRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if reqID := middleware.GetReqID(r.Context()); reqID != "" {
+			r = hah.SetRequestID(r, reqID)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
 ```
 
-这些 helper 会把请求解码和输入校验错误适配到 `hah` 的统一错误响应中。
+`SetRequestID(...)` 只影响 `hah` 的错误观测链路，不替代 access log、trace 或分布式链路追踪方案。
 
-它们的职责边界是：
+## 示例与常用命令
 
-- 负责 JSON 请求体解码
-- 负责 URL query 解码
-- 负责把 `[]Violation` 归一化成稳定的 `422 invalid_request`
+示例目录：
 
-它们不负责：
+- [`_examples/chi`](./_examples/chi)：推荐主路径，内部错误通过 mapper 收敛到边界
+- [`_examples/nethttp`](./_examples/nethttp)：直接返回 `*hah.HTTPError` 的标准库接法
 
-- 拥有 router
-- 接管完整响应生命周期
-- path param / header / form 的全量 binding runtime
-- 业务规则建模本身
-
-如果你明确想直接依赖更窄的子包，也可以直接使用 [`reqx`](./reqx)。`reqx.Problem` 仍然可以通过 `WriteError(...)` 归一化到 `hah` 的统一公开错误契约中。
-
-## 示例
-
-仓库同时提供 `chi` 与 `net/http` 示例，可根据项目接法直接选择：
-
-- [`_examples/chi`](./_examples/chi)：推荐主路径
-- [`_examples/nethttp`](./_examples/nethttp)：标准库兼容示例
-
-两个目录都是独立 Go module，可以直接运行：
+两个示例目录都是独立 Go module，可以直接运行：
 
 ```bash
 cd _examples/chi
@@ -401,53 +378,25 @@ make bench
 make ci
 ```
 
-## 复用 `chi` 的 Request ID
-
-`hah` 默认会在错误链路里惰性生成并复用 request id。只有当你希望 `ErrorReport.RequestID` 与 `chi/middleware.RequestID`、access log 或网关日志对齐时，才需要显式桥接。
-
-```go
-func bindChiRequestID(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if reqID := middleware.GetReqID(r.Context()); reqID != "" {
-			r = hah.SetRequestID(r, reqID)
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func main() {
-	r := chi.NewRouter()
-	r.Use(middleware.RequestID)
-	r.Use(bindChiRequestID)
-	r.Use(middleware.Recoverer)
-}
-```
-
-说明：
-
-- `chi` 负责生成或传播 request id
-- bridge middleware 负责把应用最终采用的值显式注入给 `hah`
-- `hah` 根包因此不需要依赖 `chi` 的 context 协议
-
 ## 已知限制
 
-- `WriteError(...)` 在拿不到可观测 writer 状态时，只能基于当前 `http.ResponseWriter` 能暴露的信息判断响应是否已经开始；如果项目非常依赖 started-response 保护，可在业务边界最内层使用一层很薄的 tracking middleware
-- `Respond(...)` / `RespondWithMeta(...)` 的成功载荷仍然要求可被标准库 `encoding/json` 正常编码；错误响应里的 `details` 如果混入不可编码值，会在内部观测中记录并降级为 `details: []`，而不是把整个公开错误改写成 `500`
-- `reqx.DecodeJSON(...)` 当前会在受 `WithMaxBodyBytes(...)` 约束下先完整读取请求体，再执行 JSON decode；这适合常规 JSON API 请求，但不是面向超大 body 或流式 decode 的运行时
-- `Respond(...)` / `RespondWithMeta(...)` 是一次性 envelope writer，不提供流式响应能力
-- `SetRequestID(...)` 只负责把 request id 桥接进 `hah` 的错误观测链路，不替代外层 access log、trace 或分布式链路追踪策略
+- `Respond(...)` / `RespondWithMeta(...)` 是一次性 JSON envelope writer，不提供流式响应能力
+- `DecodeJSON(...)` 会先完整读取请求体再 decode，不适合超大 body 或流式场景
+- `WriteError(...)` 在无法拿到带跟踪能力的 writer 时，只能基于已暴露的状态码和已写出字节数判断响应是否已经开始
+- 如果错误响应里的 `details` 无法编码，`hah` 会降级为 `details: []`，而不是把整个公开错误改写成另一个不兼容结果
+- `SetRequestID(...)` 只负责桥接 request id，不负责全局 tracing 协议
 
 ## 兼容性
 
-本项目当前的公开兼容边界由本文档中描述的两类内容构成：
+当前版本的公开兼容边界包括：
 
-- 根包公开 API
-- 由 `hah` 自己写出的 HTTP 可观察行为
+- `hah` 根包公开 API
+- `hah` 自己写出的 HTTP 可观察行为
 
 版本策略：
 
-- 在 `v1.0.0` 之前，minor release 仍可能包含破坏性调整，但会在 [CHANGELOG](./CHANGELOG.md) 中明确标注
-- 在 `v1.0.0` 之后，破坏根包公开 API 或 HTTP 契约的变更应只出现在新的 major version
+- `v1.0.0` 之前，minor release 仍可能包含破坏性调整，但会在 [CHANGELOG](./CHANGELOG.md) 中明确标注
+- `v1.0.0` 之后，破坏根包 API 或 HTTP 契约的变更应只出现在新的 major version
 
 ## 许可证
 
