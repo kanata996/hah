@@ -1,0 +1,17 @@
+bin/
+logs/
+vendor/
+.env
+.gocache/
+.gomodcache/
+.gopath/
+.golangci-lint-cache/
+.cache
+
+# macOS system files
+.DS_Store
+
+# Go test coverage files
+*.out
+*.cover
+*.test
