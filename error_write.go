@@ -50,8 +50,10 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error, opts ...Error
 	}
 
 	cfg := buildWriteErrorConfig(opts...)
-	if state := contractStateFrom(r); state != nil {
-		cfg = mergeWriteErrorConfig(state.config.writeError, cfg)
+	if r != nil {
+		if state := contractStateFrom(r); state != nil {
+			cfg = mergeWriteErrorConfig(state.config.writeError, cfg)
+		}
 	}
 
 	handleErrorWithConfig(w, r, err, cfg)

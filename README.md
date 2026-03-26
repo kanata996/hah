@@ -293,6 +293,7 @@ type ErrorReport struct {
 - `DecodeQuery(...)`
 - `DecodeAndValidateQuery(...)`
 - `Validate(...)`
+- `InvalidRequest(...)`
 
 JSON 解码特性：
 
@@ -311,9 +312,10 @@ Query 解码特性：
 
 校验特性：
 
-- 通过 `Validate(...)` 或 `DecodeAndValidate*` 返回 `[]hah.Violation`
+- 通过 `Validate(...)` 或 `DecodeAndValidate*` 接收调用方产出的 `[]hah.Violation`
 - 违反约束时统一写成 `422 invalid_request`
 - violation 结构包含 `field`、`code`、`message`
+- 如果你已经有现成的 `[]hah.Violation`，可直接用 `InvalidRequest(...)` 构造标准边界错误
 
 如果你明确想依赖更窄的子包，也可以直接使用 `reqx`。`hah.WriteError(...)` 会自动把 `reqx.Problem` 归一化到 `hah` 的公开错误契约里。
 

@@ -281,50 +281,11 @@ func TestWriteErrorFallsBackWhenPayloadCannotBeMarshaled(t *testing.T) {
 		Message: "bad request",
 		Details: []any{func() {}},
 	})
-	if err == nil {
-		t.Fatal("expected degraded write error, got nil")
-	}
-	var degraded *ErrorWriteDegraded
-	if !errors.As(err, &degraded) || degraded == nil {
-		t.Fatalf("WriteErrorPayload() error = %T, want *ErrorWriteDegraded", err)
-	}
-	if !degraded.PreservedPublicResponse {
-		t.Fatal("degraded.PreservedPublicResponse = false, want true")
+	if err != nil {
+		t.Fatalf("WriteErrorPayload() error = %v", err)
 	}
 
 	assertErrorResponse(t, rr, http.StatusBadRequest, "bad_request", "bad request")
-}
-
-func TestErrorWriteDegradedMethods(t *testing.T) {
-	t.Run("nil receiver", func(t *testing.T) {
-		var degraded *ErrorWriteDegraded
-		if got := degraded.Error(); got != "hah: error response details were dropped" {
-			t.Fatalf("degraded.Error() = %q, want default message", got)
-		}
-		if got := degraded.Unwrap(); got != nil {
-			t.Fatalf("degraded.Unwrap() = %#v, want nil", got)
-		}
-	})
-
-	t.Run("nil cause", func(t *testing.T) {
-		degraded := &ErrorWriteDegraded{}
-		if got := degraded.Error(); got != "hah: error response details were dropped" {
-			t.Fatalf("degraded.Error() = %q, want default message", got)
-		}
-		if got := degraded.Unwrap(); got != nil {
-			t.Fatalf("degraded.Unwrap() = %#v, want nil", got)
-		}
-	})
-
-	t.Run("with cause", func(t *testing.T) {
-		degraded := &ErrorWriteDegraded{Cause: errors.New("json: unsupported type: func()")}
-		if got := degraded.Error(); got != "hah: error response details were dropped: json: unsupported type: func()" {
-			t.Fatalf("degraded.Error() = %q, want message with cause", got)
-		}
-		if got := degraded.Unwrap(); got == nil || got.Error() != "json: unsupported type: func()" {
-			t.Fatalf("degraded.Unwrap() = %#v, want original cause", got)
-		}
-	})
 }
 
 func TestWriteErrorReturnsWhenFallbackWriteFails(t *testing.T) {
@@ -337,15 +298,7 @@ func TestWriteErrorReturnsWhenFallbackWriteFails(t *testing.T) {
 		Details: []any{func() {}},
 	})
 	if err == nil {
-		t.Fatal("expected joined write error, got nil")
-	}
-
-	var degraded *ErrorWriteDegraded
-	if !errors.As(err, &degraded) || degraded == nil {
-		t.Fatalf("WriteErrorPayload() error = %T, want joined error containing *ErrorWriteDegraded", err)
-	}
-	if degraded.PreservedPublicResponse {
-		t.Fatal("degraded.PreservedPublicResponse = true, want false")
+		t.Fatal("expected write error, got nil")
 	}
 
 	if rw.status != http.StatusBadRequest {

@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/kanata996/hah/internal/resp"
 )
 
 func TestDefaultErrorReporterSkipsNilAndNonInternalReports(t *testing.T) {
@@ -109,56 +107,16 @@ func TestDefaultErrorReporterLogsSecurityEvent(t *testing.T) {
 	}
 }
 
-func TestDefaultErrorReporterLogsWriteResponseDegradation(t *testing.T) {
-	var logs bytes.Buffer
-	previousWriter := errorLogger.Writer()
-	errorLogger.SetOutput(&logs)
-	defer errorLogger.SetOutput(previousWriter)
-
-	req := httptest.NewRequest(http.MethodPost, "/users", nil)
-	req.RemoteAddr = "127.0.0.1:8080"
-
-	defaultErrorReporter(ErrorReport{
-		Request:         req,
-		Error:           &resp.ErrorWriteDegraded{Cause: errors.New("json: unsupported type: func()"), PreservedPublicResponse: true},
-		PublicError:     NewHTTPError(http.StatusBadRequest, "invalid_request", "request is invalid"),
-		RequestID:       "req_write",
-		ResponseStarted: true,
-	})
-
-	output := logs.String()
-	if !strings.Contains(output, "error response degraded") {
-		t.Fatalf("logs = %q, want degraded log", output)
-	}
-	if !strings.Contains(output, "preserved=true") {
-		t.Fatalf("logs = %q, want preserved=true", output)
-	}
-	if !strings.Contains(output, "code=invalid_request") {
-		t.Fatalf("logs = %q, want invalid_request code", output)
-	}
-}
-
 func TestClassifyDefaultReport(t *testing.T) {
 	tests := []struct {
-		name         string
-		report       ErrorReport
-		wantKind     defaultReportKind
-		wantDegraded bool
+		name     string
+		report   ErrorReport
+		wantKind defaultReportKind
 	}{
 		{
-			name:         "skip nil public error",
-			report:       ErrorReport{},
-			wantKind:     defaultReportKindSkip,
-			wantDegraded: false,
-		},
-		{
-			name: "classify write degradation first",
-			report: ErrorReport{
-				Error:       &resp.ErrorWriteDegraded{Cause: errors.New("json: unsupported type: func()"), PreservedPublicResponse: true},
-				PublicError: NewHTTPError(http.StatusBadRequest, "invalid_request", "request is invalid"),
-			},
-			wantKind:     defaultReportKindDegradation,
-			wantDegraded: true,
+			name:     "skip nil public error",
+			report:   ErrorReport{},
+			wantKind: defaultReportKindSkip,
 		},
 		{
 			name: "classify security event",
@@ -166,8 +124,7 @@ func TestClassifyDefaultReport(t *testing.T) {
 				Error:       errors.New("missing role"),
 				PublicError: NewHTTPError(http.StatusForbidden, "forbidden", "forbidden"),
 			},
-			wantKind:     defaultReportKindSecurity,
-			wantDegraded: false,
+			wantKind: defaultReportKindSecurity,
 		},
 		{
 			name: "skip ordinary client error",
@@ -175,8 +132,7 @@ func TestClassifyDefaultReport(t *testing.T) {
 				Error:       errors.New("bad request"),
 				PublicError: NewHTTPError(http.StatusBadRequest, "invalid_request", "invalid request"),
 			},
-			wantKind:     defaultReportKindSkip,
-			wantDegraded: false,
+			wantKind: defaultReportKindSkip,
 		},
 		{
 			name: "classify internal error",
@@ -184,22 +140,15 @@ func TestClassifyDefaultReport(t *testing.T) {
 				Error:       errors.New("db down"),
 				PublicError: NewHTTPError(http.StatusInternalServerError, "internal_error", "internal server error"),
 			},
-			wantKind:     defaultReportKindInternal,
-			wantDegraded: false,
+			wantKind: defaultReportKindInternal,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := classifyDefaultReport(tt.report)
-			if got.kind != tt.wantKind {
-				t.Fatalf("classifyDefaultReport().kind = %v, want %v", got.kind, tt.wantKind)
-			}
-			if (got.degraded != nil) != tt.wantDegraded {
-				t.Fatalf("classifyDefaultReport().degraded present = %t, want %t", got.degraded != nil, tt.wantDegraded)
-			}
-			if shouldLogStack(got) != (tt.wantKind == defaultReportKindInternal) {
-				t.Fatalf("shouldLogStack() = %t, want %t", shouldLogStack(got), tt.wantKind == defaultReportKindInternal)
+			if got != tt.wantKind {
+				t.Fatalf("classifyDefaultReport() = %v, want %v", got, tt.wantKind)
 			}
 		})
 	}

@@ -51,6 +51,48 @@ func TestValidateAdaptsReqxProblemToHTTPError(t *testing.T) {
 	}
 }
 
+func TestInvalidRequestAdaptsReqxProblemToHTTPError(t *testing.T) {
+	err := InvalidRequest(
+		Violation{Field: "name"},
+		Violation{Field: "age", Code: "required"},
+	)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var boundaryErr *HTTPError
+	if !errors.As(err, &boundaryErr) || boundaryErr == nil {
+		t.Fatalf("error = %T, want *HTTPError", err)
+	}
+	if got := boundaryErr.Status(); got != http.StatusUnprocessableEntity {
+		t.Fatalf("boundaryErr.Status() = %d, want %d", got, http.StatusUnprocessableEntity)
+	}
+	if got := boundaryErr.Code(); got != "invalid_request" {
+		t.Fatalf("boundaryErr.Code() = %q, want invalid_request", got)
+	}
+
+	gotDetails := boundaryErr.Details()
+	if len(gotDetails) != 2 {
+		t.Fatalf("len(boundaryErr.Details()) = %d, want 2", len(gotDetails))
+	}
+
+	first, ok := gotDetails[0].(Violation)
+	if !ok {
+		t.Fatalf("boundaryErr.Details()[0] = %T, want Violation", gotDetails[0])
+	}
+	if first != (Violation{Field: "name", Code: "invalid", Message: "is invalid"}) {
+		t.Fatalf("boundaryErr.Details()[0] = %#v, want normalized violation", first)
+	}
+
+	second, ok := gotDetails[1].(Violation)
+	if !ok {
+		t.Fatalf("boundaryErr.Details()[1] = %T, want Violation", gotDetails[1])
+	}
+	if second != (Violation{Field: "age", Code: "required", Message: "is required"}) {
+		t.Fatalf("boundaryErr.Details()[1] = %#v, want normalized violation", second)
+	}
+}
+
 func TestDecodeJSONPassesThroughNonProblemErrors(t *testing.T) {
 	var body struct {
 		Name string `json:"name"`

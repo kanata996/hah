@@ -3,7 +3,6 @@ package resp
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 )
@@ -23,25 +22,6 @@ type ErrorPayload struct {
 	Code    string
 	Message string
 	Details []any
-}
-
-type ErrorWriteDegraded struct {
-	Cause                   error
-	PreservedPublicResponse bool
-}
-
-func (e *ErrorWriteDegraded) Error() string {
-	if e == nil || e.Cause == nil {
-		return "hah: error response details were dropped"
-	}
-	return "hah: error response details were dropped: " + e.Cause.Error()
-}
-
-func (e *ErrorWriteDegraded) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Cause
 }
 
 func WriteSuccess(w http.ResponseWriter, status int, data any, meta any, includeMeta bool) error {
@@ -89,21 +69,10 @@ func WriteEmpty(w http.ResponseWriter, status int) error {
 func WriteErrorPayload(w http.ResponseWriter, payload ErrorPayload) error {
 	body, err := marshalErrorEnvelope(payload.Code, payload.Message, normalizeDetails(payload.Details))
 	if err != nil {
-		degradedBody, _ := marshalErrorEnvelope(payload.Code, payload.Message, []any{})
-		if writeErr := WriteJSONBytes(w, payload.Status, degradedBody); writeErr != nil {
-			return errors.Join(&ErrorWriteDegraded{Cause: err}, writeErr)
-		}
-		return &ErrorWriteDegraded{
-			Cause:                   err,
-			PreservedPublicResponse: true,
-		}
+		body, _ = marshalErrorEnvelope(payload.Code, payload.Message, []any{})
 	}
 
-	if writeErr := WriteJSONBytes(w, payload.Status, body); writeErr != nil {
-		return writeErr
-	}
-
-	return nil
+	return WriteJSONBytes(w, payload.Status, body)
 }
 
 func marshalErrorEnvelope(code, message string, details []any) ([]byte, error) {

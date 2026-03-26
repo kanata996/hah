@@ -10,21 +10,17 @@ import (
 	"github.com/kanata996/hah/internal/reqid"
 )
 
-func TestContractAllowsNilNextHandler(t *testing.T) {
-	handler := Contract()(nil)
-	if handler == nil {
-		t.Fatal("Contract()(nil) = nil")
-	}
+func TestContractRejectsNilNextHandler(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("Contract()(nil) did not panic")
+		}
+	}()
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	handler.ServeHTTP(httptest.NewRecorder(), req)
+	_ = Contract()(nil)
 }
 
-func TestWithContractConfigGuardsAndStoresState(t *testing.T) {
-	if got := withContractConfig(nil, contractConfig{}); got != nil {
-		t.Fatalf("withContractConfig(nil, cfg) = %#v, want nil", got)
-	}
-
+func TestWithContractConfigStoresConfigAndSharedRequestState(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	cfg := contractConfig{
 		writeError: writeErrorConfig{
@@ -48,8 +44,10 @@ func TestWithContractConfigGuardsAndStoresState(t *testing.T) {
 		t.Fatalf("len(state.config.writeError.mappers) = %d, want 1", len(state.config.writeError.mappers))
 	}
 
-	if state := contractStateFrom(got); state == nil || state.storedRequestID() != nil {
-		t.Fatalf("contractStateFrom(got).storedRequestID() = %#v, want nil before first use", state)
+	if current := reqid.StateFrom(got); current == nil {
+		t.Fatal("reqid.StateFrom(got) = nil")
+	} else if id := current.Get(); id != "" {
+		t.Fatalf("reqid.StateFrom(got).Get() = %q, want empty before first use", id)
 	}
 
 	_, id := ensureRequestID(got)
@@ -62,36 +60,25 @@ func TestWithContractConfigGuardsAndStoresState(t *testing.T) {
 	}
 }
 
-func TestContractStateFromNilAndMissingState(t *testing.T) {
-	if got := contractStateFrom(nil); got != nil {
-		t.Fatalf("contractStateFrom(nil) = %#v, want nil", got)
-	}
-
+func TestContractStateFromMissingState(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	if got := contractStateFrom(req); got != nil {
 		t.Fatalf("contractStateFrom(req) = %#v, want nil", got)
 	}
-
-	var nilState *contractState
-	if got := nilState.storedRequestID(); got != nil {
-		t.Fatalf("nilState.storedRequestID() = %#v, want nil", got)
-	}
-	if got := nilState.ensureRequestID(req); got != nil {
-		t.Fatalf("nilState.ensureRequestID(req) = %#v, want nil", got)
-	}
 }
 
-func TestContractEnsureRequestIDAdoptsExistingRequestState(t *testing.T) {
+func TestWithContractConfigReusesExistingRequestState(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	req = reqid.Set(req, "req_upstream")
-	state := &contractState{}
 
-	current := state.ensureRequestID(req)
-	if current == nil {
-		t.Fatal("state.ensureRequestID(req) = nil")
+	got := withContractConfig(req, contractConfig{})
+	if got == nil {
+		t.Fatal("withContractConfig(req, cfg) = nil")
 	}
+
+	current := reqid.StateFrom(got)
 	if current != reqid.StateFrom(req) {
-		t.Fatal("state.ensureRequestID(req) did not reuse existing request state")
+		t.Fatal("withContractConfig(req, cfg) did not reuse existing request state")
 	}
 	if id := reqid.EnsureID(current); id != "req_upstream" {
 		t.Fatalf("reqid.EnsureID(current) = %q, want req_upstream", id)

@@ -77,9 +77,17 @@ func DecodeAndValidateQuery[T any](r *http.Request, dst *T, fn ValidateFunc[T], 
 }
 
 // Validate applies a validation function and returns a standardized 422
-// error when violations are present.
+// error when violations are present. The supplied fn owns the validation
+// logic; reqx only normalizes returned violations into a public boundary error.
 func Validate[T any](dst *T, fn ValidateFunc[T]) error {
 	return adaptReqxProblem(reqx.Validate(dst, reqx.ValidateFunc[T](fn)))
+}
+
+// InvalidRequest constructs a standardized 422 invalid_request boundary error
+// from one or more violations. This is the lowest-level helper for adapters
+// that already have validation results and only need hah's public error shape.
+func InvalidRequest(violations ...Violation) error {
+	return adaptReqxProblem(reqx.InvalidRequest(violations...))
 }
 
 // adaptReqxProblem keeps the root-package facade thin: reqx owns request

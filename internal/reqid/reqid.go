@@ -62,17 +62,30 @@ func Ensure(r *http.Request) (*http.Request, string) {
 	return withState(r, current), EnsureID(current)
 }
 
+func EnsureState(r *http.Request) *http.Request {
+	if r == nil {
+		return nil
+	}
+
+	if StateFrom(r) != nil {
+		return r
+	}
+
+	return withState(r, NewState())
+}
+
 func EnsureID(current *State) string {
 	if current == nil {
 		return requestIDGenerator()
 	}
-	if id := current.Get(); id != "" {
-		return id
-	}
 
-	id := requestIDGenerator()
-	current.Set(id)
-	return id
+	current.mu.Lock()
+	defer current.mu.Unlock()
+
+	if current.id == "" {
+		current.id = requestIDGenerator()
+	}
+	return current.id
 }
 
 func withState(r *http.Request, current *State) *http.Request {

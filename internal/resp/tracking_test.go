@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kanata996/hah/internal/resp"
 )
@@ -43,9 +44,19 @@ type pushableRecorder struct {
 	target    string
 }
 
+type deadlineRecorder struct {
+	*httptest.ResponseRecorder
+	writeDeadline time.Time
+}
+
 func (w *pushableRecorder) Push(target string, _ *http.PushOptions) error {
 	w.pushCalls++
 	w.target = target
+	return nil
+}
+
+func (w *deadlineRecorder) SetWriteDeadline(deadline time.Time) error {
+	w.writeDeadline = deadline
 	return nil
 }
 
@@ -289,6 +300,19 @@ func TestTrackingWriterPushUsesUnderlyingPusher(t *testing.T) {
 	}
 	if rr.target != "/asset.js" {
 		t.Fatalf("push target = %q, want /asset.js", rr.target)
+	}
+}
+
+func TestTrackingWriterUnwrapAllowsResponseControllerPassthrough(t *testing.T) {
+	rr := &deadlineRecorder{ResponseRecorder: newResponseRecorder()}
+	tw := resp.NewTrackingResponseWriter(rr)
+
+	deadline := time.Unix(123, 0)
+	if err := http.NewResponseController(tw).SetWriteDeadline(deadline); err != nil {
+		t.Fatalf("SetWriteDeadline() error = %v", err)
+	}
+	if !rr.writeDeadline.Equal(deadline) {
+		t.Fatalf("write deadline = %v, want %v", rr.writeDeadline, deadline)
 	}
 }
 

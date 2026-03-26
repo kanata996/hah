@@ -26,18 +26,19 @@ type responseBytesWritten interface {
 
 type trackingResponseWriter struct {
 	http.ResponseWriter
-	started  bool
-	hijacked bool
-	status   int
-	bytes    int
+	started bool
 }
 
 func NewTrackingResponseWriter(w http.ResponseWriter) http.ResponseWriter {
 	return &trackingResponseWriter{ResponseWriter: w}
 }
 
+func (w *trackingResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
 func (w *trackingResponseWriter) responseStarted() bool {
-	return w.started || w.hijacked
+	return w.started
 }
 
 func (w *trackingResponseWriter) WriteHeader(status int) {
@@ -46,7 +47,6 @@ func (w *trackingResponseWriter) WriteHeader(status int) {
 	}
 
 	w.started = true
-	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
 
@@ -55,9 +55,7 @@ func (w *trackingResponseWriter) Write(p []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 
-	n, err := w.ResponseWriter.Write(p)
-	w.bytes += n
-	return n, err
+	return w.ResponseWriter.Write(p)
 }
 
 func (w *trackingResponseWriter) ReadFrom(r io.Reader) (int64, error) {
@@ -66,9 +64,7 @@ func (w *trackingResponseWriter) ReadFrom(r io.Reader) (int64, error) {
 	}
 
 	if rf, ok := w.ResponseWriter.(io.ReaderFrom); ok {
-		n, err := rf.ReadFrom(r)
-		w.bytes += int(n)
-		return n, err
+		return rf.ReadFrom(r)
 	}
 
 	n, err := io.Copy(struct{ io.Writer }{Writer: w}, r)
@@ -92,7 +88,6 @@ func (w *trackingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	}
 	conn, rw, err := hijacker.Hijack()
 	if err == nil {
-		w.hijacked = true
 		w.started = true
 	}
 	return conn, rw, err

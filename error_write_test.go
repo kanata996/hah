@@ -17,6 +17,33 @@ type statusTrackingRecorder struct {
 	bytesWritten int
 }
 
+type failingResponseWriter struct {
+	header   http.Header
+	status   int
+	writeErr error
+	writes   int
+}
+
+func newFailingResponseWriter(err error) *failingResponseWriter {
+	return &failingResponseWriter{
+		header:   make(http.Header),
+		writeErr: err,
+	}
+}
+
+func (w *failingResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *failingResponseWriter) WriteHeader(status int) {
+	w.status = status
+}
+
+func (w *failingResponseWriter) Write(_ []byte) (int, error) {
+	w.writes++
+	return 0, w.writeErr
+}
+
 func (w *statusTrackingRecorder) WriteHeader(status int) {
 	if w.status == 0 {
 		w.status = status
@@ -57,6 +84,31 @@ func TestWriteErrorAllowsNilWriter(t *testing.T) {
 
 	if ok := hah.WriteError(nil, req, hah.NewHTTPError(http.StatusConflict, "conflict", "conflict")); !ok {
 		t.Fatal("WriteError() = false, want true")
+	}
+}
+
+func TestWriteErrorAllowsNilRequest(t *testing.T) {
+	var report hah.ErrorReport
+
+	rr := newResponseRecorder()
+
+	if ok := hah.WriteError(
+		rr,
+		nil,
+		hah.NewHTTPError(http.StatusConflict, "conflict", "conflict"),
+		hah.WithErrorReporter(func(r hah.ErrorReport) {
+			report = r
+		}),
+	); !ok {
+		t.Fatal("WriteError() = false, want true")
+	}
+
+	assertErrorResponse(t, rr, http.StatusConflict, "conflict", "conflict")
+	if report.Request != nil {
+		t.Fatalf("report.Request = %#v, want nil", report.Request)
+	}
+	if report.RequestID == "" {
+		t.Fatal("report.RequestID = empty, want generated request id")
 	}
 }
 
@@ -222,7 +274,7 @@ func TestWriteErrorReportsWriteResponseObservation(t *testing.T) {
 	}
 }
 
-func TestWriteErrorReportsWriteErrorFallbackAsSecondObservation(t *testing.T) {
+func TestWriteErrorDropsInvalidDetailsWithoutExtraObservation(t *testing.T) {
 	var reports []hah.ErrorReport
 
 	rr := newResponseRecorder()
@@ -243,22 +295,61 @@ func TestWriteErrorReportsWriteErrorFallbackAsSecondObservation(t *testing.T) {
 	)
 
 	assertErrorResponse(t, rr, http.StatusBadRequest, "invalid_request", "request is invalid")
-	if len(reports) != 2 {
-		t.Fatalf("reports len = %d, want 2", len(reports))
+	if len(reports) != 1 {
+		t.Fatalf("reports len = %d, want 1", len(reports))
 	}
-
 	if reports[0].PublicError == nil || reports[0].PublicError.Status() != http.StatusBadRequest {
 		t.Fatalf("reports[0].public = %#v, want 400 boundary error", reports[0].PublicError)
 	}
 	if reports[0].ResponseStarted {
 		t.Fatal("reports[0].ResponseStarted = true, want false")
 	}
+}
 
-	if reports[1].PublicError == nil || reports[1].PublicError.Status() != http.StatusBadRequest {
-		t.Fatalf("reports[1].public = %#v, want preserved 400 boundary error", reports[1].PublicError)
+func TestWriteErrorReportsWriteFailureAsSecondObservation(t *testing.T) {
+	var reports []hah.ErrorReport
+
+	rw := newFailingResponseWriter(errors.New("write failed"))
+	req := newRequest()
+
+	hah.WriteError(
+		rw,
+		req,
+		hah.NewHTTPError(http.StatusBadRequest, "invalid_request", "request is invalid"),
+		hah.WithErrorReporter(func(r hah.ErrorReport) {
+			reports = append(reports, r)
+		}),
+	)
+
+	if len(reports) != 2 {
+		t.Fatalf("reports len = %d, want 2", len(reports))
 	}
-	if !reports[1].ResponseStarted {
-		t.Fatal("reports[1].ResponseStarted = false, want true")
+	if reports[0].PublicError == nil || reports[0].PublicError.Status() != http.StatusBadRequest {
+		t.Fatalf("reports[0].public = %#v, want 400 boundary error", reports[0].PublicError)
+	}
+	if reports[0].ResponseStarted {
+		t.Fatal("reports[0].ResponseStarted = true, want false")
+	}
+	if reports[1].Error == nil || reports[1].Error.Error() != "write failed" {
+		t.Fatalf("reports[1].error = %#v, want write failed", reports[1].Error)
+	}
+	if reports[1].PublicError == nil || reports[1].PublicError.Status() != http.StatusInternalServerError {
+		t.Fatalf("reports[1].public = %#v, want 500 internal error", reports[1].PublicError)
+	}
+	if reports[1].ResponseStarted {
+		t.Fatal("reports[1].ResponseStarted = true, want false")
+	}
+	if reports[1].RequestID != reports[0].RequestID {
+		t.Fatalf("reports request ids = (%q, %q), want same generated value", reports[0].RequestID, reports[1].RequestID)
+	}
+	if rw.status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rw.status, http.StatusBadRequest)
+	}
+	if got := rw.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if rw.writes != 1 {
+		t.Fatalf("writes = %d, want 1", rw.writes)
 	}
 }
 
@@ -306,17 +397,14 @@ func TestWriteErrorGeneratesStableRequestIDWhenMissing(t *testing.T) {
 	)
 
 	assertErrorResponse(t, rr, http.StatusBadRequest, "invalid_request", "request is invalid")
-	if len(reports) != 2 {
-		t.Fatalf("reports len = %d, want 2", len(reports))
+	if len(reports) != 1 {
+		t.Fatalf("reports len = %d, want 1", len(reports))
 	}
 	if reports[0].RequestID == "" {
 		t.Fatal("reports[0].RequestID = empty, want generated request id")
 	}
 	if !strings.HasPrefix(reports[0].RequestID, "req_") {
 		t.Fatalf("reports[0].RequestID = %q, want req_ prefix", reports[0].RequestID)
-	}
-	if reports[1].RequestID != reports[0].RequestID {
-		t.Fatalf("reports request ids = (%q, %q), want same generated value", reports[0].RequestID, reports[1].RequestID)
 	}
 }
 

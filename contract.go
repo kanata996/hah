@@ -3,16 +3,13 @@ package hah
 import (
 	"context"
 	"net/http"
-	"sync"
 
 	"github.com/kanata996/hah/internal/reqid"
 	"github.com/kanata996/hah/internal/resp"
 )
 
 type contractState struct {
-	config    contractConfig
-	mu        sync.Mutex
-	requestID *reqid.State
+	config contractConfig
 }
 
 type contractStateKey struct{}
@@ -31,11 +28,11 @@ func Contract(opts ...ContractOption) func(http.Handler) http.Handler {
 	cfg := buildContractConfig(opts...)
 
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if next == nil {
-				return
-			}
+		if next == nil {
+			panic("hah: Contract requires a non-nil next handler")
+		}
 
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			next.ServeHTTP(resp.NewTrackingResponseWriter(w), withContractConfig(r, cfg))
 		})
 	}
@@ -72,61 +69,22 @@ func WithContractErrorMappers(mappers ...ErrorMapper) ContractOption {
 }
 
 func withContractConfig(r *http.Request, cfg contractConfig) *http.Request {
-	if r == nil {
-		return nil
-	}
-
-	requestID := reqid.StateFrom(r)
 	if state := contractStateFrom(r); state != nil {
 		cfg = mergeContractConfig(state.config, cfg)
-		if requestID == nil {
-			requestID = state.storedRequestID()
-		}
 	}
+
+	r = reqid.EnsureState(r)
 
 	return r.WithContext(context.WithValue(
 		r.Context(),
 		contractStateKey{},
-		&contractState{config: cfg, requestID: requestID},
+		&contractState{config: cfg},
 	))
 }
 
 func contractStateFrom(r *http.Request) *contractState {
-	if r == nil {
-		return nil
-	}
-
 	state, _ := r.Context().Value(contractStateKey{}).(*contractState)
 	return state
-}
-
-func (s *contractState) storedRequestID() *reqid.State {
-	if s == nil {
-		return nil
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.requestID
-}
-
-func (s *contractState) ensureRequestID(r *http.Request) *reqid.State {
-	if s == nil {
-		return nil
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.requestID == nil {
-		if current := reqid.StateFrom(r); current != nil {
-			s.requestID = current
-		} else {
-			s.requestID = reqid.NewState()
-		}
-	}
-
-	return s.requestID
 }
 
 func mergeContractConfig(base, override contractConfig) contractConfig {
@@ -154,8 +112,6 @@ func mergeWriteErrorConfig(base, override writeErrorConfig) writeErrorConfig {
 	if override.reporterSet {
 		merged.reporter = override.reporter
 		merged.reporterSet = true
-	} else if !base.reporterSet && override.reporter != nil {
-		merged.reporter = override.reporter
 	}
 
 	if merged.reporter == nil && !merged.reporterSet {

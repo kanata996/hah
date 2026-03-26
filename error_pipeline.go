@@ -1,7 +1,6 @@
 package hah
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/kanata996/hah/internal/reqid"
@@ -24,20 +23,13 @@ func handleErrorWithConfig(w http.ResponseWriter, r *http.Request, err error, cf
 	}
 
 	if writeErr := writeMappedError(w, mapped); writeErr != nil {
-		public := defaultInternalError()
-		writeStarted := resp.ResponseStarted(w)
-		var degraded *resp.ErrorWriteDegraded
-		if errors.As(writeErr, &degraded) && degraded.PreservedPublicResponse {
-			public = mapped
-			writeStarted = true
-		}
 		reportError(
 			cfg,
 			r,
 			writeErr,
-			public,
+			defaultInternalError(),
 			requestID,
-			writeStarted,
+			resp.ResponseStarted(w),
 		)
 	}
 }
@@ -57,10 +49,6 @@ func reportError(cfg writeErrorConfig, r *http.Request, err error, public *HTTPE
 }
 
 func ensureRequestID(r *http.Request) (*http.Request, string) {
-	if state := contractStateFrom(r); state != nil {
-		return r, reqid.EnsureID(state.ensureRequestID(r))
-	}
-
 	return reqid.Ensure(r)
 }
 
