@@ -5,13 +5,13 @@
 核心关注点：
 
 - 不使用 `Contract(...)`，也不使用 mapper
-- handler 只负责 `DecodeAndValidate*`、调用 service、再用 `hah.WriteError(...)` / `Respond*`
+- handler 只负责 `DecodeAndValidate*`、调用 service、再用 `hah.RenderError(...)` / `Render*`
 - service / repository 直接返回公开 HTTP 错误，例如 `hah.NotFound(...)`、`hah.Conflict(...)`
-- 成功响应统一走 `Respond(...)` / `RespondWithMeta(...)`
+- 成功响应统一走 `Render(...)` / `RenderWithMeta(...)`
 
 主要路由：
 
-- `GET /users`：query decode + validate + `RespondWithMeta`
+- `GET /users`：query decode + validate + `RenderWithMeta`
 - `GET /users/{userID}`：repository 直接返回 `404`
 - `POST /users`：JSON decode + validate + `Create`，冲突时直接返回 `409`
 
@@ -20,9 +20,9 @@
 1. handler 用 `DecodeAndValidateQuery(...)` 或 `DecodeAndValidateJSON(...)` 处理输入。
 2. handler 调用 service，service 再调用 repository。
 3. repository / service 直接返回 `hah.NotFound(...)`、`hah.Conflict(...)` 这类公开 HTTP 错误。
-4. handler 统一调用 `hah.WriteError(w, r, err)`。
-5. `WriteError(...)` 直接把这些公开错误写成统一 JSON HTTP 错误响应。
-6. 成功路径统一走 `Respond(...)` 或 `RespondWithMeta(...)`。
+4. handler 在失败点统一调用 `hah.RenderError(w, r, err)`。
+5. `RenderError(...)` 直接把这些公开错误写成统一 JSON HTTP 错误响应。
+6. 成功路径统一走 `Render(...)` 或 `RenderWithMeta(...)`。
 
 说明：
 

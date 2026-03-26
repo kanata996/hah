@@ -29,7 +29,7 @@
 3. 让 `reqx` 统一把这些 violation 转成稳定的请求问题
 4. 让 service 层只处理业务规则
 
-配合 `hah.WriteError(...)` 使用时，`reqx` 返回的 `Problem` 可以直接进入统一错误响应。
+配合 `hah.RenderError(...)` 使用时，`reqx` 返回的 `Problem` 可以直接进入统一错误响应。
 
 ## 适用场景
 

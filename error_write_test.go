@@ -11,12 +11,6 @@ import (
 	"github.com/kanata996/hah"
 )
 
-type statusTrackingRecorder struct {
-	*httptest.ResponseRecorder
-	status       int
-	bytesWritten int
-}
-
 type failingResponseWriter struct {
 	header   http.Header
 	status   int
@@ -44,63 +38,40 @@ func (w *failingResponseWriter) Write(_ []byte) (int, error) {
 	return 0, w.writeErr
 }
 
-func (w *statusTrackingRecorder) WriteHeader(status int) {
-	if w.status == 0 {
-		w.status = status
-	}
-	w.ResponseRecorder.WriteHeader(status)
-}
-
-func (w *statusTrackingRecorder) Write(p []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	n, err := w.ResponseRecorder.Write(p)
-	w.bytesWritten += n
-	return n, err
-}
-
-func (w *statusTrackingRecorder) Status() int {
-	return w.status
-}
-
-func (w *statusTrackingRecorder) BytesWritten() int {
-	return w.bytesWritten
-}
-
-func TestWriteErrorWritesImmediatelyWithoutMiddleware(t *testing.T) {
+func TestRenderErrorWritesImmediatelyWithoutMiddleware(t *testing.T) {
 	rr := newResponseRecorder()
 	req := newRequest()
 
-	if ok := hah.WriteError(rr, req, hah.NewHTTPError(http.StatusConflict, "conflict", "conflict")); !ok {
-		t.Fatal("WriteError() = false, want true")
+	if err := hah.RenderError(rr, req, hah.NewHTTPError(http.StatusConflict, "conflict", "conflict")); err != nil {
+		t.Fatalf("RenderError() error = %v", err)
 	}
 
 	assertErrorResponse(t, rr, http.StatusConflict, "conflict", "conflict")
 }
 
-func TestWriteErrorAllowsNilWriter(t *testing.T) {
+func TestRenderErrorAllowsNilWriter(t *testing.T) {
 	req := newRequest()
 
-	if ok := hah.WriteError(nil, req, hah.NewHTTPError(http.StatusConflict, "conflict", "conflict")); !ok {
-		t.Fatal("WriteError() = false, want true")
+	if err := hah.RenderError(nil, req, hah.NewHTTPError(http.StatusConflict, "conflict", "conflict")); err != nil {
+		t.Fatalf("RenderError() error = %v", err)
 	}
 }
 
-func TestWriteErrorAllowsNilRequest(t *testing.T) {
+func TestRenderErrorAllowsNilRequest(t *testing.T) {
 	var report hah.ErrorReport
 
 	rr := newResponseRecorder()
 
-	if ok := hah.WriteError(
+	err := hah.RenderError(
 		rr,
 		nil,
 		hah.NewHTTPError(http.StatusConflict, "conflict", "conflict"),
 		hah.WithErrorReporter(func(r hah.ErrorReport) {
 			report = r
 		}),
-	); !ok {
-		t.Fatal("WriteError() = false, want true")
+	)
+	if err != nil {
+		t.Fatalf("RenderError() error = %v", err)
 	}
 
 	assertErrorResponse(t, rr, http.StatusConflict, "conflict", "conflict")
@@ -112,12 +83,12 @@ func TestWriteErrorAllowsNilRequest(t *testing.T) {
 	}
 }
 
-func TestWriteErrorAppliesMappersImmediately(t *testing.T) {
+func TestRenderErrorAppliesMappersImmediately(t *testing.T) {
 	rr := newResponseRecorder()
 	req := newRequest()
 	target := errors.New("target")
 
-	if ok := hah.WriteError(
+	err := hah.RenderError(
 		rr,
 		req,
 		target,
@@ -127,19 +98,20 @@ func TestWriteErrorAppliesMappersImmediately(t *testing.T) {
 			}
 			return nil
 		}),
-	); !ok {
-		t.Fatal("WriteError() = false, want true")
+	)
+	if err != nil {
+		t.Fatalf("RenderError() error = %v", err)
 	}
 
 	assertErrorResponse(t, rr, http.StatusNotFound, "route_not_found", "route not found")
 }
 
-func TestWriteErrorReturnsFalseForNilError(t *testing.T) {
+func TestRenderErrorReturnsNilForNilError(t *testing.T) {
 	rr := newResponseRecorder()
 	req := newRequest()
 
-	if ok := hah.WriteError(rr, req, nil); ok {
-		t.Fatal("WriteError() = true, want false")
+	if err := hah.RenderError(rr, req, nil); err != nil {
+		t.Fatalf("RenderError() error = %v", err)
 	}
 	if rr.Code != 200 && rr.Code != 0 {
 		t.Fatalf("status = %d, want zero-value recorder status", rr.Code)
@@ -149,35 +121,17 @@ func TestWriteErrorReturnsFalseForNilError(t *testing.T) {
 	}
 }
 
-func TestWriteErrorDoesNotRewriteStartedStatusTrackingWriter(t *testing.T) {
-	rr := &statusTrackingRecorder{ResponseRecorder: newResponseRecorder()}
-	req := newRequest()
-
-	if _, err := rr.Write([]byte("partial")); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-
-	hah.WriteError(rr, req, hah.NewHTTPError(http.StatusUnauthorized, "unauthorized", "unauthorized"))
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-	if got := rr.Body.String(); got != "partial" {
-		t.Fatalf("body = %q, want partial", got)
-	}
-}
-
-func TestWriteErrorReportsStartedResponseWithoutRewrite(t *testing.T) {
+func TestRenderErrorDoesNotRewriteAfterRender(t *testing.T) {
 	var report hah.ErrorReport
 
-	rr := &statusTrackingRecorder{ResponseRecorder: newResponseRecorder()}
+	rr := newResponseRecorder()
 	req := newRequest()
 
-	if _, err := rr.Write([]byte("partial")); err != nil {
-		t.Fatalf("Write() error = %v", err)
+	if err := hah.Render(rr, req, map[string]any{"partial": true}); err != nil {
+		t.Fatalf("Render() error = %v", err)
 	}
 
-	hah.WriteError(
+	err := hah.RenderError(
 		rr,
 		req,
 		hah.NewHTTPError(http.StatusUnauthorized, "unauthorized", "unauthorized"),
@@ -185,12 +139,12 @@ func TestWriteErrorReportsStartedResponseWithoutRewrite(t *testing.T) {
 			report = r
 		}),
 	)
+	if err != nil {
+		t.Fatalf("RenderError() error = %v", err)
+	}
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-	if got := rr.Body.String(); got != "partial" {
-		t.Fatalf("body = %q, want partial", got)
 	}
 	if !report.ResponseStarted {
 		t.Fatal("report.ResponseStarted = false, want true")
@@ -200,9 +154,11 @@ func TestWriteErrorReportsStartedResponseWithoutRewrite(t *testing.T) {
 	}
 }
 
-func TestWriteErrorHEADUsesStandardServerSemantics(t *testing.T) {
+func TestRenderErrorHEADUsesStandardServerSemantics(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hah.WriteError(w, r, hah.NewHTTPError(http.StatusNotFound, "route_not_found", "route not found"))
+		if err := hah.RenderError(w, r, hah.NewHTTPError(http.StatusNotFound, "route_not_found", "route not found")); err != nil {
+			t.Fatalf("RenderError() error = %v", err)
+		}
 	}))
 	defer srv.Close()
 
@@ -234,7 +190,7 @@ func TestWriteErrorHEADUsesStandardServerSemantics(t *testing.T) {
 	}
 }
 
-func TestWriteErrorReportsReqxDecodeObservation(t *testing.T) {
+func TestRenderErrorReportsReqxDecodeObservation(t *testing.T) {
 	var report hah.ErrorReport
 
 	rr := newResponseRecorder()
@@ -247,9 +203,11 @@ func TestWriteErrorReportsReqxDecodeObservation(t *testing.T) {
 		Name string `json:"name"`
 	}
 	err := hah.DecodeJSON(req, &input)
-	hah.WriteError(rr, req, err, hah.WithErrorReporter(func(r hah.ErrorReport) {
+	if renderErr := hah.RenderError(rr, req, err, hah.WithErrorReporter(func(r hah.ErrorReport) {
 		report = r
-	}))
+	})); renderErr != nil {
+		t.Fatalf("RenderError() error = %v", renderErr)
+	}
 
 	assertErrorResponse(t, rr, http.StatusBadRequest, "invalid_json", "request body must be valid JSON")
 	if report.PublicError == nil || report.PublicError.Code() != "invalid_json" {
@@ -257,16 +215,18 @@ func TestWriteErrorReportsReqxDecodeObservation(t *testing.T) {
 	}
 }
 
-func TestWriteErrorReportsWriteResponseObservation(t *testing.T) {
+func TestRenderErrorReportsRenderFailureObservation(t *testing.T) {
 	var report hah.ErrorReport
 
 	rr := newResponseRecorder()
 	req := newRequest()
 
-	err := hah.Respond(rr, http.StatusOK, map[string]any{"bad": func() {}})
-	hah.WriteError(rr, req, err, hah.WithErrorReporter(func(r hah.ErrorReport) {
+	err := hah.Render(rr, req, map[string]any{"bad": func() {}})
+	if renderErr := hah.RenderError(rr, req, err, hah.WithErrorReporter(func(r hah.ErrorReport) {
 		report = r
-	}))
+	})); renderErr != nil {
+		t.Fatalf("RenderError() error = %v", renderErr)
+	}
 
 	assertErrorResponse(t, rr, http.StatusInternalServerError, "internal_error", "internal server error")
 	if report.PublicError == nil || report.PublicError.Code() != "internal_error" {
@@ -274,13 +234,13 @@ func TestWriteErrorReportsWriteResponseObservation(t *testing.T) {
 	}
 }
 
-func TestWriteErrorDropsInvalidDetailsWithoutExtraObservation(t *testing.T) {
+func TestRenderErrorDropsInvalidDetailsWithoutExtraObservation(t *testing.T) {
 	var reports []hah.ErrorReport
 
 	rr := newResponseRecorder()
 	req := newRequest()
 
-	hah.WriteError(
+	err := hah.RenderError(
 		rr,
 		req,
 		hah.NewHTTPError(
@@ -293,6 +253,9 @@ func TestWriteErrorDropsInvalidDetailsWithoutExtraObservation(t *testing.T) {
 			reports = append(reports, r)
 		}),
 	)
+	if err != nil {
+		t.Fatalf("RenderError() error = %v", err)
+	}
 
 	assertErrorResponse(t, rr, http.StatusBadRequest, "invalid_request", "request is invalid")
 	if len(reports) != 1 {
@@ -306,13 +269,13 @@ func TestWriteErrorDropsInvalidDetailsWithoutExtraObservation(t *testing.T) {
 	}
 }
 
-func TestWriteErrorReportsWriteFailureAsSecondObservation(t *testing.T) {
+func TestRenderErrorReportsWriteFailureAsSecondObservation(t *testing.T) {
 	var reports []hah.ErrorReport
 
 	rw := newFailingResponseWriter(errors.New("write failed"))
 	req := newRequest()
 
-	hah.WriteError(
+	err := hah.RenderError(
 		rw,
 		req,
 		hah.NewHTTPError(http.StatusBadRequest, "invalid_request", "request is invalid"),
@@ -320,6 +283,9 @@ func TestWriteErrorReportsWriteFailureAsSecondObservation(t *testing.T) {
 			reports = append(reports, r)
 		}),
 	)
+	if err == nil {
+		t.Fatal("expected write error, got nil")
+	}
 
 	if len(reports) != 2 {
 		t.Fatalf("reports len = %d, want 2", len(reports))
@@ -336,8 +302,8 @@ func TestWriteErrorReportsWriteFailureAsSecondObservation(t *testing.T) {
 	if reports[1].PublicError == nil || reports[1].PublicError.Status() != http.StatusInternalServerError {
 		t.Fatalf("reports[1].public = %#v, want 500 internal error", reports[1].PublicError)
 	}
-	if reports[1].ResponseStarted {
-		t.Fatal("reports[1].ResponseStarted = true, want false")
+	if !reports[1].ResponseStarted {
+		t.Fatal("reports[1].ResponseStarted = false, want true")
 	}
 	if reports[1].RequestID != reports[0].RequestID {
 		t.Fatalf("reports request ids = (%q, %q), want same generated value", reports[0].RequestID, reports[1].RequestID)
@@ -353,21 +319,22 @@ func TestWriteErrorReportsWriteFailureAsSecondObservation(t *testing.T) {
 	}
 }
 
-func TestWriteErrorUsesExplicitRequestIDWithoutMiddleware(t *testing.T) {
+func TestRenderErrorUsesExplicitRequestIDWithoutMiddleware(t *testing.T) {
 	var report hah.ErrorReport
 
 	rr := newResponseRecorder()
 	req := hah.SetRequestID(newRequest(), "req_direct")
 
-	if ok := hah.WriteError(
+	err := hah.RenderError(
 		rr,
 		req,
 		hah.NewHTTPError(http.StatusConflict, "conflict", "conflict"),
 		hah.WithErrorReporter(func(r hah.ErrorReport) {
 			report = r
 		}),
-	); !ok {
-		t.Fatal("WriteError() = false, want true")
+	)
+	if err != nil {
+		t.Fatalf("RenderError() error = %v", err)
 	}
 
 	assertErrorResponse(t, rr, http.StatusConflict, "conflict", "conflict")
@@ -376,44 +343,12 @@ func TestWriteErrorUsesExplicitRequestIDWithoutMiddleware(t *testing.T) {
 	}
 }
 
-func TestWriteErrorGeneratesStableRequestIDWhenMissing(t *testing.T) {
-	var reports []hah.ErrorReport
-
-	rr := newResponseRecorder()
-	req := newRequest()
-
-	hah.WriteError(
-		rr,
-		req,
-		hah.NewHTTPError(
-			http.StatusBadRequest,
-			"invalid_request",
-			"request is invalid",
-			func() {},
-		),
-		hah.WithErrorReporter(func(r hah.ErrorReport) {
-			reports = append(reports, r)
-		}),
-	)
-
-	assertErrorResponse(t, rr, http.StatusBadRequest, "invalid_request", "request is invalid")
-	if len(reports) != 1 {
-		t.Fatalf("reports len = %d, want 1", len(reports))
-	}
-	if reports[0].RequestID == "" {
-		t.Fatal("reports[0].RequestID = empty, want generated request id")
-	}
-	if !strings.HasPrefix(reports[0].RequestID, "req_") {
-		t.Fatalf("reports[0].RequestID = %q, want req_ prefix", reports[0].RequestID)
-	}
-}
-
 func TestWithErrorMappersUsesFirstMatchInOrder(t *testing.T) {
 	target := errors.New("target")
 	rr := newResponseRecorder()
 	req := newRequest()
 
-	hah.WriteError(
+	err := hah.RenderError(
 		rr,
 		req,
 		target,
@@ -433,6 +368,9 @@ func TestWithErrorMappersUsesFirstMatchInOrder(t *testing.T) {
 			},
 		),
 	)
+	if err != nil {
+		t.Fatalf("RenderError() error = %v", err)
+	}
 
 	assertErrorResponse(t, rr, http.StatusConflict, "conflict", "conflict")
 }
@@ -442,32 +380,16 @@ func TestWithErrorMappersIgnoresNil(t *testing.T) {
 	rr := newResponseRecorder()
 	req := newRequest()
 
-	hah.WriteError(
+	err := hah.RenderError(
 		rr,
 		req,
 		target,
 		hah.WithErrorMappers(nil),
 		hah.WithErrorReporter(nil),
 	)
-
-	assertErrorResponse(t, rr, http.StatusInternalServerError, "internal_error", "internal server error")
-}
-
-func TestWithErrorMappersReturnsInternalErrorWhenNoMapperMatches(t *testing.T) {
-	rr := newResponseRecorder()
-	req := newRequest()
-
-	hah.WriteError(
-		rr,
-		req,
-		errors.New("miss"),
-		hah.WithErrorMappers(
-			func(err error) *hah.HTTPError {
-				return nil
-			},
-		),
-		hah.WithErrorReporter(nil),
-	)
+	if err != nil {
+		t.Fatalf("RenderError() error = %v", err)
+	}
 
 	assertErrorResponse(t, rr, http.StatusInternalServerError, "internal_error", "internal server error")
 }

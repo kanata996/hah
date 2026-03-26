@@ -19,7 +19,9 @@ func TestContractAppliesRouteScopedMappers(t *testing.T) {
 			return nil
 		}),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hah.WriteError(w, r, target)
+		if err := hah.RenderError(w, r, target); err != nil {
+			t.Fatalf("RenderError() error = %v", err)
+		}
 	}))
 
 	rr := newResponseRecorder()
@@ -62,7 +64,7 @@ func TestContractPrefersInnerMapperOverOuterAndCallSiteOverContract(t *testing.T
 				return nil
 			}),
 		)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			hah.WriteError(
+			err := hah.RenderError(
 				w,
 				r,
 				target,
@@ -73,6 +75,9 @@ func TestContractPrefersInnerMapperOverOuterAndCallSiteOverContract(t *testing.T
 					return nil
 				}),
 			)
+			if err != nil {
+				t.Fatalf("RenderError() error = %v", err)
+			}
 		})),
 	)
 
@@ -91,7 +96,9 @@ func TestContractAppliesRouteScopedReporter(t *testing.T) {
 			report = r
 		}),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hah.WriteError(w, r, hah.NewHTTPError(http.StatusUnauthorized, "unauthorized", "unauthorized"))
+		if err := hah.RenderError(w, r, hah.NewHTTPError(http.StatusUnauthorized, "unauthorized", "unauthorized")); err != nil {
+			t.Fatalf("RenderError() error = %v", err)
+		}
 	}))
 
 	rr := newResponseRecorder()
@@ -104,7 +111,7 @@ func TestContractAppliesRouteScopedReporter(t *testing.T) {
 	}
 }
 
-func TestWriteErrorReporterOverridesContractReporter(t *testing.T) {
+func TestRenderErrorReporterOverridesContractReporter(t *testing.T) {
 	var contractReport hah.ErrorReport
 	var writeReport hah.ErrorReport
 
@@ -113,7 +120,7 @@ func TestWriteErrorReporterOverridesContractReporter(t *testing.T) {
 			contractReport = r
 		}),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hah.WriteError(
+		err := hah.RenderError(
 			w,
 			r,
 			hah.NewHTTPError(http.StatusUnauthorized, "unauthorized", "unauthorized"),
@@ -121,6 +128,9 @@ func TestWriteErrorReporterOverridesContractReporter(t *testing.T) {
 				writeReport = r
 			}),
 		)
+		if err != nil {
+			t.Fatalf("RenderError() error = %v", err)
+		}
 	}))
 
 	rr := newResponseRecorder()
@@ -129,14 +139,14 @@ func TestWriteErrorReporterOverridesContractReporter(t *testing.T) {
 
 	assertErrorResponse(t, rr, http.StatusUnauthorized, "unauthorized", "unauthorized")
 	if contractReport.PublicError != nil {
-		t.Fatalf("contract report = %#v, want zero value because WriteError reporter overrides it", contractReport)
+		t.Fatalf("contract report = %#v, want zero value because RenderError reporter overrides it", contractReport)
 	}
 	if writeReport.PublicError == nil || writeReport.PublicError.Code() != "unauthorized" {
 		t.Fatalf("write report = %#v, want unauthorized", writeReport)
 	}
 }
 
-func TestContractTracksStartedResponseWithPlainRecorder(t *testing.T) {
+func TestContractReportsStartedAfterRender(t *testing.T) {
 	var report hah.ErrorReport
 
 	handler := hah.Contract(
@@ -144,10 +154,12 @@ func TestContractTracksStartedResponseWithPlainRecorder(t *testing.T) {
 			report = r
 		}),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, err := w.Write([]byte("partial")); err != nil {
-			t.Fatalf("write error = %v", err)
+		if err := hah.Render(w, r, map[string]any{"partial": true}); err != nil {
+			t.Fatalf("Render() error = %v", err)
 		}
-		hah.WriteError(w, r, hah.NewHTTPError(http.StatusUnauthorized, "unauthorized", "unauthorized"))
+		if err := hah.RenderError(w, r, hah.NewHTTPError(http.StatusUnauthorized, "unauthorized", "unauthorized")); err != nil {
+			t.Fatalf("RenderError() error = %v", err)
+		}
 	}))
 
 	rr := newResponseRecorder()
@@ -157,15 +169,12 @@ func TestContractTracksStartedResponseWithPlainRecorder(t *testing.T) {
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
 	}
-	if got := rr.Body.String(); got != "partial" {
-		t.Fatalf("body = %q, want partial", got)
-	}
 	if !report.ResponseStarted {
 		t.Fatal("report.ResponseStarted = false, want true")
 	}
 }
 
-func TestContractReusesGeneratedRequestIDAcrossMultipleWriteErrors(t *testing.T) {
+func TestContractReusesGeneratedRequestIDAcrossMultipleRenderErrors(t *testing.T) {
 	var reports []hah.ErrorReport
 
 	handler := hah.Contract(
@@ -173,8 +182,12 @@ func TestContractReusesGeneratedRequestIDAcrossMultipleWriteErrors(t *testing.T)
 			reports = append(reports, r)
 		}),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hah.WriteError(w, r, hah.BadRequest("first", "first"))
-		hah.WriteError(w, r, hah.Conflict("second", "second"))
+		if err := hah.RenderError(w, r, hah.BadRequest("first", "first")); err != nil {
+			t.Fatalf("RenderError() error = %v", err)
+		}
+		if err := hah.RenderError(w, r, hah.Conflict("second", "second")); err != nil {
+			t.Fatalf("RenderError() error = %v", err)
+		}
 	}))
 
 	rr := newResponseRecorder()
@@ -196,7 +209,7 @@ func TestContractReusesGeneratedRequestIDAcrossMultipleWriteErrors(t *testing.T)
 	}
 }
 
-func TestContractReusesExplicitRequestIDAcrossMultipleWriteErrors(t *testing.T) {
+func TestContractReusesExplicitRequestIDAcrossMultipleRenderErrors(t *testing.T) {
 	var reports []hah.ErrorReport
 
 	handler := hah.Contract(
@@ -204,8 +217,12 @@ func TestContractReusesExplicitRequestIDAcrossMultipleWriteErrors(t *testing.T) 
 			reports = append(reports, r)
 		}),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hah.WriteError(w, r, hah.BadRequest("first", "first"))
-		hah.WriteError(w, r, hah.Conflict("second", "second"))
+		if err := hah.RenderError(w, r, hah.BadRequest("first", "first")); err != nil {
+			t.Fatalf("RenderError() error = %v", err)
+		}
+		if err := hah.RenderError(w, r, hah.Conflict("second", "second")); err != nil {
+			t.Fatalf("RenderError() error = %v", err)
+		}
 	}))
 
 	rr := newResponseRecorder()

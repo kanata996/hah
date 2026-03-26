@@ -41,26 +41,7 @@ func buildWriteErrorConfig(opts ...ErrorOption) writeErrorConfig {
 	return cfg
 }
 
-// WriteError immediately maps, reports, and writes err at the business
-// boundary. When the current request entered via Contract, route-scoped
-// configuration is applied before any call-site options.
-func WriteError(w http.ResponseWriter, r *http.Request, err error, opts ...ErrorOption) bool {
-	if err == nil {
-		return false
-	}
-
-	cfg := buildWriteErrorConfig(opts...)
-	if r != nil {
-		if state := contractStateFrom(r); state != nil {
-			cfg = mergeWriteErrorConfig(state.config.writeError, cfg)
-		}
-	}
-
-	handleErrorWithConfig(w, r, err, cfg)
-	return true
-}
-
-// WithErrorReporter overrides error reporting for errors written by hah.
+// WithErrorReporter overrides error reporting for errors rendered by hah.
 // Passing nil disables reporting for hah error handling.
 func WithErrorReporter(reporter ErrorReporter) ErrorOption {
 	return func(cfg *writeErrorConfig) {
@@ -69,7 +50,7 @@ func WithErrorReporter(reporter ErrorReporter) ErrorOption {
 	}
 }
 
-// WithErrorMappers appends mappers to a WriteError call or reusable
+// WithErrorMappers appends mappers to a RenderError call or reusable
 // ErrorOption fragment.
 func WithErrorMappers(mappers ...ErrorMapper) ErrorOption {
 	filtered := filterErrorMappers(mappers...)

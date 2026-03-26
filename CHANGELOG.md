@@ -13,6 +13,26 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+### Breaking
+
+- Calls using `WriteError(...)` must migrate to `RenderError(...)`.
+- Calls using `Respond(...)`, `RespondWithMeta(...)`, or `RespondEmpty(...)` must migrate to `Render(...)`, `RenderWithMeta(...)`, or `RenderEmpty(...)`.
+- Code that relied on `hah` wrapping `http.ResponseWriter` should migrate to explicit `hah` render helpers; the old transparent writer-tracking model has been removed.
+
+### Changed
+
+- Reworked the public response API to a render-first model built around `Contract(...)`, `Status(...)`, `Render(...)`, `RenderWithMeta(...)`, `RenderEmpty(...)`, and `RenderError(...)`.
+- Simplified the business-boundary runtime so `Contract(...)` now carries route-scoped mapper / reporter configuration and shared request state, without wrapping `http.ResponseWriter`.
+- Kept request-scoped error reporting and request-id reuse semantics while redefining `ResponseStarted` to mean "a hah-managed render path has already begun".
+- Updated examples, tests, and user-facing docs to use the new render-first flow instead of the previous `WriteError(...)` / `Respond*` model.
+- Narrowed the public response surface to the common JSON API path instead of exposing less-common streaming / upgrade render helpers up front.
+
+### Removed
+
+- Removed the old `WriteError(...)` error-writing API.
+- Removed the old `Respond(...)`, `RespondWithMeta(...)`, and `RespondEmpty(...)` success-writing APIs.
+- Removed `ResponseWriter` tracking, optional-interface passthrough wrappers, and the old `internal/resp` implementation path.
+
 ## [v0.1.0] - 2026-03-26
 
 ### Highlights

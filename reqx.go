@@ -13,7 +13,7 @@ import (
 // import surface, for example via hah.DecodeJSON/hah.DecodeQuery/hah.Validate.
 // reqx remains the implementation package for request decoding and validation,
 // while hah adapts reqx.Problem into boundary errors that can be written via
-// WriteError like any other public HTTP error.
+// RenderError like any other public HTTP error.
 
 // DecodeOption customizes JSON decoding behavior.
 type DecodeOption = reqx.DecodeOption
@@ -92,7 +92,7 @@ func InvalidRequest(violations ...Violation) error {
 
 // adaptReqxProblem keeps the root-package facade thin: reqx owns request
 // decoding/validation, while hah turns reqx.Problem into a boundary error that
-// flows through WriteError like any other public HTTP error.
+// flows through RenderError like any other public HTTP error.
 func adaptReqxProblem(err error) error {
 	if err == nil {
 		return nil

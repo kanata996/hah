@@ -18,7 +18,8 @@ func Example() {
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var query listUsersQuery
-		if hah.WriteError(w, r, hah.DecodeQuery(r, &query)) {
+		if err := hah.DecodeQuery(r, &query); err != nil {
+			_ = hah.RenderError(w, r, err)
 			return
 		}
 
@@ -27,9 +28,10 @@ func Example() {
 			role = "member"
 		}
 
-		if err := hah.RespondWithMeta(w, http.StatusOK, []map[string]any{
+		if err := hah.RenderWithMeta(w, r, []map[string]any{
 			{"id": "u_1", "role": role},
-		}, map[string]any{"count": 1}); hah.WriteError(w, r, err) {
+		}, map[string]any{"count": 1}); err != nil {
+			_ = hah.RenderError(w, r, err)
 			return
 		}
 	})
@@ -45,7 +47,7 @@ func Example() {
 	// {"data":[{"id":"u_1","role":"admin"}],"meta":{"count":1}}
 }
 
-func ExampleWriteError_withErrorMappers() {
+func ExampleRenderError_withErrorMappers() {
 	errUserNotFound := errors.New("user not found")
 	const codeUserNotFound = "user_not_found"
 	mapUserError := func(err error) *hah.HTTPError {
@@ -56,7 +58,7 @@ func ExampleWriteError_withErrorMappers() {
 	}
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hah.WriteError(w, r, errUserNotFound, hah.WithErrorMappers(mapUserError))
+		_ = hah.RenderError(w, r, errUserNotFound, hah.WithErrorMappers(mapUserError))
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/users/missing", nil)
@@ -81,7 +83,7 @@ func ExampleContract() {
 	}
 
 	handler := hah.Contract(hah.WithContractErrorMappers(mapUserError))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hah.WriteError(w, r, errUserNotFound)
+		_ = hah.RenderError(w, r, errUserNotFound)
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/users/missing", nil)
@@ -95,11 +97,11 @@ func ExampleContract() {
 	// {"error":{"code":"user_not_found","message":"user not found","details":[]}}
 }
 
-func ExampleWriteError() {
+func ExampleRenderError() {
 	req := httptest.NewRequest(http.MethodGet, "/reports/heavy", nil)
 	rr := httptest.NewRecorder()
 
-	hah.WriteError(rr, req, hah.TooManyRequests(
+	_ = hah.RenderError(rr, req, hah.TooManyRequests(
 		errcode.RateLimited,
 		"rate limit exceeded",
 	))

@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	"github.com/kanata996/hah/internal/reqid"
-	"github.com/kanata996/hah/internal/resp"
 )
 
 type contractState struct {
@@ -22,8 +21,8 @@ type contractConfig struct {
 type ContractOption func(*contractConfig)
 
 // Contract marks a chi/net/http subtree as entering the hah API contract
-// layer. It installs started-response tracking and provides route-scoped error
-// handling configuration for WriteError.
+// layer. It provides route-scoped error handling configuration and shared
+// request state for hah render helpers.
 func Contract(opts ...ContractOption) func(http.Handler) http.Handler {
 	cfg := buildContractConfig(opts...)
 
@@ -33,7 +32,7 @@ func Contract(opts ...ContractOption) func(http.Handler) http.Handler {
 		}
 
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(resp.NewTrackingResponseWriter(w), withContractConfig(r, cfg))
+			next.ServeHTTP(w, withContractConfig(r, cfg))
 		})
 	}
 }
@@ -48,9 +47,9 @@ func buildContractConfig(opts ...ContractOption) contractConfig {
 	return cfg
 }
 
-// WithContractErrorReporter overrides error reporting for WriteError calls made
-// inside the current Contract subtree. Passing nil disables hah reporting for
-// that subtree unless a WriteError call overrides it explicitly.
+// WithContractErrorReporter overrides error reporting for RenderError calls
+// made inside the current Contract subtree. Passing nil disables hah reporting
+// for that subtree unless a RenderError call overrides it explicitly.
 func WithContractErrorReporter(reporter ErrorReporter) ContractOption {
 	return func(cfg *contractConfig) {
 		cfg.writeError.reporter = reporter

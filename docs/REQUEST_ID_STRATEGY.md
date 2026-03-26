@@ -102,7 +102,7 @@ func SetRequestID(r *http.Request, id string) *http.Request
 
 1. 外层使用 `chi/middleware.RequestID`
 2. 在应用层通过一个 bridge middleware 调 `hah.SetRequestID(...)`
-3. 在业务 handler 边界显式调用 `hah.WriteError(...)`
+3. 在业务 handler 边界显式调用 `hah.RenderError(...)`
 
 示例：
 
@@ -160,7 +160,7 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 
 当前策略能保证：
 
-- `processing`、`write_response` 等错误日志都有 request id
+- `hah` 发出的错误观测日志都有 request id
 - 同一请求内多条 `ErrorReport` 可以稳定串起来
 - 即使调用方忘了设置 request id，`hah` 也不会在错误日志里留下空洞
 

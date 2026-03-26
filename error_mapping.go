@@ -21,7 +21,7 @@ func mapBoundaryError(err error, cfg writeErrorConfig) *HTTPError {
 	var problem *reqx.Problem
 	if errors.As(err, &problem) && problem != nil {
 		// Accept direct reqx usage as a first-class bridge: callers can bypass the
-		// hah facade and WriteError should still normalize reqx problems into the
+		// hah facade and RenderError should still normalize reqx problems into the
 		// public hah error contract.
 		return NewHTTPError(problem.Status(), problem.Code(), problem.Message(), problem.Details()...)
 	}
