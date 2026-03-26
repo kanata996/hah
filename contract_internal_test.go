@@ -10,16 +10,6 @@ import (
 	"github.com/kanata996/hah/internal/reqid"
 )
 
-func TestContractRejectsNilNextHandler(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Fatal("Contract()(nil) did not panic")
-		}
-	}()
-
-	_ = Contract()(nil)
-}
-
 func TestWithContractConfigStoresConfigAndSharedRequestState(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	cfg := contractConfig{

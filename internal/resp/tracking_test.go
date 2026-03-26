@@ -2,7 +2,6 @@ package resp_test
 
 import (
 	"bufio"
-	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -79,6 +78,10 @@ type selfUnwrapRecorder struct {
 	*httptest.ResponseRecorder
 }
 
+type plainResponseWriter struct {
+	header http.Header
+}
+
 func (w *unwrapRecorder) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
 }
@@ -86,6 +89,19 @@ func (w *unwrapRecorder) Unwrap() http.ResponseWriter {
 func (w *selfUnwrapRecorder) Unwrap() http.ResponseWriter {
 	return w
 }
+
+func (w *plainResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *plainResponseWriter) Write(p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (w *plainResponseWriter) WriteHeader(int) {}
 
 func (w *statusTrackingRecorder) WriteHeader(status int) {
 	if w.status == 0 {
@@ -236,14 +252,8 @@ func TestTrackingWriterFlushStartsResponse(t *testing.T) {
 func TestTrackingWriterHijackUnsupported(t *testing.T) {
 	tw := resp.NewTrackingResponseWriter(newResponseRecorder())
 
-	hijacker, ok := tw.(http.Hijacker)
-	if !ok {
-		t.Fatalf("tracking writer should implement http.Hijacker")
-	}
-
-	_, _, err := hijacker.Hijack()
-	if err == nil {
-		t.Fatalf("expected hijack error, got nil")
+	if _, ok := tw.(http.Hijacker); ok {
+		t.Fatalf("tracking writer should not implement http.Hijacker when the underlying writer does not")
 	}
 }
 
@@ -271,14 +281,8 @@ func TestTrackingWriterHijackUsesUnderlyingHijacker(t *testing.T) {
 func TestTrackingWriterPushUnsupported(t *testing.T) {
 	tw := resp.NewTrackingResponseWriter(newResponseRecorder())
 
-	pusher, ok := tw.(http.Pusher)
-	if !ok {
-		t.Fatalf("tracking writer should implement http.Pusher")
-	}
-
-	err := pusher.Push("/asset.js", nil)
-	if !errors.Is(err, http.ErrNotSupported) {
-		t.Fatalf("Push() error = %v, want %v", err, http.ErrNotSupported)
+	if _, ok := tw.(http.Pusher); ok {
+		t.Fatalf("tracking writer should not implement http.Pusher when the underlying writer does not")
 	}
 }
 
@@ -313,6 +317,20 @@ func TestTrackingWriterUnwrapAllowsResponseControllerPassthrough(t *testing.T) {
 	}
 	if !rr.writeDeadline.Equal(deadline) {
 		t.Fatalf("write deadline = %v, want %v", rr.writeDeadline, deadline)
+	}
+}
+
+func TestTrackingWriterDoesNotAdvertiseUnsupportedOptionalInterfaces(t *testing.T) {
+	tw := resp.NewTrackingResponseWriter(&plainResponseWriter{})
+
+	if _, ok := tw.(http.Flusher); ok {
+		t.Fatalf("tracking writer should not implement http.Flusher when the underlying writer does not")
+	}
+	if _, ok := tw.(http.Hijacker); ok {
+		t.Fatalf("tracking writer should not implement http.Hijacker when the underlying writer does not")
+	}
+	if _, ok := tw.(http.Pusher); ok {
+		t.Fatalf("tracking writer should not implement http.Pusher when the underlying writer does not")
 	}
 }
 

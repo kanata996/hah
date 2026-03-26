@@ -29,6 +29,20 @@ func TestContractAppliesRouteScopedMappers(t *testing.T) {
 	assertErrorResponse(t, rr, http.StatusNotFound, "user_not_found", "user not found")
 }
 
+func TestContractPanicsOnNilNext(t *testing.T) {
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("Contract(...)(nil) did not panic")
+		}
+		if got := recovered.(string); got != "hah: Contract requires a non-nil next handler" {
+			t.Fatalf("panic = %q, want %q", got, "hah: Contract requires a non-nil next handler")
+		}
+	}()
+
+	hah.Contract()(nil)
+}
+
 func TestContractPrefersInnerMapperOverOuterAndCallSiteOverContract(t *testing.T) {
 	target := errors.New("target")
 
