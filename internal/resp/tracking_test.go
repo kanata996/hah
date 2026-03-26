@@ -1,4 +1,4 @@
-package core_test
+package resp_test
 
 import (
 	"bufio"
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kanata996/hah/internal/core"
+	"github.com/kanata996/hah/internal/resp"
 )
 
 func newResponseRecorder() *httptest.ResponseRecorder {
@@ -106,15 +106,15 @@ func (w *statusOnlyRecorder) Status() int {
 
 func TestTrackingWriterWriteHeaderMarksResponseStarted(t *testing.T) {
 	rr := newResponseRecorder()
-	tw := core.NewTrackingResponseWriter(rr)
+	tw := resp.NewTrackingResponseWriter(rr)
 
-	if core.ResponseStarted(tw) {
+	if resp.ResponseStarted(tw) {
 		t.Fatalf("response should not be started yet")
 	}
 
 	tw.WriteHeader(http.StatusAccepted)
 
-	if !core.ResponseStarted(tw) {
+	if !resp.ResponseStarted(tw) {
 		t.Fatalf("response should be started after WriteHeader")
 	}
 	if rr.Code != http.StatusAccepted {
@@ -124,7 +124,7 @@ func TestTrackingWriterWriteHeaderMarksResponseStarted(t *testing.T) {
 
 func TestTrackingWriterWriteHeaderIgnoresSecondCall(t *testing.T) {
 	rr := newResponseRecorder()
-	tw := core.NewTrackingResponseWriter(rr)
+	tw := resp.NewTrackingResponseWriter(rr)
 
 	tw.WriteHeader(http.StatusAccepted)
 	tw.WriteHeader(http.StatusConflict)
@@ -136,13 +136,13 @@ func TestTrackingWriterWriteHeaderIgnoresSecondCall(t *testing.T) {
 
 func TestTrackingWriterWriteStartsResponse(t *testing.T) {
 	rr := newResponseRecorder()
-	tw := core.NewTrackingResponseWriter(rr)
+	tw := resp.NewTrackingResponseWriter(rr)
 
 	if _, err := tw.Write([]byte("partial")); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 
-	if !core.ResponseStarted(tw) {
+	if !resp.ResponseStarted(tw) {
 		t.Fatalf("response should be started after Write")
 	}
 	if rr.Code != http.StatusOK {
@@ -155,7 +155,7 @@ func TestTrackingWriterWriteStartsResponse(t *testing.T) {
 
 func TestTrackingWriterReadFromStartsResponse(t *testing.T) {
 	rr := newResponseRecorder()
-	tw := core.NewTrackingResponseWriter(rr)
+	tw := resp.NewTrackingResponseWriter(rr)
 
 	readerFrom, ok := tw.(io.ReaderFrom)
 	if !ok {
@@ -170,7 +170,7 @@ func TestTrackingWriterReadFromStartsResponse(t *testing.T) {
 	if n != int64(len("stream")) {
 		t.Fatalf("copied bytes = %d, want %d", n, len("stream"))
 	}
-	if !core.ResponseStarted(tw) {
+	if !resp.ResponseStarted(tw) {
 		t.Fatalf("response should be started after ReadFrom")
 	}
 	if rr.Code != http.StatusOK {
@@ -183,7 +183,7 @@ func TestTrackingWriterReadFromStartsResponse(t *testing.T) {
 
 func TestTrackingWriterReadFromUsesUnderlyingReaderFrom(t *testing.T) {
 	rr := &readerFromRecorder{ResponseRecorder: newResponseRecorder()}
-	tw := core.NewTrackingResponseWriter(rr)
+	tw := resp.NewTrackingResponseWriter(rr)
 
 	readerFrom, ok := tw.(io.ReaderFrom)
 	if !ok {
@@ -205,7 +205,7 @@ func TestTrackingWriterReadFromUsesUnderlyingReaderFrom(t *testing.T) {
 
 func TestTrackingWriterFlushStartsResponse(t *testing.T) {
 	rr := newResponseRecorder()
-	tw := core.NewTrackingResponseWriter(rr)
+	tw := resp.NewTrackingResponseWriter(rr)
 
 	flusher, ok := tw.(http.Flusher)
 	if !ok {
@@ -214,7 +214,7 @@ func TestTrackingWriterFlushStartsResponse(t *testing.T) {
 
 	flusher.Flush()
 
-	if !core.ResponseStarted(tw) {
+	if !resp.ResponseStarted(tw) {
 		t.Fatalf("response should be started after Flush")
 	}
 	if rr.Code != http.StatusOK {
@@ -223,7 +223,7 @@ func TestTrackingWriterFlushStartsResponse(t *testing.T) {
 }
 
 func TestTrackingWriterHijackUnsupported(t *testing.T) {
-	tw := core.NewTrackingResponseWriter(newResponseRecorder())
+	tw := resp.NewTrackingResponseWriter(newResponseRecorder())
 
 	hijacker, ok := tw.(http.Hijacker)
 	if !ok {
@@ -238,7 +238,7 @@ func TestTrackingWriterHijackUnsupported(t *testing.T) {
 
 func TestTrackingWriterHijackUsesUnderlyingHijacker(t *testing.T) {
 	rr := &hijackableRecorder{ResponseRecorder: newResponseRecorder()}
-	tw := core.NewTrackingResponseWriter(rr)
+	tw := resp.NewTrackingResponseWriter(rr)
 
 	hijacker, ok := tw.(http.Hijacker)
 	if !ok {
@@ -252,13 +252,13 @@ func TestTrackingWriterHijackUsesUnderlyingHijacker(t *testing.T) {
 	if rr.hijackCalls != 1 {
 		t.Fatalf("underlying Hijack calls = %d, want 1", rr.hijackCalls)
 	}
-	if !core.ResponseStarted(tw) {
+	if !resp.ResponseStarted(tw) {
 		t.Fatalf("response should be considered started after Hijack")
 	}
 }
 
 func TestTrackingWriterPushUnsupported(t *testing.T) {
-	tw := core.NewTrackingResponseWriter(newResponseRecorder())
+	tw := resp.NewTrackingResponseWriter(newResponseRecorder())
 
 	pusher, ok := tw.(http.Pusher)
 	if !ok {
@@ -273,7 +273,7 @@ func TestTrackingWriterPushUnsupported(t *testing.T) {
 
 func TestTrackingWriterPushUsesUnderlyingPusher(t *testing.T) {
 	rr := &pushableRecorder{ResponseRecorder: newResponseRecorder()}
-	tw := core.NewTrackingResponseWriter(rr)
+	tw := resp.NewTrackingResponseWriter(rr)
 
 	pusher, ok := tw.(http.Pusher)
 	if !ok {
@@ -295,7 +295,7 @@ func TestTrackingWriterPushUsesUnderlyingPusher(t *testing.T) {
 func TestResponseStartedUsesStatusReportingWriter(t *testing.T) {
 	rr := &statusTrackingRecorder{ResponseRecorder: newResponseRecorder()}
 
-	if core.ResponseStarted(rr) {
+	if resp.ResponseStarted(rr) {
 		t.Fatalf("response should not be started yet")
 	}
 
@@ -303,7 +303,7 @@ func TestResponseStartedUsesStatusReportingWriter(t *testing.T) {
 		t.Fatalf("Write() error = %v", err)
 	}
 
-	if !core.ResponseStarted(rr) {
+	if !resp.ResponseStarted(rr) {
 		t.Fatalf("response should be considered started")
 	}
 }
@@ -314,31 +314,31 @@ func TestResponseStartedUsesStatusOnlyWriter(t *testing.T) {
 		status:           http.StatusAccepted,
 	}
 
-	if !core.ResponseStarted(rr) {
+	if !resp.ResponseStarted(rr) {
 		t.Fatalf("response should be considered started from status alone")
 	}
 }
 
 func TestResponseStartedFollowsUnwrapChain(t *testing.T) {
-	inner := core.NewTrackingResponseWriter(newResponseRecorder())
+	inner := resp.NewTrackingResponseWriter(newResponseRecorder())
 	if _, err := inner.Write([]byte("partial")); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 
 	outer := &unwrapRecorder{ResponseWriter: inner}
-	if !core.ResponseStarted(outer) {
+	if !resp.ResponseStarted(outer) {
 		t.Fatalf("response should be considered started through Unwrap")
 	}
 }
 
 func TestResponseStartedReturnsFalseForNilWriter(t *testing.T) {
-	if core.ResponseStarted(nil) {
+	if resp.ResponseStarted(nil) {
 		t.Fatalf("nil writer should not be considered started")
 	}
 }
 
 func TestResponseStartedReturnsFalseForPlainWriter(t *testing.T) {
-	if core.ResponseStarted(newResponseRecorder()) {
+	if resp.ResponseStarted(newResponseRecorder()) {
 		t.Fatalf("plain recorder should not be considered started")
 	}
 }
@@ -346,7 +346,7 @@ func TestResponseStartedReturnsFalseForPlainWriter(t *testing.T) {
 func TestResponseStartedStopsOnSelfReferentialUnwrap(t *testing.T) {
 	rr := &selfUnwrapRecorder{ResponseRecorder: newResponseRecorder()}
 
-	if core.ResponseStarted(rr) {
+	if resp.ResponseStarted(rr) {
 		t.Fatalf("self-unwrapping writer should not be considered started")
 	}
 }

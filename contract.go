@@ -3,13 +3,16 @@ package hah
 import (
 	"context"
 	"net/http"
+	"sync"
 
-	"github.com/kanata996/hah/internal/core"
 	"github.com/kanata996/hah/internal/reqid"
+	"github.com/kanata996/hah/internal/resp"
 )
 
 type contractState struct {
-	config contractConfig
+	config    contractConfig
+	mu        sync.Mutex
+	requestID *reqid.State
 }
 
 type contractStateKey struct{}
@@ -33,7 +36,7 @@ func Contract(opts ...ContractOption) func(http.Handler) http.Handler {
 				return
 			}
 
-			next.ServeHTTP(core.NewTrackingResponseWriter(w), withContractConfig(r, cfg))
+			next.ServeHTTP(resp.NewTrackingResponseWriter(w), withContractConfig(r, cfg))
 		})
 	}
 }
@@ -73,16 +76,18 @@ func withContractConfig(r *http.Request, cfg contractConfig) *http.Request {
 		return nil
 	}
 
-	r = reqid.EnsureState(r)
-
+	requestID := reqid.StateFrom(r)
 	if state := contractStateFrom(r); state != nil {
 		cfg = mergeContractConfig(state.config, cfg)
+		if requestID == nil {
+			requestID = state.storedRequestID()
+		}
 	}
 
 	return r.WithContext(context.WithValue(
 		r.Context(),
 		contractStateKey{},
-		&contractState{config: cfg},
+		&contractState{config: cfg, requestID: requestID},
 	))
 }
 
@@ -93,6 +98,35 @@ func contractStateFrom(r *http.Request) *contractState {
 
 	state, _ := r.Context().Value(contractStateKey{}).(*contractState)
 	return state
+}
+
+func (s *contractState) storedRequestID() *reqid.State {
+	if s == nil {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.requestID
+}
+
+func (s *contractState) ensureRequestID(r *http.Request) *reqid.State {
+	if s == nil {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.requestID == nil {
+		if current := reqid.StateFrom(r); current != nil {
+			s.requestID = current
+		} else {
+			s.requestID = reqid.NewState()
+		}
+	}
+
+	return s.requestID
 }
 
 func mergeContractConfig(base, override contractConfig) contractConfig {

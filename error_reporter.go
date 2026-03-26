@@ -8,8 +8,7 @@ import (
 	"os"
 	"runtime/debug"
 
-	"github.com/kanata996/hah/internal/core"
-	"github.com/kanata996/hah/internal/errx"
+	"github.com/kanata996/hah/internal/resp"
 )
 
 var errorLogger = log.New(os.Stderr, "", log.LstdFlags)
@@ -26,7 +25,7 @@ const (
 
 type defaultReportDecision struct {
 	kind     defaultReportKind
-	degraded *core.ErrorWriteDegraded
+	degraded *resp.ErrorWriteDegraded
 }
 
 type defaultReportContext struct {
@@ -62,13 +61,11 @@ func classifyDefaultReport(report ErrorReport) defaultReportDecision {
 		return defaultReportDecision{kind: defaultReportKindSkip}
 	}
 
-	if report.Stage == errx.StageWriteResponse.String() {
-		var degraded *core.ErrorWriteDegraded
-		if errors.As(report.Error, &degraded) {
-			return defaultReportDecision{
-				kind:     defaultReportKindDegradation,
-				degraded: degraded,
-			}
+	var degraded *resp.ErrorWriteDegraded
+	if errors.As(report.Error, &degraded) {
+		return defaultReportDecision{
+			kind:     defaultReportKindDegradation,
+			degraded: degraded,
 		}
 	}
 
@@ -97,17 +94,16 @@ func newDefaultReportContext(report ErrorReport) defaultReportContext {
 	}
 }
 
-func formatWriteResponseDegradationLog(ctx defaultReportContext, degraded *core.ErrorWriteDegraded) string {
+func formatWriteResponseDegradationLog(ctx defaultReportContext, degraded *resp.ErrorWriteDegraded) string {
 	preserved := degraded != nil && degraded.PreservedPublicResponse
 
 	return fmt.Sprintf(
-		"hah: error response degraded: err=%v err_type=%T preserved=%t status=%d code=%s stage=%s method=%s target=%s remote=%s request_id=%s started=%t",
+		"hah: error response degraded: err=%v err_type=%T preserved=%t status=%d code=%s method=%s target=%s remote=%s request_id=%s started=%t",
 		ctx.report.Error,
 		ctx.report.Error,
 		preserved,
 		ctx.report.PublicError.Status(),
 		ctx.report.PublicError.Code(),
-		ctx.report.Stage,
 		ctx.method,
 		ctx.target,
 		ctx.remoteAddr,
@@ -118,12 +114,11 @@ func formatWriteResponseDegradationLog(ctx defaultReportContext, degraded *core.
 
 func formatInternalErrorLog(ctx defaultReportContext) string {
 	return fmt.Sprintf(
-		"hah: internal error handled: err=%v err_type=%T status=%d code=%s stage=%s method=%s target=%s remote=%s request_id=%s started=%t",
+		"hah: internal error handled: err=%v err_type=%T status=%d code=%s method=%s target=%s remote=%s request_id=%s started=%t",
 		ctx.report.Error,
 		ctx.report.Error,
 		ctx.report.PublicError.Status(),
 		ctx.report.PublicError.Code(),
-		ctx.report.Stage,
 		ctx.method,
 		ctx.target,
 		ctx.remoteAddr,
@@ -134,21 +129,19 @@ func formatInternalErrorLog(ctx defaultReportContext) string {
 
 func formatInternalErrorStackLog(ctx defaultReportContext, stack []byte) string {
 	return fmt.Sprintf(
-		"hah: internal error stack: request_id=%s stage=%s\n%s",
+		"hah: internal error stack: request_id=%s\n%s",
 		ctx.report.RequestID,
-		ctx.report.Stage,
 		stack,
 	)
 }
 
 func formatSecurityEventLog(ctx defaultReportContext) string {
 	return fmt.Sprintf(
-		"hah: security event handled: err=%v err_type=%T status=%d code=%s stage=%s method=%s target=%s remote=%s request_id=%s started=%t",
+		"hah: security event handled: err=%v err_type=%T status=%d code=%s method=%s target=%s remote=%s request_id=%s started=%t",
 		ctx.report.Error,
 		ctx.report.Error,
 		ctx.report.PublicError.Status(),
 		ctx.report.PublicError.Code(),
-		ctx.report.Stage,
 		ctx.method,
 		ctx.target,
 		ctx.remoteAddr,

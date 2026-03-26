@@ -8,8 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kanata996/hah/internal/core"
-	"github.com/kanata996/hah/internal/errx"
+	"github.com/kanata996/hah/internal/resp"
 )
 
 func TestDefaultErrorReporterSkipsNilAndNonInternalReports(t *testing.T) {
@@ -47,7 +46,6 @@ func TestDefaultErrorReporterLogsInternalErrorContext(t *testing.T) {
 		Request:         req,
 		Error:           errors.New("db down"),
 		PublicError:     NewHTTPError(http.StatusInternalServerError, "internal_error", "internal server error"),
-		Stage:           errx.StageProcessing.String(),
 		RequestID:       "req_ctx",
 		ResponseStarted: true,
 	})
@@ -59,9 +57,6 @@ func TestDefaultErrorReporterLogsInternalErrorContext(t *testing.T) {
 	if !strings.Contains(output, "err_type=*errors.errorString") {
 		t.Fatalf("logs = %q, want error type", output)
 	}
-	if !strings.Contains(output, "stage=processing") {
-		t.Fatalf("logs = %q, want internal observation fields", output)
-	}
 	if !strings.Contains(output, "method=POST") {
 		t.Fatalf("logs = %q, want method", output)
 	}
@@ -71,7 +66,7 @@ func TestDefaultErrorReporterLogsInternalErrorContext(t *testing.T) {
 	if !strings.Contains(output, "remote=127.0.0.1:8080") {
 		t.Fatalf("logs = %q, want remote addr", output)
 	}
-	if !strings.Contains(output, "internal error stack: request_id=req_ctx stage=processing") {
+	if !strings.Contains(output, "internal error stack: request_id=req_ctx") {
 		t.Fatalf("logs = %q, want internal stack header", output)
 	}
 	if !strings.Contains(output, "stack line 1") {
@@ -92,7 +87,6 @@ func TestDefaultErrorReporterLogsSecurityEvent(t *testing.T) {
 		Request:         req,
 		Error:           errors.New("missing role"),
 		PublicError:     NewHTTPError(http.StatusForbidden, "forbidden", "forbidden"),
-		Stage:           errx.StageProcessing.String(),
 		RequestID:       "req_sec",
 		ResponseStarted: false,
 	})
@@ -126,9 +120,8 @@ func TestDefaultErrorReporterLogsWriteResponseDegradation(t *testing.T) {
 
 	defaultErrorReporter(ErrorReport{
 		Request:         req,
-		Error:           &core.ErrorWriteDegraded{Cause: errors.New("json: unsupported type: func()"), PreservedPublicResponse: true},
+		Error:           &resp.ErrorWriteDegraded{Cause: errors.New("json: unsupported type: func()"), PreservedPublicResponse: true},
 		PublicError:     NewHTTPError(http.StatusBadRequest, "invalid_request", "request is invalid"),
-		Stage:           errx.StageWriteResponse.String(),
 		RequestID:       "req_write",
 		ResponseStarted: true,
 	})
@@ -139,9 +132,6 @@ func TestDefaultErrorReporterLogsWriteResponseDegradation(t *testing.T) {
 	}
 	if !strings.Contains(output, "preserved=true") {
 		t.Fatalf("logs = %q, want preserved=true", output)
-	}
-	if !strings.Contains(output, "stage=write_response") {
-		t.Fatalf("logs = %q, want write_response stage", output)
 	}
 	if !strings.Contains(output, "code=invalid_request") {
 		t.Fatalf("logs = %q, want invalid_request code", output)
@@ -164,9 +154,8 @@ func TestClassifyDefaultReport(t *testing.T) {
 		{
 			name: "classify write degradation first",
 			report: ErrorReport{
-				Error:       &core.ErrorWriteDegraded{Cause: errors.New("json: unsupported type: func()"), PreservedPublicResponse: true},
+				Error:       &resp.ErrorWriteDegraded{Cause: errors.New("json: unsupported type: func()"), PreservedPublicResponse: true},
 				PublicError: NewHTTPError(http.StatusBadRequest, "invalid_request", "request is invalid"),
-				Stage:       errx.StageWriteResponse.String(),
 			},
 			wantKind:     defaultReportKindDegradation,
 			wantDegraded: true,
@@ -176,7 +165,6 @@ func TestClassifyDefaultReport(t *testing.T) {
 			report: ErrorReport{
 				Error:       errors.New("missing role"),
 				PublicError: NewHTTPError(http.StatusForbidden, "forbidden", "forbidden"),
-				Stage:       errx.StageProcessing.String(),
 			},
 			wantKind:     defaultReportKindSecurity,
 			wantDegraded: false,
@@ -186,7 +174,6 @@ func TestClassifyDefaultReport(t *testing.T) {
 			report: ErrorReport{
 				Error:       errors.New("bad request"),
 				PublicError: NewHTTPError(http.StatusBadRequest, "invalid_request", "invalid request"),
-				Stage:       errx.StageProcessing.String(),
 			},
 			wantKind:     defaultReportKindSkip,
 			wantDegraded: false,
@@ -196,7 +183,6 @@ func TestClassifyDefaultReport(t *testing.T) {
 			report: ErrorReport{
 				Error:       errors.New("db down"),
 				PublicError: NewHTTPError(http.StatusInternalServerError, "internal_error", "internal server error"),
-				Stage:       errx.StageProcessing.String(),
 			},
 			wantKind:     defaultReportKindInternal,
 			wantDegraded: false,
@@ -227,7 +213,6 @@ func TestFormatInternalErrorLogIncludesDerivedRequestContext(t *testing.T) {
 		Request:         req,
 		Error:           errors.New("db down"),
 		PublicError:     NewHTTPError(http.StatusInternalServerError, "internal_error", "internal server error"),
-		Stage:           errx.StageProcessing.String(),
 		RequestID:       "req_ctx",
 		ResponseStarted: true,
 	})

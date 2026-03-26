@@ -1,4 +1,4 @@
-package core
+package resp
 
 import (
 	"encoding/json"
@@ -229,13 +229,13 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 	t.Run("without details", func(t *testing.T) {
 		rr := newResponseRecorder()
 
-		err := WriteError(rr, ErrorPayload{
+		err := WriteErrorPayload(rr, ErrorPayload{
 			Status:  http.StatusConflict,
 			Code:    "conflict",
 			Message: "conflict",
 		})
 		if err != nil {
-			t.Fatalf("WriteError() error = %v", err)
+			t.Fatalf("WriteErrorPayload() error = %v", err)
 		}
 
 		assertErrorResponse(t, rr, http.StatusConflict, "conflict", "conflict")
@@ -244,14 +244,14 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 	t.Run("with details", func(t *testing.T) {
 		rr := newResponseRecorder()
 
-		err := WriteError(rr, ErrorPayload{
+		err := WriteErrorPayload(rr, ErrorPayload{
 			Status:  http.StatusUnprocessableEntity,
 			Code:    "invalid",
 			Message: "invalid",
 			Details: []any{map[string]any{"field": "email"}},
 		})
 		if err != nil {
-			t.Fatalf("WriteError() error = %v", err)
+			t.Fatalf("WriteErrorPayload() error = %v", err)
 		}
 
 		payload := decodePayload(t, rr)
@@ -275,7 +275,7 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 func TestWriteErrorFallsBackWhenPayloadCannotBeMarshaled(t *testing.T) {
 	rr := newResponseRecorder()
 
-	err := WriteError(rr, ErrorPayload{
+	err := WriteErrorPayload(rr, ErrorPayload{
 		Status:  http.StatusBadRequest,
 		Code:    "bad_request",
 		Message: "bad request",
@@ -286,7 +286,7 @@ func TestWriteErrorFallsBackWhenPayloadCannotBeMarshaled(t *testing.T) {
 	}
 	var degraded *ErrorWriteDegraded
 	if !errors.As(err, &degraded) || degraded == nil {
-		t.Fatalf("WriteError() error = %T, want *ErrorWriteDegraded", err)
+		t.Fatalf("WriteErrorPayload() error = %T, want *ErrorWriteDegraded", err)
 	}
 	if !degraded.PreservedPublicResponse {
 		t.Fatal("degraded.PreservedPublicResponse = false, want true")
@@ -330,7 +330,7 @@ func TestErrorWriteDegradedMethods(t *testing.T) {
 func TestWriteErrorReturnsWhenFallbackWriteFails(t *testing.T) {
 	rw := newFailingResponseWriter(errors.New("write failed"))
 
-	err := WriteError(rw, ErrorPayload{
+	err := WriteErrorPayload(rw, ErrorPayload{
 		Status:  http.StatusBadRequest,
 		Code:    "bad_request",
 		Message: "bad request",
@@ -342,7 +342,7 @@ func TestWriteErrorReturnsWhenFallbackWriteFails(t *testing.T) {
 
 	var degraded *ErrorWriteDegraded
 	if !errors.As(err, &degraded) || degraded == nil {
-		t.Fatalf("WriteError() error = %T, want joined error containing *ErrorWriteDegraded", err)
+		t.Fatalf("WriteErrorPayload() error = %T, want joined error containing *ErrorWriteDegraded", err)
 	}
 	if degraded.PreservedPublicResponse {
 		t.Fatal("degraded.PreservedPublicResponse = true, want false")
@@ -362,7 +362,7 @@ func TestWriteErrorReturnsWhenFallbackWriteFails(t *testing.T) {
 func TestWriteErrorReturnsWhenPrimaryWriteFails(t *testing.T) {
 	rw := newFailingResponseWriter(errors.New("write failed"))
 
-	err := WriteError(rw, ErrorPayload{
+	err := WriteErrorPayload(rw, ErrorPayload{
 		Status:  http.StatusConflict,
 		Code:    "conflict",
 		Message: "conflict",

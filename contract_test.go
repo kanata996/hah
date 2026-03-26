@@ -181,3 +181,31 @@ func TestContractReusesGeneratedRequestIDAcrossMultipleWriteErrors(t *testing.T)
 		t.Fatal("reports[1].ResponseStarted = false, want true")
 	}
 }
+
+func TestContractReusesExplicitRequestIDAcrossMultipleWriteErrors(t *testing.T) {
+	var reports []hah.ErrorReport
+
+	handler := hah.Contract(
+		hah.WithContractErrorReporter(func(r hah.ErrorReport) {
+			reports = append(reports, r)
+		}),
+	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hah.WriteError(w, r, hah.BadRequest("first", "first"))
+		hah.WriteError(w, r, hah.Conflict("second", "second"))
+	}))
+
+	rr := newResponseRecorder()
+	req := hah.SetRequestID(newRequest(), "req_explicit")
+	handler.ServeHTTP(rr, req)
+
+	assertErrorResponse(t, rr, http.StatusBadRequest, "first", "first")
+	if len(reports) != 2 {
+		t.Fatalf("reports len = %d, want 2", len(reports))
+	}
+	if reports[0].RequestID != "req_explicit" {
+		t.Fatalf("reports[0].RequestID = %q, want req_explicit", reports[0].RequestID)
+	}
+	if reports[1].RequestID != "req_explicit" {
+		t.Fatalf("reports[1].RequestID = %q, want req_explicit", reports[1].RequestID)
+	}
+}

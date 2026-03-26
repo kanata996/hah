@@ -6,11 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/kanata996/hah/internal/errx"
 )
 
-func TestDecodeJSONAttachesDecodeStage(t *testing.T) {
+func TestDecodeJSONAdaptsReqxProblemToHTTPError(t *testing.T) {
 	var body struct {
 		Name string `json:"name"`
 	}
@@ -27,12 +25,12 @@ func TestDecodeJSONAttachesDecodeStage(t *testing.T) {
 	if !errors.As(err, &boundaryErr) || boundaryErr == nil {
 		t.Fatalf("error = %T, want *HTTPError", err)
 	}
-	if got := errx.From(err).Stage; got != errx.StageDecode {
-		t.Fatalf("stage = %q, want decode", got)
+	if got := boundaryErr.Code(); got != "invalid_json" {
+		t.Fatalf("boundaryErr.Code() = %q, want invalid_json", got)
 	}
 }
 
-func TestValidateAttachesValidateStage(t *testing.T) {
+func TestValidateAdaptsReqxProblemToHTTPError(t *testing.T) {
 	type input struct {
 		Name string `json:"name"`
 	}
@@ -48,8 +46,8 @@ func TestValidateAttachesValidateStage(t *testing.T) {
 	if !errors.As(err, &boundaryErr) || boundaryErr == nil {
 		t.Fatalf("error = %T, want *HTTPError", err)
 	}
-	if got := errx.From(err).Stage; got != errx.StageValidate {
-		t.Fatalf("stage = %q, want validate", got)
+	if got := boundaryErr.Code(); got != "invalid_request" {
+		t.Fatalf("boundaryErr.Code() = %q, want invalid_request", got)
 	}
 }
 
@@ -66,9 +64,6 @@ func TestDecodeJSONPassesThroughNonProblemErrors(t *testing.T) {
 	var boundaryErr *HTTPError
 	if errors.As(err, &boundaryErr) {
 		t.Fatalf("error = %T, want non-boundary error", err)
-	}
-	if got := errx.From(err).Stage; got != "" {
-		t.Fatalf("stage = %q, want empty", got)
 	}
 }
 

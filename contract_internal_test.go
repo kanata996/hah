@@ -48,13 +48,17 @@ func TestWithContractConfigGuardsAndStoresState(t *testing.T) {
 		t.Fatalf("len(state.config.writeError.mappers) = %d, want 1", len(state.config.writeError.mappers))
 	}
 
-	_, id := reqid.Ensure(got)
-	_, idAgain := reqid.Ensure(got)
+	if state := contractStateFrom(got); state == nil || state.storedRequestID() != nil {
+		t.Fatalf("contractStateFrom(got).storedRequestID() = %#v, want nil before first use", state)
+	}
+
+	_, id := ensureRequestID(got)
+	_, idAgain := ensureRequestID(got)
 	if id == "" {
-		t.Fatal("reqid.Ensure(got) id = empty, want generated request id")
+		t.Fatal("ensureRequestID(got) id = empty, want generated request id")
 	}
 	if idAgain != id {
-		t.Fatalf("reqid.Ensure(got) ids = (%q, %q), want same generated value", id, idAgain)
+		t.Fatalf("ensureRequestID(got) ids = (%q, %q), want same generated value", id, idAgain)
 	}
 }
 
@@ -66,6 +70,31 @@ func TestContractStateFromNilAndMissingState(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	if got := contractStateFrom(req); got != nil {
 		t.Fatalf("contractStateFrom(req) = %#v, want nil", got)
+	}
+
+	var nilState *contractState
+	if got := nilState.storedRequestID(); got != nil {
+		t.Fatalf("nilState.storedRequestID() = %#v, want nil", got)
+	}
+	if got := nilState.ensureRequestID(req); got != nil {
+		t.Fatalf("nilState.ensureRequestID(req) = %#v, want nil", got)
+	}
+}
+
+func TestContractEnsureRequestIDAdoptsExistingRequestState(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req = reqid.Set(req, "req_upstream")
+	state := &contractState{}
+
+	current := state.ensureRequestID(req)
+	if current == nil {
+		t.Fatal("state.ensureRequestID(req) = nil")
+	}
+	if current != reqid.StateFrom(req) {
+		t.Fatal("state.ensureRequestID(req) did not reuse existing request state")
+	}
+	if id := reqid.EnsureID(current); id != "req_upstream" {
+		t.Fatalf("reqid.EnsureID(current) = %q, want req_upstream", id)
 	}
 }
 

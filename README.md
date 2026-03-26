@@ -271,7 +271,6 @@ type ErrorReport struct {
 	Request         *http.Request
 	Error           error
 	PublicError     *HTTPError
-	Stage           string
 	RequestID       string
 	ResponseStarted bool
 }
@@ -282,13 +281,6 @@ type ErrorReport struct {
 - `WithContractErrorReporter(...)` 为整个 `Contract(...)` 子树设置 reporter
 - `WithErrorReporter(...)` 为单次 `WriteError(...)` 调用覆盖 reporter
 - 传 `nil` 可以关闭 `hah` 的错误观测
-
-`Stage` 当前会落在这些位置：
-
-- `decode`
-- `validate`
-- `processing`
-- `write_response`
 
 默认 reporter 会把内部错误和写响应退化记录到结构化 stderr；普通业务 `4xx` 默认不单独记错误日志。
 
@@ -332,7 +324,8 @@ Query 解码特性：
 默认行为是：
 
 - 第一次需要发送错误观测时，缺失的 request id 会被惰性生成
-- 同一次错误处理链路内会复用同一个 request id
+- 同一个错误处理链路内会复用同一个 request id
+- 经过 `Contract(...)` 的请求，如果同一次请求里发生多次 `WriteError(...)`，这些观测也会复用同一个 request id
 
 如果项目已经有 request id 机制，可以显式桥接给 `hah`：
 
@@ -384,6 +377,7 @@ make ci
 - `DecodeJSON(...)` 会先完整读取请求体再 decode，不适合超大 body 或流式场景
 - `WriteError(...)` 在无法拿到带跟踪能力的 writer 时，只能基于已暴露的状态码和已写出字节数判断响应是否已经开始
 - 如果错误响应里的 `details` 无法编码，`hah` 会降级为 `details: []`，而不是把整个公开错误改写成另一个不兼容结果
+- `HEAD` 请求在真实 `net/http` server 上仍由标准库负责抑制响应体；如果直接用 `httptest.ResponseRecorder` 断言 body，可能会看到编码后的内容
 - `SetRequestID(...)` 只负责桥接 request id，不负责全局 tracing 协议
 
 ## 兼容性

@@ -2,7 +2,9 @@ package hah_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/kanata996/hah"
@@ -86,5 +88,44 @@ func TestWriteEmpty(t *testing.T) {
 	}
 	if got := rr.Header().Get("Content-Type"); got != "" {
 		t.Fatalf("Content-Type = %q, want empty", got)
+	}
+}
+
+func TestRespondHEADUsesStandardServerSemantics(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := hah.Respond(w, http.StatusOK, map[string]any{"ok": true}); err != nil {
+			t.Fatalf("Respond() error = %v", err)
+		}
+	}))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodHead, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Fatalf("resp.Body.Close() error = %v", closeErr)
+		}
+	}()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if len(body) != 0 {
+		t.Fatalf("body length = %d, want 0", len(body))
 	}
 }

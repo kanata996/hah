@@ -146,23 +146,39 @@ func TestWriteErrorReportsStartedResponseWithoutRewrite(t *testing.T) {
 	if report.PublicError == nil || report.PublicError.Status() != http.StatusUnauthorized {
 		t.Fatalf("public error = %#v, want unauthorized mapping", report.PublicError)
 	}
-	if report.Stage != "processing" {
-		t.Fatalf("stage = %q, want processing", report.Stage)
-	}
 }
 
-func TestWriteErrorWritesNoBodyForHEADError(t *testing.T) {
-	rr := newResponseRecorder()
-	req := newRequest()
-	req.Method = http.MethodHead
+func TestWriteErrorHEADUsesStandardServerSemantics(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hah.WriteError(w, r, hah.NewHTTPError(http.StatusNotFound, "route_not_found", "route not found"))
+	}))
+	defer srv.Close()
 
-	hah.WriteError(rr, req, hah.NewHTTPError(http.StatusNotFound, "route_not_found", "route not found"))
-
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	req, err := http.NewRequest(http.MethodHead, srv.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
 	}
-	if rr.Body.Len() != 0 {
-		t.Fatalf("body = %q, want empty", rr.Body.String())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Fatalf("resp.Body.Close() error = %v", closeErr)
+		}
+	}()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusNotFound)
+	}
+	if len(body) != 0 {
+		t.Fatalf("body length = %d, want 0", len(body))
 	}
 }
 
@@ -187,9 +203,6 @@ func TestWriteErrorReportsReqxDecodeObservation(t *testing.T) {
 	if report.PublicError == nil || report.PublicError.Code() != "invalid_json" {
 		t.Fatalf("public error = %#v, want invalid_json", report.PublicError)
 	}
-	if report.Stage != "decode" {
-		t.Fatalf("stage = %q, want decode", report.Stage)
-	}
 }
 
 func TestWriteErrorReportsWriteResponseObservation(t *testing.T) {
@@ -206,9 +219,6 @@ func TestWriteErrorReportsWriteResponseObservation(t *testing.T) {
 	assertErrorResponse(t, rr, http.StatusInternalServerError, "internal_error", "internal server error")
 	if report.PublicError == nil || report.PublicError.Code() != "internal_error" {
 		t.Fatalf("public error = %#v, want internal_error", report.PublicError)
-	}
-	if report.Stage != "write_response" {
-		t.Fatalf("stage = %q, want write_response", report.Stage)
 	}
 }
 
@@ -240,18 +250,12 @@ func TestWriteErrorReportsWriteErrorFallbackAsSecondObservation(t *testing.T) {
 	if reports[0].PublicError == nil || reports[0].PublicError.Status() != http.StatusBadRequest {
 		t.Fatalf("reports[0].public = %#v, want 400 boundary error", reports[0].PublicError)
 	}
-	if reports[0].Stage != "processing" {
-		t.Fatalf("reports[0].stage = %q, want processing", reports[0].Stage)
-	}
 	if reports[0].ResponseStarted {
 		t.Fatal("reports[0].ResponseStarted = true, want false")
 	}
 
 	if reports[1].PublicError == nil || reports[1].PublicError.Status() != http.StatusBadRequest {
 		t.Fatalf("reports[1].public = %#v, want preserved 400 boundary error", reports[1].PublicError)
-	}
-	if reports[1].Stage != "write_response" {
-		t.Fatalf("reports[1].stage = %q, want write_response", reports[1].Stage)
 	}
 	if !reports[1].ResponseStarted {
 		t.Fatal("reports[1].ResponseStarted = false, want true")

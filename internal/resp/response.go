@@ -1,4 +1,4 @@
-package core
+package resp
 
 import (
 	"bytes"
@@ -86,7 +86,7 @@ func WriteEmpty(w http.ResponseWriter, status int) error {
 	return nil
 }
 
-func WriteError(w http.ResponseWriter, payload ErrorPayload) error {
+func WriteErrorPayload(w http.ResponseWriter, payload ErrorPayload) error {
 	body, err := marshalErrorEnvelope(payload.Code, payload.Message, normalizeDetails(payload.Details))
 	if err != nil {
 		degradedBody, _ := marshalErrorEnvelope(payload.Code, payload.Message, []any{})

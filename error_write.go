@@ -1,25 +1,14 @@
 package hah
 
-import (
-	"errors"
-	"net/http"
-
-	"github.com/kanata996/hah/errcode"
-	"github.com/kanata996/hah/internal/core"
-	"github.com/kanata996/hah/internal/errx"
-	"github.com/kanata996/hah/internal/reqid"
-	"github.com/kanata996/hah/reqx"
-)
+import "net/http"
 
 // ErrorReport is the centralized observation emitted when hah handles an
-// error. Stage identifies the internal observation point such as decode,
-// validate, processing, or write_response. RequestID is the effective request
-// identifier used by the current error handling chain.
+// error. RequestID is the effective request identifier used by the current
+// error handling chain.
 type ErrorReport struct {
 	Request         *http.Request
 	Error           error
 	PublicError     *HTTPError
-	Stage           string
 	RequestID       string
 	ResponseStarted bool
 }
@@ -69,112 +58,6 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error, opts ...Error
 	return true
 }
 
-func handleErrorWithConfig(w http.ResponseWriter, r *http.Request, err error, cfg writeErrorConfig) {
-	requestID := ""
-	if cfg.reporter != nil {
-		r, requestID = reqid.Ensure(r)
-	}
-
-	mapped := mapBoundaryError(err, cfg)
-	observation := errx.Derive(err, errx.StageProcessing)
-	started := core.ResponseStarted(w)
-
-	reportError(cfg, r, err, mapped, observation.Stage, requestID, started)
-
-	if started {
-		return
-	}
-
-	if writeErr := writeMappedError(w, r, mapped); writeErr != nil {
-		public := defaultInternalError()
-		writeStarted := core.ResponseStarted(w)
-		var degraded *core.ErrorWriteDegraded
-		if errors.As(writeErr, &degraded) && degraded.PreservedPublicResponse {
-			public = mapped
-			writeStarted = true
-		}
-		reportError(
-			cfg,
-			r,
-			writeErr,
-			public,
-			errx.StageWriteResponse,
-			requestID,
-			writeStarted,
-		)
-	}
-}
-
-func reportError(cfg writeErrorConfig, r *http.Request, err error, public *HTTPError, stage errx.Stage, requestID string, started bool) {
-	if cfg.reporter == nil {
-		return
-	}
-
-	cfg.reporter(ErrorReport{
-		Request:         r,
-		Error:           err,
-		PublicError:     public,
-		Stage:           stage.String(),
-		RequestID:       requestID,
-		ResponseStarted: started,
-	})
-}
-
-func writeMappedError(w http.ResponseWriter, r *http.Request, mapped *HTTPError) error {
-	if w == nil {
-		return nil
-	}
-	if r != nil && r.Method == http.MethodHead {
-		w.WriteHeader(mapped.Status())
-		return nil
-	}
-
-	return core.WriteError(w, core.ErrorPayload{
-		Status:  mapped.Status(),
-		Code:    mapped.Code(),
-		Message: mapped.Message(),
-		Details: mapped.Details(),
-	})
-}
-
-func mapBoundaryError(err error, cfg writeErrorConfig) *HTTPError {
-	if err == nil {
-		return defaultInternalError()
-	}
-
-	var boundaryErr *HTTPError
-	if errors.As(err, &boundaryErr) && boundaryErr != nil {
-		return boundaryErr
-	}
-
-	var problem *reqx.Problem
-	if errors.As(err, &problem) && problem != nil {
-		// Accept direct reqx usage as a first-class bridge: callers can bypass the
-		// hah facade and WriteError should still normalize reqx problems into the
-		// public hah error contract.
-		return NewHTTPError(problem.Status(), problem.Code(), problem.Message(), problem.Details()...)
-	}
-
-	for _, mapper := range cfg.mappers {
-		if mapper == nil {
-			continue
-		}
-		if mapped := mapper(err); mapped != nil {
-			return mapped
-		}
-	}
-
-	return defaultInternalError()
-}
-
-func defaultInternalError() *HTTPError {
-	return NewHTTPError(
-		http.StatusInternalServerError,
-		errcode.InternalError,
-		"internal server error",
-	)
-}
-
 // WithErrorReporter overrides error reporting for errors written by hah.
 // Passing nil disables reporting for hah error handling.
 func WithErrorReporter(reporter ErrorReporter) ErrorOption {
@@ -192,14 +75,4 @@ func WithErrorMappers(mappers ...ErrorMapper) ErrorOption {
 	return func(cfg *writeErrorConfig) {
 		cfg.mappers = append(cfg.mappers, filtered...)
 	}
-}
-
-func filterErrorMappers(mappers ...ErrorMapper) []ErrorMapper {
-	filtered := make([]ErrorMapper, 0, len(mappers))
-	for _, mapper := range mappers {
-		if mapper != nil {
-			filtered = append(filtered, mapper)
-		}
-	}
-	return filtered
 }
