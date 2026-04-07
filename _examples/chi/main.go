@@ -1,287 +1,312 @@
 package main
 
 import (
-	"errors"
 	"fmt"
+	"io"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/go-chi/chi/v5"
-
+	"github.com/go-chi/chi/v5/middleware"
+	httplog "github.com/go-chi/httplog/v3"
+	"github.com/go-chi/traceid"
 	"github.com/kanata996/hah"
-	"github.com/kanata996/hah/errcode"
+	"github.com/kanata996/hah/errx"
 )
 
-var (
-	errUserConflict = errors.New("users: conflict")
-	errUserNotFound = errors.New("users: not found")
-)
-
-const (
-	codeUserConflict = "user_conflict"
-	codeUserNotFound = "user_not_found"
-)
-
-type createUserRequest struct {
-	Name string `json:"name"`
-	Role string `json:"role"`
+type account struct {
+	ID    string `json:"id"`
+	OrgID string `json:"org_id"`
+	Name  string `json:"name"`
 }
 
-type listUsersQuery struct {
-	Page  *int   `query:"page"`
-	Limit *int   `query:"limit"`
-	Role  string `query:"role"`
+type accountStore struct {
+	mu        sync.Mutex
+	nextID    int
+	accounts  map[string]account
+	nameIndex map[string]string
 }
 
-type user struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Role string `json:"role"`
-}
-
-type userRepository struct {
-	users map[string]user
-}
-
-type userService struct {
-	repo *userRepository
-}
-
-func main() {
-	log.Fatal(http.ListenAndServe(":8080", newRouter()))
-}
-
-func newRouter() http.Handler {
-	service := &userService{repo: newUserRepository()}
-
-	r := chi.NewRouter()
-	r.Route("/users", func(r chi.Router) {
-		// WithResponses 挂在 feature 边界，负责把内部错误语义映射成公开 HTTP 错误。
-		r.Use(hah.WithResponses(hah.ErrorMappers(mapUserError)))
-
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			var query listUsersQuery
-			if err := hah.DecodeAndValidateQuery(r, &query, validateListUsersQuery); err != nil {
-				_ = hah.RenderError(w, r, err)
-				return
-			}
-
-			users, meta, err := service.List(query)
-			if err != nil {
-				_ = hah.RenderError(w, r, err)
-				return
-			}
-
-			if err := hah.RenderWithMeta(w, r, users, meta); err != nil {
-				_ = hah.RenderError(w, r, err)
-				return
-			}
-		})
-
-		r.Get("/{userID}", func(w http.ResponseWriter, r *http.Request) {
-			item, err := service.Get(chi.URLParam(r, "userID"))
-			if err != nil {
-				_ = hah.RenderError(w, r, err)
-				return
-			}
-
-			if err := hah.Render(w, r, item); err != nil {
-				_ = hah.RenderError(w, r, err)
-				return
-			}
-		})
-
-		r.Post("/", func(w http.ResponseWriter, r *http.Request) {
-			var req createUserRequest
-			if err := hah.DecodeAndValidateJSON(r, &req, validateCreateUserRequest); err != nil {
-				_ = hah.RenderError(w, r, err)
-				return
-			}
-
-			item, err := service.Create(req)
-			if err != nil {
-				_ = hah.RenderError(w, r, err)
-				return
-			}
-
-			hah.Status(r, http.StatusCreated)
-			if err := hah.Render(w, r, item); err != nil {
-				_ = hah.RenderError(w, r, err)
-				return
-			}
-		})
-	})
-
-	return r
-}
-
-func mapUserError(err error) *hah.HTTPError {
-	switch {
-	case errors.Is(err, errUserNotFound):
-		return hah.NotFound(codeUserNotFound, "user not found")
-	case errors.Is(err, errUserConflict):
-		return hah.Conflict(codeUserConflict, "user already exists")
-	default:
-		return nil
-	}
-}
-
-func newUserRepository() *userRepository {
-	return &userRepository{
-		users: map[string]user{
-			"u_1": {ID: "u_1", Name: "Alice", Role: "admin"},
-			"u_2": {ID: "u_2", Name: "Bob", Role: "member"},
-			"u_3": {ID: "u_3", Name: "Carol", Role: "admin"},
+func newAccountStore() *accountStore {
+	store := &accountStore{
+		nextID: 3,
+		accounts: map[string]account{
+			"acct_001": {ID: "acct_001", OrgID: "org_123", Name: "Primary"},
+			"acct_002": {ID: "acct_002", OrgID: "org_123", Name: "Billing"},
 		},
+		nameIndex: map[string]string{},
 	}
+	for _, acct := range store.accounts {
+		store.nameIndex[accountNameKey(acct.OrgID, acct.Name)] = acct.ID
+	}
+	return store
 }
 
-func (s *userService) List(query listUsersQuery) ([]user, map[string]any, error) {
-	page := 1
-	if query.Page != nil {
-		page = *query.Page
-	}
-
-	limit := 20
-	if query.Limit != nil {
-		limit = *query.Limit
-	}
-
-	role := strings.TrimSpace(query.Role)
-	items := s.repo.List(role, page, limit)
-
-	meta := map[string]any{
-		"page":  page,
-		"limit": limit,
-		"count": len(items),
-	}
-	if role != "" {
-		meta["role"] = role
-	}
-
-	return items, meta, nil
+func accountNameKey(orgID, name string) string {
+	return orgID + ":" + strings.ToLower(strings.TrimSpace(name))
 }
 
-func (s *userService) Get(userID string) (user, error) {
-	return s.repo.Get(userID)
-}
+func (s *accountStore) list(orgID string, limit int) []account {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-func (s *userService) Create(req createUserRequest) (user, error) {
-	name := strings.TrimSpace(req.Name)
-	role := strings.TrimSpace(req.Role)
-	if role == "" {
-		role = "member"
-	}
-
-	return s.repo.Create(name, role)
-}
-
-func (r *userRepository) List(role string, page, limit int) []user {
-	ids := make([]string, 0, len(r.users))
-	for id := range r.users {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-
-	filtered := make([]user, 0, len(ids))
-	for _, id := range ids {
-		item := r.users[id]
-		if role == "" || item.Role == role {
-			filtered = append(filtered, item)
+	items := make([]account, 0, len(s.accounts))
+	for _, acct := range s.accounts {
+		if acct.OrgID == orgID {
+			items = append(items, acct)
 		}
 	}
-
-	start := (page - 1) * limit
-	if start >= len(filtered) {
-		return []user{}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].ID < items[j].ID
+	})
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
 	}
-
-	end := start + limit
-	if end > len(filtered) {
-		end = len(filtered)
-	}
-
-	items := make([]user, end-start)
-	copy(items, filtered[start:end])
 	return items
 }
 
-func (r *userRepository) Get(userID string) (user, error) {
-	item, ok := r.users[userID]
-	if !ok {
-		return user{}, errUserNotFound
+func (s *accountStore) create(orgID, name string) (account, error) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return account{}, errx.UnprocessableEntity("account_name_required", "account name must not be blank")
 	}
-	return item, nil
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	nameKey := accountNameKey(orgID, trimmed)
+	if _, exists := s.nameIndex[nameKey]; exists {
+		return account{}, errx.Conflict("account_name_conflict", "account name already exists")
+	}
+
+	acct := account{
+		ID:    fmt.Sprintf("acct_%03d", s.nextID),
+		OrgID: orgID,
+		Name:  trimmed,
+	}
+	s.nextID++
+	s.accounts[acct.ID] = acct
+	s.nameIndex[nameKey] = acct.ID
+	return acct, nil
 }
 
-func (r *userRepository) Create(name, role string) (user, error) {
-	for _, item := range r.users {
-		if strings.EqualFold(item.Name, name) {
-			return user{}, errUserConflict
+func (s *accountStore) get(orgID, accountID string) (account, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	acct, ok := s.accounts[accountID]
+	if !ok || acct.OrgID != orgID {
+		return account{}, errx.NotFound("account_not_found", "account not found")
+	}
+	return acct, nil
+}
+
+func (s *accountStore) delete(orgID, accountID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	acct, ok := s.accounts[accountID]
+	if !ok || acct.OrgID != orgID {
+		return errx.NotFound("account_not_found", "account not found")
+	}
+
+	delete(s.accounts, accountID)
+	delete(s.nameIndex, accountNameKey(acct.OrgID, acct.Name))
+	return nil
+}
+
+type app struct {
+	store *accountStore
+}
+
+type listAccountsRequest struct {
+	OrgID string `param:"org_id" validate:"required"`
+	Limit int    `query:"limit" validate:"min=1,max=100"`
+}
+
+func (r *listAccountsRequest) Normalize() {
+	if r.Limit == 0 {
+		r.Limit = 20
+	}
+}
+
+type createAccountRequest struct {
+	OrgID string `param:"org_id" validate:"required"`
+	Name  string `json:"name" validate:"required,min=3,max=64"`
+}
+
+func (r *createAccountRequest) Normalize() {
+	r.Name = strings.TrimSpace(r.Name)
+}
+
+type accountPathRequest struct {
+	OrgID     string `param:"org_id" validate:"required"`
+	AccountID string `param:"account_id" validate:"required"`
+}
+
+type deleteAccountHeaders struct {
+	Actor string `header:"x-actor" validate:"required"`
+}
+
+func (r *deleteAccountHeaders) Normalize() {
+	r.Actor = strings.TrimSpace(r.Actor)
+}
+
+func newRouter(store *accountStore) http.Handler {
+	return newRouterWithLogger(store, newExampleLogger(io.Discard))
+}
+
+func newRouterWithLogger(store *accountStore, accessLogger *slog.Logger) http.Handler {
+	application := &app{store: store}
+	if accessLogger == nil {
+		accessLogger = newExampleLogger(io.Discard)
+	}
+
+	router := chi.NewRouter()
+	router.Use(middleware.RequestID)
+	router.Use(middleware.RealIP)
+	router.Use(traceid.Middleware)
+	router.Use(httplog.RequestLogger(accessLogger, &httplog.Options{
+		Level:             slog.LevelInfo,
+		Schema:            httplog.SchemaECS,
+		RecoverPanics:     true,
+		Skip:              func(req *http.Request, _ int) bool { return req.URL != nil && req.URL.Path == "/healthz" },
+		LogRequestHeaders: []string{"Content-Type", middleware.RequestIDHeader, traceid.Header},
+		LogResponseHeaders: []string{
+			"Content-Type",
+			middleware.RequestIDHeader,
+			traceid.Header,
+		},
+	}))
+	router.Use(attachRequestObservability)
+	router.Use(middleware.Timeout(30 * time.Second))
+	router.Use(middleware.Heartbeat("/healthz"))
+
+	router.Route("/orgs/{org_id}/accounts", func(r chi.Router) {
+		r.Get("/", application.listAccounts)
+		r.Post("/", application.createAccount)
+		r.Get("/{account_id}", application.getAccount)
+		r.Delete("/{account_id}", application.deleteAccount)
+	})
+
+	return router
+}
+
+func newExampleLogger(out io.Writer) *slog.Logger {
+	if out == nil {
+		out = io.Discard
+	}
+	traceid.LogKey = "trace.id"
+	return slog.New(traceid.LogHandler(slog.NewJSONHandler(out, &slog.HandlerOptions{
+		ReplaceAttr: httplog.SchemaECS.ReplaceAttr,
+	}))).With(
+		slog.String("service.name", "hah-chi-example"),
+	)
+}
+
+func attachRequestObservability(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		if requestID := middleware.GetReqID(ctx); requestID != "" {
+			httplog.SetAttrs(ctx, slog.String("request.id", requestID))
+			w.Header().Set(middleware.RequestIDHeader, requestID)
 		}
-	}
-
-	item := user{
-		ID:   fmt.Sprintf("u_%d", len(r.users)+1),
-		Name: name,
-		Role: role,
-	}
-	r.users[item.ID] = item
-	return item, nil
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
-func validateCreateUserRequest(value *createUserRequest) []hah.Violation {
-	var violations []hah.Violation
-
-	if strings.TrimSpace(value.Name) == "" {
-		violations = append(violations, hah.Violation{
-			Field:   "name",
-			Code:    errcode.ViolationRequired,
-			Message: "is required",
-		})
+func (a *app) listAccounts(w http.ResponseWriter, r *http.Request) {
+	var req listAccountsRequest
+	if err := hah.BindAndValidate(r, &req); err != nil {
+		_ = hah.WriteError(w, r, err)
+		return
 	}
 
-	role := strings.TrimSpace(value.Role)
-	if role != "" && role != "member" && role != "admin" {
-		violations = append(violations, hah.Violation{
-			Field:   "role",
-			Code:    errcode.ViolationOneOf,
-			Message: "must be member or admin",
-		})
+	payload := map[string]any{
+		"org_id": req.OrgID,
+		"count":  len(a.store.list(req.OrgID, 0)),
+		"items":  a.store.list(req.OrgID, req.Limit),
+	}
+	if requestID := middleware.GetReqID(r.Context()); requestID != "" {
+		payload["request_id"] = requestID
+	}
+	if traceID := traceid.FromContext(r.Context()); traceID != "" {
+		payload["trace_id"] = traceID
 	}
 
-	return violations
+	if err := hah.OK(w, r, payload); err != nil {
+		_ = hah.WriteError(w, r, err)
+	}
 }
 
-func validateListUsersQuery(value *listUsersQuery) []hah.Violation {
-	var violations []hah.Violation
-
-	if value.Page != nil && *value.Page < 1 {
-		violations = append(violations, hah.Violation{
-			Field:   "page",
-			Code:    errcode.ViolationMin,
-			Message: "must be at least 1",
-		})
+func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
+	var req createAccountRequest
+	if err := hah.BindAndValidate(r, &req); err != nil {
+		_ = hah.WriteError(w, r, err)
+		return
 	}
 
-	if value.Limit != nil && (*value.Limit < 1 || *value.Limit > 100) {
-		violations = append(violations, hah.Violation{
-			Field:   "limit",
-			Code:    errcode.ViolationRange,
-			Message: "must be between 1 and 100",
-		})
+	acct, err := a.store.create(req.OrgID, req.Name)
+	if err != nil {
+		_ = hah.WriteError(w, r, err)
+		return
 	}
 
-	role := strings.TrimSpace(value.Role)
-	if role != "" && role != "member" && role != "admin" {
-		violations = append(violations, hah.Violation{
-			Field:   "role",
-			Code:    errcode.ViolationOneOf,
-			Message: "must be member or admin",
-		})
+	if err := hah.Created(w, r, acct); err != nil {
+		_ = hah.WriteError(w, r, err)
+	}
+}
+
+func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
+	var req accountPathRequest
+	if err := hah.BindAndValidatePath(r, &req); err != nil {
+		_ = hah.WriteError(w, r, err)
+		return
 	}
 
-	return violations
+	acct, err := a.store.get(req.OrgID, req.AccountID)
+	if err != nil {
+		_ = hah.WriteError(w, r, err)
+		return
+	}
+
+	if err := hah.OK(w, r, acct); err != nil {
+		_ = hah.WriteError(w, r, err)
+	}
+}
+
+func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	var pathReq accountPathRequest
+	if err := hah.BindAndValidatePath(r, &pathReq); err != nil {
+		_ = hah.WriteError(w, r, err)
+		return
+	}
+
+	var headers deleteAccountHeaders
+	if err := hah.BindAndValidateHeaders(r, &headers); err != nil {
+		_ = hah.WriteError(w, r, err)
+		return
+	}
+
+	if err := a.store.delete(pathReq.OrgID, pathReq.AccountID); err != nil {
+		_ = hah.WriteError(w, r, err)
+		return
+	}
+
+	w.Header().Set("X-Deleted-By", headers.Actor)
+	if err := hah.NoContent(w, r); err != nil {
+		_ = hah.WriteError(w, r, err)
+	}
+}
+
+func main() {
+	accessLogger := newExampleLogger(os.Stdout)
+	slog.SetDefault(accessLogger)
+	log.Fatal(http.ListenAndServe(":8080", newRouterWithLogger(newAccountStore(), accessLogger)))
 }

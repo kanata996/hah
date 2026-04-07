@@ -13,6 +13,22 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-04-07
+
+### Highlights
+
+- Repositioned `hah` as a `net/http`-first JSON API boundary layer with a small root facade over `reqx`, `errx`, and `resp`.
+- Added explicit request-side binding and validation APIs for path, query, header, and body inputs with `validator/v10` integration.
+- Added explicit response-side success writers and `application/problem+json` error writing with standalone `slog.Default()` 5xx diagnostics.
+- Removed all `chi`, router-scoped middleware, request-id, tracing, and access-log dependencies from the public model.
+
+### Breaking
+
+- Removed the `chi`-style render/runtime model built around `WithResponses(...)`, `Render(...)`, `RenderWithMeta(...)`, `RenderEmpty(...)`, `RenderError(...)`, and `Status(...)`.
+- Replaced the previous root package shape with a facade over `Bind*`, `BindAndValidate*`, `Param*`, `WriteError`, `JSON*`, `OK`, `Created`, and `NoContent`.
+- Removed router-coupled request-id, tracing, access-log, and middleware integration from the library contract.
+- Replaced the old shared error model with the dedicated `errx.HTTPError` package boundary and updated error responses to the current `application/problem+json` contract.
+
 ## [v0.1.1] - 2026-03-27
 
 ### Highlights
