@@ -37,6 +37,10 @@ type startedWriter struct {
 	bytesWritten int
 }
 
+type unwrapOnlyWriter struct {
+	inner http.ResponseWriter
+}
+
 type rawTestError struct {
 	message string
 }
@@ -118,6 +122,22 @@ func (w *startedWriter) BytesWritten() int {
 }
 
 func (w *startedWriter) Unwrap() http.ResponseWriter {
+	return w.inner
+}
+
+func (w *unwrapOnlyWriter) Header() http.Header {
+	return w.inner.Header()
+}
+
+func (w *unwrapOnlyWriter) WriteHeader(status int) {
+	w.inner.WriteHeader(status)
+}
+
+func (w *unwrapOnlyWriter) Write(p []byte) (int, error) {
+	return w.inner.Write(p)
+}
+
+func (w *unwrapOnlyWriter) Unwrap() http.ResponseWriter {
 	return w.inner
 }
 
@@ -666,6 +686,17 @@ func TestWriteErrorSkipsRewriteAfterWrappedResponseStarted(t *testing.T) {
 	}
 	if got := rr.Body.String(); got != "partial" {
 		t.Errorf("body = %q, want partial", got)
+	}
+}
+
+func TestResponseAlreadyStartedUsesUnwrappedWriterState(t *testing.T) {
+	rr := httptest.NewRecorder()
+	started := &startedWriter{inner: rr}
+	started.WriteHeader(http.StatusAccepted)
+
+	wrapped := &unwrapOnlyWriter{inner: started}
+	if !responseAlreadyStarted(wrapped) {
+		t.Fatal("responseAlreadyStarted(wrapped) = false, want true")
 	}
 }
 
