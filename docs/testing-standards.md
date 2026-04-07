@@ -6,8 +6,8 @@
 
 - 根包 `hah`
 - `reqx`
+- `errx`
 - `resp`
-- `middleware`
 - 未来新增的公开包与公开 HTTP 边界能力
 
 ## 1. 总原则
@@ -174,7 +174,22 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 若改动影响绑定顺序、默认值、字段覆盖或错误映射，必须补回归测试。
 
-### 3.3 `resp`
+### 3.3 `errx`
+
+`errx` 是公共 HTTP 错误模型，测试必须覆盖标准化规则、cause 语义和快捷构造器。
+
+至少覆盖：
+
+- `HTTPError` nil 接收者的安全默认值
+- `Status` / `Code` / `Title` / `Detail` / `Errors` 的标准化规则
+- `Error` / `Unwrap` 的 cause 语义，以及异常/空白 cause 下的退化行为
+- 公开 detail/errors 的防御性切片拷贝
+- `NewHTTPError` / `NewHTTPErrorWithCause` 与常用快捷构造器的稳定输出
+- 非标准状态码与 `499` 特例的公共默认语义
+
+若改动影响任何公开字段、默认值、状态快捷构造或 cause 暴露规则，必须补直接回归测试。
+
+### 3.4 `resp`
 
 `resp` 是响应边界核心包，测试必须覆盖成功响应、错误响应和错误收敛。
 
@@ -182,14 +197,14 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 - `OK` / `Created` / `NoContent`
 - `JSON` / `JSONPretty` / `JSONBlob`
-- `HTTPError` 的状态码、错误码、标题、详情、公开错误项
+- `errx.HTTPError` 与 `WriteError(...)` 的协作契约：状态码、错误码、标题、详情、公开错误项
 - `WriteError(...)` 的 error 收敛和 problem JSON 写回
 - 非法状态码、无响应体状态、`nil writer`、`nil request`
 - pretty 行为和 raw bytes 透传行为
 - 内部 cause 不泄漏到公开响应
 - context canceled / timeout 的公共错误语义
 - 错误响应降级路径和响应已开始写出路径
-- 请求日志注解仅在约定场景出现，且不污染不该暴露的字段
+- 5xx 独立错误日志与错误响应写出失败日志的出现条件、消息和关键字段契约
 
 若改动影响任何对外字段名、状态码、错误码、日志字段或响应体结构，必须有直接回归测试。
 
@@ -242,8 +257,9 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 例如：
 
-- 5xx 请求日志要有 `error.code`
-- 4xx 请求日志不应污染 `error.*`
+- 5xx 独立错误日志要有 `error.code`
+- 4xx 不应额外输出独立服务端错误日志
+- 错误响应写出失败日志要能区分普通写失败与降级写回
 - 公共错误响应不应泄漏内部 cause
 
 ### 4.5 全局状态必须成对恢复

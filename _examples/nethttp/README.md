@@ -1,32 +1,28 @@
 # net/http example
 
-这个独立子模块只演示 `hah` 在标准库 `net/http` / `ServeMux` 里的 `Direct HTTPError Mode` 主流程，不混入 auth、rate limit、panic recover、request id 等入口层噪音。
+这个独立子模块演示 `hah` 在标准库 `net/http` / `ServeMux` 中的最新公开 API，用最少依赖把请求绑定、校验、成功响应和 `problem+json` 错误响应串起来。
 
 核心关注点：
 
-- 不使用 `WithResponses(...)`，也不使用 mapper
-- handler 只负责 `DecodeAndValidate*`、调用 service、再用 `hah.RenderError(...)` / `Render*`
-- service / repository 直接返回公开 HTTP 错误，例如 `hah.NotFound(...)`、`hah.Conflict(...)`
-- 成功响应统一走 `Render(...)` / `RenderWithMeta(...)`
+- 只使用当前根包公开 API：`BindAndValidate*`、`OK`、`Created`、`NoContent`、`WriteError`
+- path/query/body 都走 `hah` 的 `net/http` 绑定契约，不依赖 router 私有上下文
+- 领域层直接返回 `errx.NotFound(...)`、`errx.Conflict(...)` 这类稳定公共错误
+- 成功路径直接写 JSON，失败路径统一写 `application/problem+json`
 
 主要路由：
 
-- `GET /users`：query decode + validate + `RenderWithMeta`
-- `GET /users/{userID}`：repository 直接返回 `404`
-- `POST /users`：JSON decode + validate + `Create`，冲突时直接返回 `409`
+- `GET /healthz`
+- `GET /orgs/{org_id}/accounts`
+- `POST /orgs/{org_id}/accounts`
+- `GET /orgs/{org_id}/accounts/{account_id}`
+- `DELETE /orgs/{org_id}/accounts/{account_id}`
 
 请求主流程：
 
-1. handler 用 `DecodeAndValidateQuery(...)` 或 `DecodeAndValidateJSON(...)` 处理输入。
-2. handler 调用 service，service 再调用 repository。
-3. repository / service 直接返回 `hah.NotFound(...)`、`hah.Conflict(...)` 这类公开 HTTP 错误。
-4. handler 在失败点统一调用 `hah.RenderError(w, r, err)`。
-5. `RenderError(...)` 直接把这些公开错误写成统一 JSON HTTP 错误响应。
-6. 成功路径统一走 `Render(...)` 或 `RenderWithMeta(...)`。
-
-说明：
-
-- `Mapped Internal Error Mode` 在 `net/http` 里也能做，但不是这个示例的重点。
+1. handler 用 `hah.BindAndValidate(...)` 或 `hah.BindAndValidatePath(...)` 处理 path/query/body 输入。
+2. handler 调用内存 store；store 直接返回 `errx` 公共错误。
+3. 失败路径统一调用 `hah.WriteError(w, r, err)`。
+4. 成功路径统一走 `hah.OK(...)`、`hah.Created(...)` 或 `hah.NoContent(...)`。
 
 入口文件：
 

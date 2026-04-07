@@ -125,7 +125,8 @@ func main() {
 
 示例目录：
 
-- [`_examples/nethttp`](./_examples/nethttp)
+- [`_examples/nethttp`](./_examples/nethttp)：纯 `net/http` / `ServeMux` 示例
+- [`_examples/chi`](./_examples/chi)：`chi` router + `RequestID` / `traceid` / `httplog` / 常用中间件示例
 
 仓库根目录常用命令：
 
