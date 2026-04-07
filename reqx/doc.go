@@ -31,5 +31,5 @@
 // 新增、移除、重命名以上导出符号，或改变其公开语义时，应同步更新本注释与 CHANGELOG。
 //
 // path 输入只依赖 net/http 暴露的 PathValue / Pattern 命名 wildcard 语义，
-// 不依赖 chi.RouteContext，也不承诺 chi 专有 `*` catch-all 的兼容行为。
+// 不依赖任何 router 私有上下文，也不承诺各家 router 的私有 catch-all 语法兼容行为。
 package reqx

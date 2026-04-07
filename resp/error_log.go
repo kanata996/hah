@@ -1,21 +1,20 @@
 package resp
 
-// 本文件负责“错误请求日志注解”，而不是“统一错误日志输出”。
+// 本文件负责“独立错误日志输出”。
 //
 // 定位：
 //   - 这里服务于 WriteError(...) 的内部流程。
-//   - 它只负责把已收敛好的 HTTP 错误语义补充到当前 request log。
-//   - 真正输出请求日志的仍然是外层 httplog，中间件层不重复实现 error -> HTTP 语义映射。
+//   - 它不依赖任何 router、request logger 或 tracing 中间件。
+//   - 它只在需要时通过 slog.Default() 输出一条独立错误日志。
 //
 // 职责：
 //   - 从 error / HTTPError 提取更适合排障的结构化字段。
-//   - request log 只补低噪音、可关联字段；独立 error log 保留完整诊断摘要。
 //   - 在不泄露不可控内部对象的前提下，尽量保留原始错误文本、类型以及首层/根因摘要。
-//   - 仅在“错误响应自身写出失败”这类基础设施异常时，额外输出一条独立 error 日志。
+//   - 在错误响应自身写出失败时，额外输出基础设施级异常日志。
 //
 // 要点：
-//   - 普通 4xx / 5xx 不在这里额外打一条重复业务错误日志。
-//   - 诊断字段优先围绕排障，而不是简单镜像对外响应 JSON。
+//   - 普通 4xx 不额外输出独立错误日志。
+//   - 5xx 只输出一条独立错误日志，不再尝试补 access log 字段。
 //   - 诊断链优先从原始 cause 开始，避免 *HTTPError 包装层淹没真正根因。
 
 import (
@@ -27,9 +26,6 @@ import (
 	"reflect"
 	"strings"
 
-	chimw "github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/httplog/v3"
-	"github.com/go-chi/traceid"
 	"github.com/kanata996/hah/errx"
 )
 
@@ -43,40 +39,6 @@ type errorChainInfo struct {
 	errorType   string
 	rootMessage string
 	rootType    string
-}
-
-func annotateRequestErrorLogAttrs(r *http.Request, attrs []slog.Attr) {
-	if r == nil || len(attrs) == 0 {
-		return
-	}
-	httplog.SetAttrs(r.Context(), attrs...)
-}
-
-// requestErrorLogAttrs 生成请求级错误日志字段。
-// 4xx 仅保留外层请求日志；5xx 只补充低噪音、可聚合且便于关联的字段。
-func requestErrorLogAttrs(r *http.Request, err error, httpErr *errx.HTTPError) []slog.Attr {
-	if err == nil || httpErr == nil {
-		return nil
-	}
-
-	status := httpErr.Status()
-	if status < http.StatusInternalServerError {
-		return nil
-	}
-
-	attrs := make([]slog.Attr, 0, 6)
-	attrs = append(attrs, slog.String("error.code", httpErr.Code()))
-	if errors.Is(err, context.Canceled) {
-		attrs = append(attrs, slog.Bool("error.canceled", true))
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		attrs = append(attrs, slog.Bool("error.timeout", true))
-	}
-	if r != nil {
-		attrs = append(attrs, requestCorrelationAttrs(r.Context())...)
-	}
-
-	return attrs
 }
 
 func diagnosticErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
@@ -138,7 +100,7 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *errx.HTTPError, err 
 		slog.Int("http.response.status_code", httpErr.Status()),
 	}
 	attrs = append(attrs, diagnosticErrorLogAttrs(err, httpErr)...)
-	attrs = append(attrs, requestContextAttrs(ctx)...)
+	attrs = append(attrs, requestMetadataAttrs(r)...)
 
 	var degraded *ErrorWriteDegraded
 	if errors.As(err, &degraded) && degraded != nil {
@@ -174,7 +136,7 @@ func logServerErrorAttrs(r *http.Request, httpErr *errx.HTTPError, diagnosticAtt
 		slog.Int("http.response.status_code", httpErr.Status()),
 	}
 	attrs = append(attrs, diagnosticAttrs...)
-	attrs = append(attrs, requestContextAttrs(ctx)...)
+	attrs = append(attrs, requestMetadataAttrs(r)...)
 
 	slog.Default().LogAttrs(ctx, slog.LevelError, "resp: request failed with server error", attrs...)
 }
@@ -335,22 +297,19 @@ func limitErrorLogString(value string) string {
 	return trimmed[:maxLoggedErrorStringBytes] + "...(truncated)"
 }
 
-func requestContextAttrs(ctx context.Context) []slog.Attr {
-	attrs := requestCorrelationAttrs(ctx)
-	return attrs
-}
-
-func requestCorrelationAttrs(ctx context.Context) []slog.Attr {
-	if ctx == nil {
+func requestMetadataAttrs(r *http.Request) []slog.Attr {
+	if r == nil {
 		return nil
 	}
 
 	attrs := make([]slog.Attr, 0, 2)
-	if traceID := traceid.FromContext(ctx); traceID != "" {
-		attrs = append(attrs, slog.String(traceid.LogKey, traceID))
+	if method := strings.TrimSpace(r.Method); method != "" {
+		attrs = append(attrs, slog.String("http.request.method", method))
 	}
-	if requestID := chimw.GetReqID(ctx); requestID != "" {
-		attrs = append(attrs, slog.String("request.id", requestID))
+	if r.URL != nil {
+		if path := strings.TrimSpace(r.URL.Path); path != "" {
+			attrs = append(attrs, slog.String("url.path", path))
+		}
 	}
 
 	return attrs

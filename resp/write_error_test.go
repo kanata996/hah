@@ -11,10 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
-	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/httplog/v3"
-	"github.com/go-chi/traceid"
 	"github.com/kanata996/hah/errx"
 )
 
@@ -33,6 +29,12 @@ type failingWriter struct {
 	header http.Header
 	status int
 	writes int
+}
+
+type startedWriter struct {
+	inner        http.ResponseWriter
+	status       int
+	bytesWritten int
 }
 
 type rawTestError struct {
@@ -87,6 +89,36 @@ func (w *failingWriter) WriteHeader(status int) {
 func (w *failingWriter) Write(_ []byte) (int, error) {
 	w.writes++
 	return 0, errors.New("socket closed")
+}
+
+func (w *startedWriter) Header() http.Header {
+	return w.inner.Header()
+}
+
+func (w *startedWriter) WriteHeader(status int) {
+	w.status = status
+	w.inner.WriteHeader(status)
+}
+
+func (w *startedWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	n, err := w.inner.Write(p)
+	w.bytesWritten += n
+	return n, err
+}
+
+func (w *startedWriter) Status() int {
+	return w.status
+}
+
+func (w *startedWriter) BytesWritten() int {
+	return w.bytesWritten
+}
+
+func (w *startedWriter) Unwrap() http.ResponseWriter {
+	return w.inner
 }
 
 // WriteError 会把 HTTPError 写成标准 problem JSON。
@@ -614,7 +646,7 @@ func TestWriteErrorSkipsRewriteAfterResponseStarted(t *testing.T) {
 // 显式暴露状态的包装 ResponseWriter 一旦已经发出状态或字节，WriteError 不应再改写响应。
 func TestWriteErrorSkipsRewriteAfterWrappedResponseStarted(t *testing.T) {
 	rr := httptest.NewRecorder()
-	w := chimiddleware.NewWrapResponseWriter(rr, 1)
+	w := &startedWriter{inner: rr}
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusAccepted)
 	if _, err := w.Write([]byte("partial")); err != nil {
@@ -637,254 +669,137 @@ func TestWriteErrorSkipsRewriteAfterWrappedResponseStarted(t *testing.T) {
 	}
 }
 
-// 5xx 错误会给请求日志补充诊断字段，但不写入公开 details。
-func TestWriteErrorEnrichesRequestLog(t *testing.T) {
-	var buf bytes.Buffer
+// 5xx 会通过 slog.Default() 记录一条独立错误日志，并保留请求元数据。
+func TestWriteErrorLogsServerErrorMetadataToDefaultLogger(t *testing.T) {
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
 
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	r := chi.NewRouter()
-	r.Use(chimiddleware.RequestID)
-	r.Use(traceid.Middleware)
-	r.Use(httplog.RequestLogger(logger, &httplog.Options{
-		Level:         slog.LevelInfo,
-		Schema:        httplog.SchemaECS,
-		RecoverPanics: true,
-	}))
-	r.Get("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
-		rawErr := &rawTestError{message: "db timeout"}
-		err := errx.NewHTTPErrorWithCause(
-			http.StatusInternalServerError,
-			"internal_error",
-			"",
-			&wrappedTestError{op: "load user", err: rawErr},
-			map[string]any{"field": "name", "code": "required"},
-		)
-		_ = WriteError(w, r, err)
-	})
 	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
-	req.Header.Set(chimiddleware.RequestIDHeader, "req-123")
 	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
 
+	rawErr := &rawTestError{message: "db timeout"}
+	err := WriteError(rr, req, errx.NewHTTPErrorWithCause(
+		http.StatusInternalServerError,
+		"internal_error",
+		"",
+		&wrappedTestError{op: "load user", err: rawErr},
+	))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
+	if defaultBuf.Len() == 0 {
+		t.Fatal("default logger did not capture output")
+	}
 
-	logEntry := decodePayload(t, buf.Bytes())
+	logEntry := decodePayload(t, defaultBuf.Bytes())
+	if got := logEntry["msg"]; got != "resp: request failed with server error" {
+		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
+	}
 	if got := logEntry["error.code"]; got != "internal_error" {
 		t.Fatalf("error.code = %#v, want internal_error", got)
 	}
-	if got := logEntry["request.id"]; got != "req-123" {
-		t.Fatalf("request.id = %#v, want req-123", got)
+	if got := logEntry["error.message"]; got != "load user: db timeout" {
+		t.Fatalf("error.message = %#v, want load user: db timeout", got)
 	}
-	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
-		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
+	if got := logEntry["error.root_message"]; got != "db timeout" {
+		t.Fatalf("error.root_message = %#v, want db timeout", got)
 	}
-	if _, exists := logEntry["error.message"]; exists {
-		t.Fatalf("error.message unexpectedly present: %#v", logEntry["error.message"])
+	if got := logEntry["http.request.method"]; got != http.MethodGet {
+		t.Fatalf("http.request.method = %#v, want %q", got, http.MethodGet)
 	}
-	if _, exists := logEntry["error.type"]; exists {
-		t.Fatalf("error.type unexpectedly present: %#v", logEntry["error.type"])
-	}
-	if _, exists := logEntry["error.root_message"]; exists {
-		t.Fatalf("error.root_message unexpectedly present: %#v", logEntry["error.root_message"])
-	}
-	if _, exists := logEntry["error.root_type"]; exists {
-		t.Fatalf("error.root_type unexpectedly present: %#v", logEntry["error.root_type"])
-	}
-	if _, exists := logEntry["error.details"]; exists {
-		t.Fatalf("error.details unexpectedly present: %#v", logEntry["error.details"])
-	}
-	if _, exists := logEntry["error.chain"]; exists {
-		t.Fatalf("error.chain unexpectedly present: %#v", logEntry["error.chain"])
-	}
-	if _, exists := logEntry["error.chain_types"]; exists {
-		t.Fatalf("error.chain_types unexpectedly present: %#v", logEntry["error.chain_types"])
-	}
-	if _, exists := logEntry["error.public_message"]; exists {
-		t.Fatalf("error.public_message unexpectedly present: %#v", logEntry["error.public_message"])
-	}
-	if _, exists := logEntry["error.expected"]; exists {
-		t.Fatalf("error.expected unexpectedly present: %#v", logEntry["error.expected"])
-	}
-	if _, exists := logEntry["error.category"]; exists {
-		t.Fatalf("error.category unexpectedly present: %#v", logEntry["error.category"])
-	}
-	if _, exists := logEntry["error.details_count"]; exists {
-		t.Fatalf("error.details_count unexpectedly present: %#v", logEntry["error.details_count"])
+	if got := logEntry["url.path"]; got != "/users/u_123" {
+		t.Fatalf("url.path = %#v, want /users/u_123", got)
 	}
 }
 
-// request log 只保留低噪音字段，不会镜像包装错误文本或类型。
-func TestWriteErrorEnrichesRequestLogFromWrappedHTTPErrorWithoutCause(t *testing.T) {
-	var buf bytes.Buffer
+// 5xx 独立错误日志会显式标记超时错误，便于和普通内部错误区分。
+func TestWriteErrorLogsTimeoutFlagToDefaultLogger(t *testing.T) {
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
 
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	r := chi.NewRouter()
-	r.Use(httplog.RequestLogger(logger, &httplog.Options{
-		Level:         slog.LevelInfo,
-		Schema:        httplog.SchemaECS,
-		RecoverPanics: true,
-	}))
-	r.Get("/wrapped", func(w http.ResponseWriter, r *http.Request) {
-		err := fmt.Errorf("handler failed: %w", errx.NewHTTPError(
-			http.StatusInternalServerError,
-			"internal_error",
-			"",
-		))
-		_ = WriteError(w, r, err)
-	})
-	req := httptest.NewRequest(http.MethodGet, "/wrapped", nil)
-	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
-	}
-
-	logEntry := decodePayload(t, buf.Bytes())
-	if got := logEntry["error.code"]; got != "internal_error" {
-		t.Fatalf("error.code = %#v, want internal_error", got)
-	}
-	for _, key := range []string{"error.message", "error.type", "error.root_message", "error.root_type"} {
-		if _, exists := logEntry[key]; exists {
-			t.Fatalf("%s unexpectedly present: %#v", key, logEntry[key])
-		}
-	}
-}
-
-// 5xx 请求日志会显式标记超时错误，便于和普通内部错误区分。
-func TestWriteErrorEnrichesRequestLogWithTimeoutFlag(t *testing.T) {
-	var buf bytes.Buffer
-
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	r := chi.NewRouter()
-	r.Use(chimiddleware.RequestID)
-	r.Use(traceid.Middleware)
-	r.Use(httplog.RequestLogger(logger, &httplog.Options{
-		Level:         slog.LevelInfo,
-		Schema:        httplog.SchemaECS,
-		RecoverPanics: true,
-	}))
-	r.Get("/timeout", func(w http.ResponseWriter, r *http.Request) {
-		err := errx.NewHTTPErrorWithCause(
-			http.StatusInternalServerError,
-			"internal_error",
-			"",
-			context.DeadlineExceeded,
-		)
-		_ = WriteError(w, r, err)
-	})
 	req := httptest.NewRequest(http.MethodGet, "/timeout", nil)
-	req.Header.Set(chimiddleware.RequestIDHeader, "req-timeout")
 	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
 
+	err := WriteError(rr, req, errx.NewHTTPErrorWithCause(
+		http.StatusInternalServerError,
+		"internal_error",
+		"",
+		context.DeadlineExceeded,
+	))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
 
-	logEntry := decodePayload(t, buf.Bytes())
+	logEntry := decodePayload(t, defaultBuf.Bytes())
 	if got := logEntry["error.timeout"]; got != true {
 		t.Fatalf("error.timeout = %#v, want true", got)
 	}
 	if _, exists := logEntry["error.canceled"]; exists {
 		t.Fatalf("error.canceled unexpectedly present: %#v", logEntry["error.canceled"])
 	}
-	if got := logEntry["request.id"]; got != "req-timeout" {
-		t.Fatalf("request.id = %#v, want req-timeout", got)
-	}
-	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
-		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
-	}
 }
 
-// 5xx 请求日志会显式标记 canceled 错误，即使公开响应仍是 500。
-func TestWriteErrorEnrichesRequestLogWithCanceledFlag(t *testing.T) {
-	var buf bytes.Buffer
+// 5xx 独立错误日志会显式标记 canceled 错误，即使公开响应仍是 500。
+func TestWriteErrorLogsCanceledFlagToDefaultLogger(t *testing.T) {
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
 
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	r := chi.NewRouter()
-	r.Use(chimiddleware.RequestID)
-	r.Use(traceid.Middleware)
-	r.Use(httplog.RequestLogger(logger, &httplog.Options{
-		Level:         slog.LevelInfo,
-		Schema:        httplog.SchemaECS,
-		RecoverPanics: true,
-	}))
-	r.Get("/canceled", func(w http.ResponseWriter, r *http.Request) {
-		err := errx.NewHTTPErrorWithCause(
-			http.StatusInternalServerError,
-			"internal_error",
-			"",
-			context.Canceled,
-		)
-		_ = WriteError(w, r, err)
-	})
 	req := httptest.NewRequest(http.MethodGet, "/canceled", nil)
-	req.Header.Set(chimiddleware.RequestIDHeader, "req-canceled")
 	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
 
+	err := WriteError(rr, req, errx.NewHTTPErrorWithCause(
+		http.StatusInternalServerError,
+		"internal_error",
+		"",
+		context.Canceled,
+	))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
 
-	logEntry := decodePayload(t, buf.Bytes())
+	logEntry := decodePayload(t, defaultBuf.Bytes())
 	if got := logEntry["error.canceled"]; got != true {
 		t.Fatalf("error.canceled = %#v, want true", got)
 	}
 	if _, exists := logEntry["error.timeout"]; exists {
 		t.Fatalf("error.timeout unexpectedly present: %#v", logEntry["error.timeout"])
 	}
-	if got := logEntry["request.id"]; got != "req-canceled" {
-		t.Fatalf("request.id = %#v, want req-canceled", got)
-	}
-	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
-		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
-	}
 }
 
-// 4xx 错误不会污染请求日志的 error.* 诊断字段。
-func TestWriteErrorDoesNotEnrichRequestLogFor4xx(t *testing.T) {
-	var buf bytes.Buffer
+// 4xx 错误不会输出独立服务端错误日志。
+func TestWriteErrorDoesNotLogServerErrorFor4xx(t *testing.T) {
 	var defaultBuf bytes.Buffer
 	previousDefault := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
 	defer slog.SetDefault(previousDefault)
 
-	logger := slog.New(slog.NewJSONHandler(&buf, nil))
-	r := chi.NewRouter()
-	r.Use(httplog.RequestLogger(logger, &httplog.Options{
-		Level:         slog.LevelInfo,
-		Schema:        httplog.SchemaECS,
-		RecoverPanics: true,
-	}))
-	r.Use(chimiddleware.RequestID)
-	r.Get("/users/{id}", func(w http.ResponseWriter, r *http.Request) {
-		err := errx.BadRequest("bad_request", "bad request", map[string]any{
-			"field": "name",
-			"code":  "required",
-		})
-		_ = WriteError(w, r, err)
-	})
 	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
-	req.Header.Set(chimiddleware.RequestIDHeader, "req-456")
 	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
 
+	err := WriteError(rr, req, errx.BadRequest("bad_request", "bad request", map[string]any{
+		"field": "name",
+		"code":  "required",
+	}))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
-	}
-
-	logEntry := decodePayload(t, buf.Bytes())
-	if got := logEntry["http.response.status_code"]; got != float64(http.StatusBadRequest) {
-		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusBadRequest)
-	}
-	for key := range logEntry {
-		if strings.HasPrefix(key, "error.") {
-			t.Fatalf("unexpected error log field for 4xx: %s=%#v", key, logEntry[key])
-		}
 	}
 	if defaultBuf.Len() != 0 {
 		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
@@ -916,52 +831,22 @@ func TestWriteErrorDoesNotBuildDiagnosticAttrsFor4xx(t *testing.T) {
 
 // 5xx 会通过 slog.Default() 额外记录一条独立错误日志，便于脱离 access log 排查问题。
 func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
-	var requestBuf bytes.Buffer
-	requestLogger := slog.New(slog.NewJSONHandler(&requestBuf, nil))
-
 	var defaultBuf bytes.Buffer
 	previousDefault := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
 	defer slog.SetDefault(previousDefault)
 
-	r := chi.NewRouter()
-	r.Use(chimiddleware.RequestID)
-	r.Use(traceid.Middleware)
-	r.Use(httplog.RequestLogger(requestLogger, &httplog.Options{
-		Level:         slog.LevelInfo,
-		Schema:        httplog.SchemaECS,
-		RecoverPanics: true,
-	}))
-	r.Get("/failure", func(w http.ResponseWriter, r *http.Request) {
-		_ = WriteError(w, r, errors.New("db timeout"))
-	})
 	req := httptest.NewRequest(http.MethodGet, "/failure", nil)
-	req.Header.Set(chimiddleware.RequestIDHeader, "req-server")
 	rr := httptest.NewRecorder()
-	r.ServeHTTP(rr, req)
+	if err := WriteError(rr, req, errors.New("db timeout")); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
-	if requestBuf.Len() == 0 {
-		t.Fatal("request logger did not capture access log")
-	}
 	if defaultBuf.Len() == 0 {
 		t.Fatal("default logger did not capture output")
-	}
-
-	accessLog := decodePayload(t, requestBuf.Bytes())
-	if got := accessLog["error.code"]; got != "internal_error" {
-		t.Fatalf("access log error.code = %#v, want internal_error", got)
-	}
-	if got := accessLog["request.id"]; got != "req-server" {
-		t.Fatalf("access log request.id = %#v, want req-server", got)
-	}
-	if got, ok := accessLog["traceId"].(string); !ok || got == "" {
-		t.Fatalf("access log traceId = %#v, want non-empty string", accessLog["traceId"])
-	}
-	if _, exists := accessLog["error.message"]; exists {
-		t.Fatalf("access log error.message unexpectedly present: %#v", accessLog["error.message"])
 	}
 
 	logEntry := decodePayload(t, defaultBuf.Bytes())
@@ -974,14 +859,14 @@ func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	if got := logEntry["error.message"]; got != "db timeout" {
 		t.Fatalf("error.message = %#v, want db timeout", got)
 	}
-	if got := logEntry["request.id"]; got != "req-server" {
-		t.Fatalf("request.id = %#v, want req-server", got)
-	}
-	if got, ok := logEntry["traceId"].(string); !ok || got == "" {
-		t.Fatalf("traceId = %#v, want non-empty string", logEntry["traceId"])
-	}
 	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
 		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
+	}
+	if got := logEntry["http.request.method"]; got != http.MethodGet {
+		t.Fatalf("http.request.method = %#v, want %q", got, http.MethodGet)
+	}
+	if got := logEntry["url.path"]; got != "/failure" {
+		t.Fatalf("url.path = %#v, want /failure", got)
 	}
 }
 

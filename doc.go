@@ -1,4 +1,4 @@
-// Package chix 提供根包常用的请求/响应边界入口，聚合 reqx 与 resp 中最常用的一组能力。
+// Package hah 提供根包常用的请求/响应边界入口，聚合 reqx 与 resp 中最常用的一组能力。
 //
 // 适合在大多数 handler 中直接使用：
 //   - Echo 风格的请求绑定与校验入口

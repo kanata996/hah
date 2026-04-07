@@ -9,7 +9,6 @@ package resp
 // - [✓] `WriteError` 在 5xx 服务端错误场景下的基准性能。
 
 import (
-	"context"
 	"errors"
 	"io"
 	"log/slog"
@@ -17,8 +16,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	chimw "github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/traceid"
 	"github.com/kanata996/hah/errx"
 )
 
@@ -139,7 +136,7 @@ func BenchmarkWriteError_ServerError500(b *testing.B) {
 	restore := setBenchmarkDefaultLogger()
 	defer restore()
 
-	req := benchmarkRequestWithIDs(http.MethodGet, "/accounts/acct_123456")
+	req := httptest.NewRequest(http.MethodGet, "/accounts/acct_123456", nil)
 	w := &benchmarkResponseWriter{header: make(http.Header, 1)}
 
 	for b.Loop() {
@@ -147,14 +144,6 @@ func BenchmarkWriteError_ServerError500(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
-}
-
-func benchmarkRequestWithIDs(method, target string) *http.Request {
-	req := httptest.NewRequest(method, target, nil)
-	ctx := traceid.NewContext(req.Context())
-	ctx = context.WithValue(ctx, chimw.RequestIDKey, "req-bench")
-
-	return req.WithContext(ctx)
 }
 
 func setBenchmarkDefaultLogger() func() {

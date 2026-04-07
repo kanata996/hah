@@ -27,7 +27,6 @@
 说明：
 
 - `Mapped Internal Error Mode` 在 `net/http` 里也能做，但不是这个示例的重点。
-- 如果要强调 feature 边界挂载 mapper，`chi` 示例更直观。
 
 入口文件：
 

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/kanata996/hah/errx"
 )
 
@@ -366,8 +365,8 @@ func TestReadmeCreateAccountFlow(t *testing.T) {
 		Name  string `json:"name" validate:"required"`
 	}
 
-	router := chi.NewRouter()
-	router.Post("/orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
+	router := http.NewServeMux()
+	router.HandleFunc("POST /orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
 		var req createAccountRequest
 		if err := BindAndValidate(r, &req); err != nil {
 			_ = WriteError(w, r, err)

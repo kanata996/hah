@@ -1,4 +1,4 @@
-// Package resp 为基于 chi 的 JSON API 提供响应侧辅助能力。
+// Package resp 为基于 net/http 的 JSON API 提供响应侧辅助能力。
 //
 // 它聚焦在 HTTP 输出边界：
 //   - JSON 响应写回
@@ -12,7 +12,7 @@
 //   - 使用 JSON / JSONPretty / JSONBlob 进行底层 JSON 输出
 //   - 使用 OK / Created / NoContent 写成功响应
 //   - 使用 WriteError 写结构化错误响应
-//   - 在 5xx 场景通过 WriteError 补 request log 诊断字段，并输出独立错误日志
+//   - 在 5xx 场景通过 WriteError 输出独立错误日志
 //   - 与 errx.HTTPError 配合，按统一错误模型写回响应
 //
 // 公开 API：
