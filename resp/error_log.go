@@ -46,9 +46,19 @@ func diagnosticErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
 		return nil
 	}
 
-	chain := buildErrorChainInfo(errorForDiagnostics(err, httpErr))
+	return diagnosticErrorLogAttrsForError(errorForDiagnostics(err, httpErr), err, httpErr.Code())
+}
+
+func diagnosticErrorLogAttrsForError(diagnosticErr, flagErr error, code string) []slog.Attr {
+	if diagnosticErr == nil {
+		return nil
+	}
+
+	chain := buildErrorChainInfo(diagnosticErr)
 	attrs := make([]slog.Attr, 0, 7)
-	attrs = append(attrs, slog.String("error.code", httpErr.Code()))
+	if strings.TrimSpace(code) != "" {
+		attrs = append(attrs, slog.String("error.code", code))
+	}
 	if chain.message != "" {
 		attrs = append(attrs, slog.String("error.message", chain.message))
 	}
@@ -62,10 +72,10 @@ func diagnosticErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
 	if chain.rootType != "" {
 		attrs = append(attrs, slog.String("error.root_type", chain.rootType))
 	}
-	if errors.Is(err, context.Canceled) {
+	if errors.Is(flagErr, context.Canceled) {
 		attrs = append(attrs, slog.Bool("error.canceled", true))
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(flagErr, context.DeadlineExceeded) {
 		attrs = append(attrs, slog.Bool("error.timeout", true))
 	}
 
@@ -99,7 +109,7 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *errx.HTTPError, err 
 	attrs := []slog.Attr{
 		slog.Int("http.response.status_code", httpErr.Status()),
 	}
-	attrs = append(attrs, diagnosticErrorLogAttrs(err, httpErr)...)
+	attrs = append(attrs, diagnosticErrorLogAttrsForError(err, err, httpErr.Code())...)
 	attrs = append(attrs, requestMetadataAttrs(r)...)
 
 	var degraded *ErrorWriteDegraded

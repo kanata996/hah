@@ -13,6 +13,15 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+### Fixed
+
+- Clarified `resp.WriteError(...)` logging behavior so ordinary `4xx` responses still do not emit standalone error logs; only `5xx` failures and error-response write failures produce independent `slog.Default()` records.
+- Fixed error-response write-failure diagnostics to log the actual `writeErr` chain instead of falling back to the original `errx.HTTPError` cause, so `"resp: failed to write error response"` now points at the real write-path failure.
+
+### Documentation
+
+- Updated the error-logging documentation to match the current standalone-log contract and the write-failure diagnostic starting point.
+
 ## [v0.2.0] - 2026-04-07
 
 ### Highlights
