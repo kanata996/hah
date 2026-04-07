@@ -52,8 +52,7 @@
 
 ### 普通 5xx
 
-当 `WriteError(...)` 最终收敛为 `5xx` 时，会通过 `slog.Default()` 输出一条独立
-`error` 日志：
+当 `WriteError(...)` 最终收敛为 `5xx` 时，会额外输出一条独立 `error` 日志：
 
 - 消息：`resp: request failed with server error`
 
@@ -105,6 +104,11 @@
 
 - 如果 `HTTPError` 持有 `cause`，优先从 `httpErr.cause` 开始
 - 否则从原始 `err` 开始
+
+错误响应写出失败的诊断起点规则为：
+
+- 始终从实际的 `writeErr` 开始
+- 不再回跳到原始 `HTTPError.cause`
 
 错误链展开同时兼容：
 

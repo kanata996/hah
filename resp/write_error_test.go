@@ -23,7 +23,7 @@ import (
 // [✓] 响应已经开始写出时不会被二次改写，但 5xx 仍会输出独立错误日志
 // [✓] asHTTPError 会保留 HTTPError，并把 context/普通 error 收敛为稳定公共语义
 // [✓] problem payload 会按 includeErrors 开关决定是否暴露公开 errors
-// [✓] 5xx 请求日志只补充低噪音关联字段并输出独立错误日志，4xx 不会；错误响应写出失败会记录独立日志
+// [✓] 5xx 会输出独立错误日志，4xx 不会；错误响应写出失败会记录独立日志
 
 type failingWriter struct {
 	header http.Header
@@ -932,6 +932,11 @@ func TestWriteErrorWithNilRequestLogsWriteFailureToDefaultLogger(t *testing.T) {
 	}
 	if got := serverLog["error.code"]; got != "internal_error" {
 		t.Fatalf("error.code = %#v, want internal_error", got)
+	}
+
+	writeFailureLog := decodePayload(t, lines[1])
+	if got := writeFailureLog["msg"]; got != "resp: failed to write error response" {
+		t.Fatalf("msg = %#v, want resp: failed to write error response", got)
 	}
 }
 

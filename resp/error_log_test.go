@@ -212,6 +212,9 @@ func TestDiagnosticErrorLogAttrs(t *testing.T) {
 	if got := diagnosticErrorLogAttrs(nil, nil); got != nil {
 		t.Fatalf("diagnosticErrorLogAttrs(nil, nil) = %#v, want nil", got)
 	}
+	if got := diagnosticErrorLogAttrsForError(nil, nil, "internal_error"); got != nil {
+		t.Fatalf("diagnosticErrorLogAttrsForError(nil, nil, code) = %#v, want nil", got)
+	}
 
 	canceledErr := errx.NewHTTPErrorWithCause(http.StatusInternalServerError, "internal_error", "", context.Canceled)
 	canceledAttrs := attrsToMap(diagnosticErrorLogAttrs(canceledErr, canceledErr))
@@ -263,6 +266,33 @@ func TestLogServerError(t *testing.T) {
 	}
 	if got := logEntry["url.path"]; got != "/users/u_1" {
 		t.Fatalf("url.path = %#v, want /users/u_1", got)
+	}
+}
+
+func TestLogErrorResponseWriteFailureUsesWriteErrorDiagnostics(t *testing.T) {
+	var buf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	req := httptest.NewRequest(http.MethodGet, "/failure", nil)
+	httpErr := errx.NewHTTPErrorWithCause(
+		http.StatusInternalServerError,
+		"internal_error",
+		"Internal Server Error",
+		errors.New("db timeout"),
+	)
+	logErrorResponseWriteFailure(req, httpErr, errors.New("socket closed"))
+	if buf.Len() == 0 {
+		t.Fatal("logErrorResponseWriteFailure() did not write output")
+	}
+
+	logEntry := decodePayload(t, buf.Bytes())
+	if got := logEntry["error.message"]; got != "socket closed" {
+		t.Fatalf("error.message = %#v, want socket closed", got)
+	}
+	if got := logEntry["error.root_message"]; got != "socket closed" {
+		t.Fatalf("error.root_message = %#v, want socket closed", got)
 	}
 }
 
