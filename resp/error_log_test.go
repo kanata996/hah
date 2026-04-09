@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -247,6 +248,7 @@ func TestLogServerError(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	defer slog.SetDefault(previousDefault)
 
+	req := httptest.NewRequest(http.MethodGet, "/users/u_1", nil)
 	var responder *ErrorResponder
 	responder.logServerError(nil, nil, nil)
 	responder.logServerError(nil, errx.BadRequest("bad_request", "bad request"), errors.New("client error"))
@@ -254,7 +256,7 @@ func TestLogServerError(t *testing.T) {
 		t.Fatalf("logServerError() unexpectedly wrote output: %s", buf.Bytes())
 	}
 
-	responder.logServerError(nil, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), errors.New("db timeout"))
+	responder.logServerError(req, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), errors.New("db timeout"))
 	if buf.Len() == 0 {
 		t.Fatal("logServerError() did not write 5xx output")
 	}
@@ -272,6 +274,12 @@ func TestLogServerError(t *testing.T) {
 	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
 		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
 	}
+	if got := logEntry["http.request.method"]; got != http.MethodGet {
+		t.Fatalf("http.request.method = %#v, want %q", got, http.MethodGet)
+	}
+	if got := logEntry["url.path"]; got != "/users/u_1" {
+		t.Fatalf("url.path = %#v, want /users/u_1", got)
+	}
 }
 
 func TestLogServerErrorAttrs(t *testing.T) {
@@ -280,6 +288,7 @@ func TestLogServerErrorAttrs(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	defer slog.SetDefault(previousDefault)
 
+	req := httptest.NewRequest(http.MethodPost, "/users", nil)
 	var responder *ErrorResponder
 	responder.logServerErrorAttrs(nil, nil, nil)
 	responder.logServerErrorAttrs(nil, errx.BadRequest("bad_request", "bad request"), []slog.Attr{
@@ -289,7 +298,7 @@ func TestLogServerErrorAttrs(t *testing.T) {
 		t.Fatalf("logServerErrorAttrs() unexpectedly wrote output: %s", buf.Bytes())
 	}
 
-	responder.logServerErrorAttrs(nil, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), []slog.Attr{
+	responder.logServerErrorAttrs(req, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), []slog.Attr{
 		slog.String("error.code", "internal_error"),
 	})
 	if buf.Len() == 0 {
@@ -306,6 +315,12 @@ func TestLogServerErrorAttrs(t *testing.T) {
 	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
 		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
 	}
+	if got := logEntry["http.request.method"]; got != http.MethodPost {
+		t.Fatalf("http.request.method = %#v, want %q", got, http.MethodPost)
+	}
+	if got := logEntry["url.path"]; got != "/users" {
+		t.Fatalf("url.path = %#v, want /users", got)
+	}
 }
 
 func TestErrorForDiagnostics(t *testing.T) {
@@ -320,6 +335,17 @@ func TestErrorForDiagnostics(t *testing.T) {
 	withoutCause := errx.NewHTTPError(http.StatusInternalServerError, "", "")
 	if got := errorForDiagnostics(original, withoutCause); !errors.Is(got, original) {
 		t.Fatalf("errorForDiagnostics() without cause = %v, want original %v", got, original)
+	}
+}
+
+func TestRequestMetadataAttrs(t *testing.T) {
+	req := httptest.NewRequest(http.MethodDelete, "/users/u_1", nil)
+	attrs := attrsToMap(requestMetadataAttrs(req))
+	if got := attrs["http.request.method"]; got != http.MethodDelete {
+		t.Fatalf("http.request.method = %#v, want %q", got, http.MethodDelete)
+	}
+	if got := attrs["url.path"]; got != "/users/u_1" {
+		t.Fatalf("url.path = %#v, want /users/u_1", got)
 	}
 }
 

@@ -770,6 +770,12 @@ func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
 	if got := logEntry["error.message"]; got != "db timeout" {
 		t.Fatalf("error.message = %#v, want db timeout", got)
 	}
+	if got := logEntry["http.request.method"]; got != http.MethodGet {
+		t.Fatalf("http.request.method = %#v, want %q", got, http.MethodGet)
+	}
+	if got := logEntry["url.path"]; got != "/failure" {
+		t.Fatalf("url.path = %#v, want /failure", got)
+	}
 	if _, exists := logEntry["request.id"]; exists {
 		t.Fatalf("request.id unexpectedly present: %#v", logEntry["request.id"])
 	}
@@ -846,6 +852,12 @@ func TestLogErrorResponseWriteFailureFallsBackToDefaultLogger(t *testing.T) {
 	}
 	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
 		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
+	}
+	if got := logEntry["http.request.method"]; got != http.MethodGet {
+		t.Fatalf("http.request.method = %#v, want %q", got, http.MethodGet)
+	}
+	if got := logEntry["url.path"]; got != "/failure" {
+		t.Fatalf("url.path = %#v, want /failure", got)
 	}
 }
 

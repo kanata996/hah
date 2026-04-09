@@ -125,6 +125,7 @@ func (r *ErrorResponder) logErrorResponseWriteFailure(req *http.Request, httpErr
 		slog.Int("http.response.status_code", httpErr.Status()),
 	}
 	attrs = append(attrs, diagnosticErrorLogAttrs(err, httpErr)...)
+	attrs = append(attrs, requestMetadataAttrs(req)...)
 	attrs = append(attrs, r.contextAttrs(ctx)...)
 
 	var degraded *ErrorWriteDegraded
@@ -161,6 +162,7 @@ func (r *ErrorResponder) logServerErrorAttrs(req *http.Request, httpErr *errx.HT
 		slog.Int("http.response.status_code", httpErr.Status()),
 	}
 	attrs = append(attrs, diagnosticAttrs...)
+	attrs = append(attrs, requestMetadataAttrs(req)...)
 	attrs = append(attrs, r.contextAttrs(ctx)...)
 
 	r.logger().LogAttrs(ctx, slog.LevelError, "resp: request failed with server error", attrs...)
@@ -320,4 +322,22 @@ func limitErrorLogString(value string) string {
 		return trimmed
 	}
 	return trimmed[:maxLoggedErrorStringBytes] + "...(truncated)"
+}
+
+func requestMetadataAttrs(req *http.Request) []slog.Attr {
+	if req == nil {
+		return nil
+	}
+
+	attrs := make([]slog.Attr, 0, 2)
+	if method := strings.TrimSpace(req.Method); method != "" {
+		attrs = append(attrs, slog.String("http.request.method", method))
+	}
+	if req.URL != nil {
+		if path := strings.TrimSpace(req.URL.Path); path != "" {
+			attrs = append(attrs, slog.String("url.path", path))
+		}
+	}
+
+	return attrs
 }
