@@ -13,67 +13,196 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-func TestErrorResponderContextAttrs(t *testing.T) {
-	var responder *ErrorResponder
-	if got := responder.contextAttrs(nilContext()); got != nil {
-		t.Fatalf("contextAttrs(nil responder) = %#v, want nil", got)
-	}
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] `NewErrorResponder` 与零值 `ErrorResponder` 的默认 fallback 契约。
+// - [✓] `ErrorResponder` 的自定义 `Logger` / `AsHTTPError` / `ContextAttrs` / `RequestLogAttrs` / `AnnotateRequestLog` 会通过 `Respond` 生效。
+// - [✓] `ErrorResponder` 仅在 5xx 请求日志补低噪音 `error.*` 字段，并对 canceled / timeout 保持稳定标记；4xx 不补这些字段也不额外打独立错误日志。
 
-	responder = &ErrorResponder{
-		ContextAttrs: func(context.Context) []slog.Attr {
-			return []slog.Attr{
-				slog.String("traceId", "trace-123"),
-			}
-		},
-	}
-
-	attrs := attrsToMap(responder.contextAttrs(context.Background()))
-	if got := attrs["traceId"]; got != "trace-123" {
-		t.Fatalf("traceId = %#v, want trace-123", got)
-	}
-}
-
-func TestNewErrorResponderAndOverrides(t *testing.T) {
+func TestNewErrorResponderRespondUsesDefaultFallbacks(t *testing.T) {
 	responder := NewErrorResponder()
 	if responder == nil {
 		t.Fatal("NewErrorResponder() = nil")
 	}
 
-	defaultLogger := slog.Default()
-	if got := responder.logger(); got != defaultLogger {
-		t.Fatalf("logger() = %p, want default %p", got, defaultLogger)
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	req := httptest.NewRequest(http.MethodGet, "/timeout", nil)
+	rr := httptest.NewRecorder()
+
+	if err := responder.Respond(rr, req, context.DeadlineExceeded); err != nil {
+		t.Fatalf("Respond() error = %v", err)
 	}
 
-	customLogger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	responder.Logger = customLogger
-	if got := responder.logger(); got != customLogger {
-		t.Fatalf("logger() = %p, want custom %p", got, customLogger)
+	if rr.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusGatewayTimeout)
 	}
 
-	cause := errors.New("boom")
-	customHTTPError := errx.BadRequest("bad_request", "bad request")
-	responder.AsHTTPError = func(err error) *errx.HTTPError {
-		if !errors.Is(err, cause) {
-			t.Fatalf("AsHTTPError() err = %v, want %v", err, cause)
-		}
-		return customHTTPError
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "timeout" {
+		t.Fatalf("code = %#v, want timeout", got)
 	}
-	if got := responder.httpError(cause); got != customHTTPError {
-		t.Fatalf("httpError() = %p, want %p", got, customHTTPError)
+	if got := body["title"]; got != http.StatusText(http.StatusGatewayTimeout) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
+	}
+	if got := body["detail"]; got != http.StatusText(http.StatusGatewayTimeout) {
+		t.Fatalf("detail = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
 	}
 
-	customAttrs := []slog.Attr{slog.String("service", "resp")}
-	responder.RequestLogAttrs = func(err error, httpErr *errx.HTTPError) []slog.Attr {
-		if !errors.Is(err, cause) {
-			t.Fatalf("RequestLogAttrs err = %v, want %v", err, cause)
-		}
-		if httpErr != customHTTPError {
-			t.Fatalf("RequestLogAttrs httpErr = %p, want %p", httpErr, customHTTPError)
-		}
-		return customAttrs
+	if defaultBuf.Len() == 0 {
+		t.Fatal("default logger did not capture output")
 	}
-	if got := responder.requestLogAttrs(cause, customHTTPError); len(got) != 1 || got[0].Key != "service" {
-		t.Fatalf("requestLogAttrs() = %#v, want custom attrs", got)
+
+	logEntry := decodePayload(t, defaultBuf.Bytes())
+	if got := logEntry["msg"]; got != "resp: request failed with server error" {
+		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
+	}
+	if got := logEntry["error.code"]; got != "timeout" {
+		t.Fatalf("error.code = %#v, want timeout", got)
+	}
+	if got := logEntry["error.timeout"]; got != true {
+		t.Fatalf("error.timeout = %#v, want true", got)
+	}
+}
+
+func TestZeroValueErrorResponderRespondUsesDefaultFallbacks(t *testing.T) {
+	var responder ErrorResponder
+
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	req := httptest.NewRequest(http.MethodGet, "/boom", nil)
+	rr := httptest.NewRecorder()
+
+	if err := responder.Respond(rr, req, errors.New("boom")); err != nil {
+		t.Fatalf("Respond() error = %v", err)
+	}
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "internal_error" {
+		t.Fatalf("code = %#v, want internal_error", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusInternalServerError))
+	}
+	if got := body["detail"]; got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf("detail = %#v, want %q", got, http.StatusText(http.StatusInternalServerError))
+	}
+
+	if defaultBuf.Len() == 0 {
+		t.Fatal("default logger did not capture output")
+	}
+
+	logEntry := decodePayload(t, defaultBuf.Bytes())
+	if got := logEntry["msg"]; got != "resp: request failed with server error" {
+		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
+	}
+	if got := logEntry["error.code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
+	}
+}
+
+func TestErrorResponderRespondUsesCustomHooks(t *testing.T) {
+	type requestContextKey struct{}
+
+	inputErr := errors.New("boom")
+	customHTTPError := errx.NewHTTPError(http.StatusBadGateway, "upstream_failure", "upstream failure")
+	captured := &capturedRequestLog{}
+
+	var customBuf bytes.Buffer
+	customLogger := slog.New(slog.NewJSONHandler(&customBuf, nil))
+
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	responder := &ErrorResponder{
+		Logger: customLogger,
+		AsHTTPError: func(err error) *errx.HTTPError {
+			if !errors.Is(err, inputErr) {
+				t.Fatalf("AsHTTPError() err = %v, want %v", err, inputErr)
+			}
+			return customHTTPError
+		},
+		ContextAttrs: func(ctx context.Context) []slog.Attr {
+			if got := ctx.Value(requestContextKey{}); got != "trace-123" {
+				t.Fatalf("ContextAttrs() context value = %#v, want trace-123", got)
+			}
+			return []slog.Attr{slog.String("traceId", "trace-123")}
+		},
+		AnnotateRequestLog: captured.annotate,
+		RequestLogAttrs: func(err error, httpErr *errx.HTTPError) []slog.Attr {
+			if !errors.Is(err, inputErr) {
+				t.Fatalf("RequestLogAttrs() err = %v, want %v", err, inputErr)
+			}
+			if httpErr != customHTTPError {
+				t.Fatalf("RequestLogAttrs() httpErr = %p, want %p", httpErr, customHTTPError)
+			}
+			return []slog.Attr{slog.String("service", "resp")}
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/custom", nil).WithContext(
+		context.WithValue(context.Background(), requestContextKey{}, "trace-123"),
+	)
+	rr := httptest.NewRecorder()
+
+	if err := responder.Respond(rr, req, inputErr); err != nil {
+		t.Fatalf("Respond() error = %v", err)
+	}
+
+	if rr.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadGateway)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "upstream_failure" {
+		t.Fatalf("code = %#v, want upstream_failure", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusBadGateway) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusBadGateway))
+	}
+	if got := body["detail"]; got != "upstream failure" {
+		t.Fatalf("detail = %#v, want upstream failure", got)
+	}
+
+	if captured.req != req {
+		t.Fatalf("annotated request = %p, want %p", captured.req, req)
+	}
+	requestLogEntry := attrsToMap(captured.attrs)
+	if got := requestLogEntry["service"]; got != "resp" {
+		t.Fatalf("request log service = %#v, want resp", got)
+	}
+	if _, exists := requestLogEntry["error.code"]; exists {
+		t.Fatalf("request log unexpectedly used default attrs: %#v", requestLogEntry)
+	}
+
+	if defaultBuf.Len() != 0 {
+		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
+	}
+	if customBuf.Len() == 0 {
+		t.Fatal("custom logger did not capture output")
+	}
+
+	logEntry := decodePayload(t, customBuf.Bytes())
+	if got := logEntry["msg"]; got != "resp: request failed with server error" {
+		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
+	}
+	if got := logEntry["error.code"]; got != "upstream_failure" {
+		t.Fatalf("error.code = %#v, want upstream_failure", got)
+	}
+	if got := logEntry["traceId"]; got != "trace-123" {
+		t.Fatalf("traceId = %#v, want trace-123", got)
 	}
 }
 

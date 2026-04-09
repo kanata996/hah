@@ -23,7 +23,7 @@ import (
 // [✓] 响应已经开始写出时不会被二次改写，但 5xx 仍会输出独立错误日志
 // [✓] asHTTPError 会保留 HTTPError，并把 context/普通 error 收敛为稳定公共语义
 // [✓] problem payload 会按 includeErrors 开关决定是否暴露公开 errors
-// [✓] ErrorResponder 可选地给 5xx request log 补低噪音 error.* 诊断字段，并默认输出独立错误日志
+// [✓] `WriteError` 默认 responder 会在 5xx 输出独立错误日志，并在错误响应写出失败时输出失败日志
 
 type failingWriter struct {
 	header http.Header
