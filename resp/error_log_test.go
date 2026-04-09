@@ -364,8 +364,3 @@ func attrsToMap(attrs []slog.Attr) map[string]any {
 	}
 	return out
 }
-
-func nilContext() context.Context {
-	var ctx context.Context
-	return ctx
-}
