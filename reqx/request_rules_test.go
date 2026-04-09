@@ -12,7 +12,8 @@ import (
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
 // - [✓] `RequireBody` 会沿用默认 binder 的 empty-body 判定并返回统一 invalid_request。
-// - [✓] `InvalidRequest` 与 `applyRequestValidation` 会维持请求级规则 helper 的稳定契约。
+// - [✓] `InvalidRequest` 会维持公开 invalid_request 包络与常见 violation code 的稳定契约。
+// - [✓] `applyRequestValidation` 会维持请求级规则 helper 的稳定契约。
 // - [✓] `BindAndValidate*` 会在字段校验之前执行请求级规则，并允许规则读取 Normalize 后的 DTO。
 // - [✓] mixed-source DTO 可通过 `ValidateRequest` 为可选字段 body 显式声明 body-required 契约。
 
@@ -106,9 +107,45 @@ func TestRequireBodyReadError(t *testing.T) {
 }
 
 func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
-	violation := assertSingleViolation(t, InvalidRequest(Violation{Field: "name"}))
-	if violation.Field != "name" || violation.Code != ViolationCodeInvalid || violation.Detail != "is invalid" {
-		t.Fatalf("violation = %#v", violation)
+	testCases := []struct {
+		name string
+		in   Violation
+		want Violation
+	}{
+		{
+			name: "default invalid",
+			in:   Violation{Field: "name"},
+			want: Violation{Field: "name", Code: ViolationCodeInvalid, Detail: "is invalid"},
+		},
+		{
+			name: "required",
+			in:   Violation{Field: "body", In: ViolationInBody, Code: ViolationCodeRequired},
+			want: Violation{Field: "body", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"},
+		},
+		{
+			name: "unknown",
+			in:   Violation{Field: "extra", In: ViolationInQuery, Code: ViolationCodeUnknown},
+			want: Violation{Field: "extra", In: ViolationInQuery, Code: ViolationCodeUnknown, Detail: "unknown field"},
+		},
+		{
+			name: "type",
+			in:   Violation{Field: "limit", In: ViolationInBody, Code: ViolationCodeType},
+			want: Violation{Field: "limit", In: ViolationInBody, Code: ViolationCodeType, Detail: "has invalid type"},
+		},
+		{
+			name: "multiple",
+			in:   Violation{Field: "X-Trace-Id", In: ViolationInHeader, Code: ViolationCodeMultiple},
+			want: Violation{Field: "X-Trace-Id", In: ViolationInHeader, Code: ViolationCodeMultiple, Detail: "must not be repeated"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			violation := assertSingleViolation(t, InvalidRequest(tc.in))
+			if violation != tc.want {
+				t.Fatalf("violation = %#v, want %#v", violation, tc.want)
+			}
+		})
 	}
 }
 

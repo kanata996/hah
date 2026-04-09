@@ -2,7 +2,7 @@ package reqx
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `invalidFieldsError` 会把 violation 规范化后写成稳定的 invalid_request 错误。
+// - [✓] `invalidFieldsError` 会把常见 violation code 规范化后写成稳定的 invalid_request 错误。
 // - [✓] `normalizeViolation` 会按 violation code 补齐默认 detail 与默认 code。
 
 import "testing"
@@ -13,6 +13,39 @@ func TestInvalidFieldsError_NormalizesViolation(t *testing.T) {
 	violation := assertSingleViolation(t, err)
 	if violation.Field != "name" || violation.Code != ViolationCodeInvalid || violation.Detail != "is invalid" {
 		t.Fatalf("violation = %#v", violation)
+	}
+}
+
+func TestInvalidFieldsError_CommonViolationCodesUsePublicEnvelope(t *testing.T) {
+	testCases := []struct {
+		name string
+		in   Violation
+		want Violation
+	}{
+		{
+			name: "unknown",
+			in:   Violation{Field: "extra", In: ViolationInQuery, Code: ViolationCodeUnknown},
+			want: Violation{Field: "extra", In: ViolationInQuery, Code: ViolationCodeUnknown, Detail: "unknown field"},
+		},
+		{
+			name: "type",
+			in:   Violation{Field: "limit", In: ViolationInBody, Code: ViolationCodeType},
+			want: Violation{Field: "limit", In: ViolationInBody, Code: ViolationCodeType, Detail: "has invalid type"},
+		},
+		{
+			name: "multiple",
+			in:   Violation{Field: "X-Trace-Id", In: ViolationInHeader, Code: ViolationCodeMultiple},
+			want: Violation{Field: "X-Trace-Id", In: ViolationInHeader, Code: ViolationCodeMultiple, Detail: "must not be repeated"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			violation := assertSingleViolation(t, invalidFieldsError([]Violation{tc.in}))
+			if violation != tc.want {
+				t.Fatalf("violation = %#v, want %#v", violation, tc.want)
+			}
+		})
 	}
 }
 

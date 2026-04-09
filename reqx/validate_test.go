@@ -2,12 +2,14 @@ package reqx
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `BindAndValidate*` 包装器会优先执行 bind，并与“先 bind，再按来源 validate”保持一致。
+// - [✓] `BindAndValidate*` 包装器会优先执行 bind，并在公开返回值中暴露稳定的成功/失败语义。
+// - [✓] `BindAndValidate*` 在各来源下都会返回请求 tag 字段名、规范化 header 名与稳定的 violation 包络。
 // - [✓] 内部 `validate`、`postBindValidate`、`validateStruct`、`validateTarget` 会维持稳定目标契约。
 // - [✓] validator 初始化、字段别名、tag 优先级、来源推断与 panic 分支都会产出稳定结果。
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -306,277 +308,168 @@ func TestBindAndValidate_EmptyMixedSourceBodyDefersToValidation(t *testing.T) {
 	}
 }
 
-// 对未实现 RequestValidator 的 DTO，各个 BindAndValidate 包装器的结果应与“先绑定，再按对应来源校验”的组合一致。
-func TestBindAndValidateWrappersMatchBindPlusValidate(t *testing.T) {
-	t.Run("request success", func(t *testing.T) {
+// 各个 BindAndValidate 包装器会把各来源的字段别名和 violation 包络直接暴露给调用方。
+func TestBindAndValidateWrappersReturnPublicValidationViolations(t *testing.T) {
+	t.Run("request uses request aliases", func(t *testing.T) {
 		type request struct {
-			ID   string `param:"id" validate:"required,uuid"`
-			Name string `query:"name" validate:"required,nospace"`
+			OrgID       string `param:"org_id" validate:"required"`
+			DisplayName string `json:"display_name" validate:"required,nospace"`
 		}
 
-		newReq := func() *http.Request {
-			req := requestWithPathParams(map[string][]string{
-				"id": {"550e8400-e29b-41d4-a716-446655440000"},
-			})
-			req.Method = http.MethodGet
-			req.URL.RawQuery = "name=kanata"
-			return req
-		}
+		req := requestWithPathParams(map[string][]string{
+			"org_id": {"org_1"},
+		})
+		req.Method = http.MethodPost
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = io.NopCloser(strings.NewReader(`{"display_name":"bad value"}`))
+		req.ContentLength = int64(len(`{"display_name":"bad value"}`))
 
-		var got request
-		gotErr := BindAndValidate(newReq(), &got)
-
-		var want request
-		wantErr := bind.Bind(newReq(), &want)
-		if wantErr == nil {
-			wantErr = validate(&want, sourceRequest)
+		var dst request
+		violation := assertSingleViolation(t, BindAndValidate(req, &dst))
+		want := Violation{
+			Field:  "display_name",
+			In:     ViolationInRequest,
+			Code:   ViolationCodeInvalid,
+			Detail: "is invalid",
 		}
-
-		if gotErr != nil || wantErr != nil {
-			t.Fatalf("gotErr = %v, wantErr = %v", gotErr, wantErr)
+		if violation != want {
+			t.Fatalf("violation = %#v, want %#v", violation, want)
 		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got = %#v, want %#v", got, want)
+		if dst.OrgID != "org_1" || dst.DisplayName != "bad value" {
+			t.Fatalf("dst = %#v, want bound values preserved on validation failure", dst)
 		}
 	})
 
-	t.Run("request validation failure", func(t *testing.T) {
+	t.Run("body uses json tag", func(t *testing.T) {
 		type request struct {
-			ID   string `param:"id" validate:"required"`
-			Name string `query:"name" validate:"required,nospace"`
+			DisplayName string `json:"display_name" validate:"required,nospace"`
 		}
 
-		newReq := func() *http.Request {
-			req := requestWithPathParams(map[string][]string{
-				"id": {"route-id"},
-			})
-			req.Method = http.MethodGet
-			req.URL.RawQuery = "name=bad%20value"
-			return req
+		var dst request
+		violation := assertSingleViolation(t, BindAndValidateBody(newJSONRequest(http.MethodPost, "/", `{"display_name":"bad value"}`), &dst))
+		want := Violation{
+			Field:  "display_name",
+			In:     ViolationInBody,
+			Code:   ViolationCodeInvalid,
+			Detail: "is invalid",
 		}
-
-		var got request
-		gotErr := BindAndValidate(newReq(), &got)
-
-		var want request
-		wantErr := bind.Bind(newReq(), &want)
-		if wantErr == nil {
-			wantErr = validate(&want, sourceRequest)
+		if violation != want {
+			t.Fatalf("violation = %#v, want %#v", violation, want)
 		}
-
-		_ = assertSameHTTPError(t, gotErr, wantErr)
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got = %#v, want %#v", got, want)
+		if dst.DisplayName != "bad value" {
+			t.Fatalf("dst = %#v, want bound body value preserved", dst)
 		}
 	})
 
-	t.Run("body success", func(t *testing.T) {
+	t.Run("query uses query tag", func(t *testing.T) {
 		type request struct {
-			Name string `json:"name" validate:"required,nospace"`
+			CursorToken string `query:"cursor_token" validate:"required,nospace"`
 		}
 
-		newReq := func() *http.Request {
-			return newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+		req := httptest.NewRequest(http.MethodGet, "/?cursor_token=bad%20value", nil)
+		var dst request
+		violation := assertSingleViolation(t, BindAndValidateQuery(req, &dst))
+		want := Violation{
+			Field:  "cursor_token",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "is invalid",
 		}
-
-		var got request
-		gotErr := BindAndValidateBody(newReq(), &got)
-
-		var want request
-		wantErr := bind.BindBody(newReq(), &want)
-		if wantErr == nil {
-			wantErr = validate(&want, sourceBody)
+		if violation != want {
+			t.Fatalf("violation = %#v, want %#v", violation, want)
 		}
-
-		if gotErr != nil || wantErr != nil {
-			t.Fatalf("gotErr = %v, wantErr = %v", gotErr, wantErr)
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got = %#v, want %#v", got, want)
+		if dst.CursorToken != "bad value" {
+			t.Fatalf("dst = %#v, want bound query value preserved", dst)
 		}
 	})
 
-	t.Run("body validation failure", func(t *testing.T) {
+	t.Run("path uses param tag", func(t *testing.T) {
 		type request struct {
-			Name string `json:"name" validate:"required,nospace"`
+			AccountUUID string `param:"account_uuid" validate:"required,nospace"`
 		}
 
-		newReq := func() *http.Request {
-			return newJSONRequest(http.MethodPost, "/", `{"name":"bad value"}`)
+		req := requestWithPathParams(map[string][]string{
+			"account_uuid": {"bad value"},
+		})
+		var dst request
+		violation := assertSingleViolation(t, BindAndValidatePath(req, &dst))
+		want := Violation{
+			Field:  "account_uuid",
+			In:     ViolationInPath,
+			Code:   ViolationCodeInvalid,
+			Detail: "is invalid",
 		}
-
-		var got request
-		gotErr := BindAndValidateBody(newReq(), &got)
-
-		var want request
-		wantErr := bind.BindBody(newReq(), &want)
-		if wantErr == nil {
-			wantErr = validate(&want, sourceBody)
+		if violation != want {
+			t.Fatalf("violation = %#v, want %#v", violation, want)
 		}
-
-		_ = assertSameHTTPError(t, gotErr, wantErr)
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got = %#v, want %#v", got, want)
+		if dst.AccountUUID != "bad value" {
+			t.Fatalf("dst = %#v, want bound path value preserved", dst)
 		}
 	})
 
-	t.Run("query success", func(t *testing.T) {
+	t.Run("headers use canonical header tag", func(t *testing.T) {
 		type request struct {
-			Cursor string `query:"cursor" validate:"required,nospace"`
+			TraceID string `header:"x-trace-id" validate:"required,nospace"`
 		}
 
-		newReq := func() *http.Request {
-			return httptest.NewRequest(http.MethodGet, "/?cursor=abc", nil)
-		}
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("X-Trace-Id", "bad value")
 
-		var got request
-		gotErr := BindAndValidateQuery(newReq(), &got)
-
-		var want request
-		wantErr := bind.BindQueryParams(newReq(), &want)
-		if wantErr == nil {
-			wantErr = validate(&want, sourceQuery)
+		var dst request
+		violation := assertSingleViolation(t, BindAndValidateHeaders(req, &dst))
+		want := Violation{
+			Field:  "X-Trace-Id",
+			In:     ViolationInHeader,
+			Code:   ViolationCodeInvalid,
+			Detail: "is invalid",
 		}
-
-		if gotErr != nil || wantErr != nil {
-			t.Fatalf("gotErr = %v, wantErr = %v", gotErr, wantErr)
+		if violation != want {
+			t.Fatalf("violation = %#v, want %#v", violation, want)
 		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got = %#v, want %#v", got, want)
+		if dst.TraceID != "bad value" {
+			t.Fatalf("dst = %#v, want bound header value preserved", dst)
 		}
 	})
+}
 
-	t.Run("query validation failure", func(t *testing.T) {
-		type request struct {
-			Cursor string `query:"cursor" validate:"required,nospace"`
+func TestBindAndValidate_UsesRequestFieldAliases(t *testing.T) {
+	var dst struct {
+		ID      string `param:"id" validate:"required"`
+		Cursor  string `query:"cursor" validate:"required"`
+		Name    string `json:"name" validate:"required"`
+		TraceID string `header:"x-trace-id" validate:"required"`
+		Plain   string `validate:"required"`
+	}
+
+	req := requestWithPathParams(nil)
+	req.Method = http.MethodGet
+
+	violations := assertViolations(t, BindAndValidate(req, &dst))
+	if len(violations) != 5 {
+		t.Fatalf("violations len = %d, want 5", len(violations))
+	}
+
+	got := map[string]Violation{}
+	for _, violation := range violations {
+		got[violation.Field] = violation
+	}
+
+	want := map[string]string{
+		"id":         ViolationInRequest,
+		"cursor":     ViolationInRequest,
+		"name":       ViolationInRequest,
+		"X-Trace-Id": ViolationInRequest,
+		"Plain":      ViolationInRequest,
+	}
+	for field, wantIn := range want {
+		violation, ok := got[field]
+		if !ok {
+			t.Fatalf("missing violation for %q in %#v", field, got)
 		}
-
-		newReq := func() *http.Request {
-			return httptest.NewRequest(http.MethodGet, "/?cursor=bad%20value", nil)
+		if violation.In != wantIn || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+			t.Fatalf("violation[%q] = %#v", field, violation)
 		}
-
-		var got request
-		gotErr := BindAndValidateQuery(newReq(), &got)
-
-		var want request
-		wantErr := bind.BindQueryParams(newReq(), &want)
-		if wantErr == nil {
-			wantErr = validate(&want, sourceQuery)
-		}
-
-		_ = assertSameHTTPError(t, gotErr, wantErr)
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got = %#v, want %#v", got, want)
-		}
-	})
-
-	t.Run("path success", func(t *testing.T) {
-		type request struct {
-			ID string `param:"id" validate:"required,nospace"`
-		}
-
-		newReq := func() *http.Request {
-			return requestWithPathParams(map[string][]string{
-				"id": {"route-id"},
-			})
-		}
-
-		var got request
-		gotErr := BindAndValidatePath(newReq(), &got)
-
-		var want request
-		wantErr := bind.BindPathValues(newReq(), &want)
-		if wantErr == nil {
-			wantErr = validate(&want, sourcePath)
-		}
-
-		if gotErr != nil || wantErr != nil {
-			t.Fatalf("gotErr = %v, wantErr = %v", gotErr, wantErr)
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got = %#v, want %#v", got, want)
-		}
-	})
-
-	t.Run("path validation failure", func(t *testing.T) {
-		type request struct {
-			ID string `param:"id" validate:"required,nospace"`
-		}
-
-		newReq := func() *http.Request {
-			return requestWithPathParams(map[string][]string{
-				"id": {"bad value"},
-			})
-		}
-
-		var got request
-		gotErr := BindAndValidatePath(newReq(), &got)
-
-		var want request
-		wantErr := bind.BindPathValues(newReq(), &want)
-		if wantErr == nil {
-			wantErr = validate(&want, sourcePath)
-		}
-
-		_ = assertSameHTTPError(t, gotErr, wantErr)
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got = %#v, want %#v", got, want)
-		}
-	})
-
-	t.Run("header success", func(t *testing.T) {
-		type request struct {
-			RequestID string `header:"x-request-id" validate:"required,nospace"`
-		}
-
-		newReq := func() *http.Request {
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			req.Header.Set("X-Request-Id", "req-1")
-			return req
-		}
-
-		var got request
-		gotErr := BindAndValidateHeaders(newReq(), &got)
-
-		var want request
-		wantErr := bind.BindHeaders(newReq(), &want)
-		if wantErr == nil {
-			wantErr = validate(&want, sourceHeader)
-		}
-
-		if gotErr != nil || wantErr != nil {
-			t.Fatalf("gotErr = %v, wantErr = %v", gotErr, wantErr)
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got = %#v, want %#v", got, want)
-		}
-	})
-
-	t.Run("header validation failure", func(t *testing.T) {
-		type request struct {
-			RequestID string `header:"x-request-id" validate:"required,nospace"`
-		}
-
-		newReq := func() *http.Request {
-			req := httptest.NewRequest(http.MethodGet, "/", nil)
-			req.Header.Set("X-Request-Id", "bad value")
-			return req
-		}
-
-		var got request
-		gotErr := BindAndValidateHeaders(newReq(), &got)
-
-		var want request
-		wantErr := bind.BindHeaders(newReq(), &want)
-		if wantErr == nil {
-			wantErr = validate(&want, sourceHeader)
-		}
-
-		_ = assertSameHTTPError(t, gotErr, wantErr)
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("got = %#v, want %#v", got, want)
-		}
-	})
+	}
 }
 
 func TestPostBindValidateRejectsInvalidTarget(t *testing.T) {
