@@ -11,7 +11,7 @@ import (
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] HasBody 会对 nil request、安全缓存分支和 body 为空/非空做稳定判定。
+// - [✓] HasBody 会对 nil request、缓存结果分支和 body 为空/非空做稳定判定。
 // - [✓] HasBody / detectBody 会保留后续读取所需的 body 数据。
 // - [✓] detectBody 会在 nil body 和读错场景下稳定退化。
 
@@ -93,6 +93,22 @@ func TestHasBody(t *testing.T) {
 	}
 	if got, err := HasBody(req); err != nil || !got {
 		t.Fatalf("HasBody(cached second call) = (%v, %v), want (true, nil)", got, err)
+	}
+
+	emptyReq := httptest.NewRequest(http.MethodPost, "/", nil)
+	emptyReq.Body = &staticReadCloser{}
+	if got, err := HasBody(emptyReq); err != nil || got {
+		t.Fatalf("HasBody(empty) = (%v, %v), want (false, nil)", got, err)
+	}
+	body, err = io.ReadAll(emptyReq.Body)
+	if err != nil {
+		t.Fatalf("ReadAll(empty replayed body) error = %v", err)
+	}
+	if len(body) != 0 {
+		t.Fatalf("empty replayed body = %q, want empty", body)
+	}
+	if got, err := HasBody(emptyReq); err != nil || got {
+		t.Fatalf("HasBody(empty cached second call) = (%v, %v), want (false, nil)", got, err)
 	}
 
 	wantErr := errors.New("read failed")
