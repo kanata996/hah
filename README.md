@@ -22,6 +22,7 @@
 - 写回标准 JSON 成功响应
 - 写回 `application/problem+json` 错误响应
 - 在 5xx 场景通过 `slog.Default()` 输出独立错误日志
+- 通过 `ErrorResponder` 自定义错误归一化、独立错误日志和 request log 注解
 
 不负责：
 
@@ -109,6 +110,21 @@ func main() {
       "detail": "is required"
     }
   ]
+}
+```
+
+`WriteError(...)` 适合默认行为；如果你需要自定义错误归一化、logger 或 request log 注解，
+可以使用 `ErrorResponder`：
+
+```go
+responder := hah.NewErrorResponder()
+responder.Logger = slog.Default()
+responder.AnnotateRequestLog = func(r *http.Request, attrs []slog.Attr) {
+	// 把 attrs 桥接到你自己的 request logger。
+}
+
+if err := responder.Respond(w, r, err); err != nil {
+	// 只在响应已开始写出或错误响应写出失败时返回非 nil。
 }
 ```
 
