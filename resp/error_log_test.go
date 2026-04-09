@@ -18,7 +18,7 @@ import (
 // [✓] 错误链摘要兼容 nil、普通包装、不可比较 error、typed-nil 和 panic Error()
 // [✓] 错误链展开兼容深度限制、errors.Join、多分支 unwrap 和循环引用
 // [✓] 诊断起点优先使用 HTTPError 的内部 cause，没有 cause 时回退原始 error
-// [✓] 独立错误日志仅在 5xx 场景输出，并附带稳定的基础诊断字段
+// [✓] 请求日志字段仅在 5xx 场景补充低噪音诊断字段；关联字段与 root cause 诊断保持稳定
 // [✓] 错误类型名与错误文本裁剪对 nil、空白、超长输入保持稳定
 
 type cycleTestError struct{}
@@ -38,10 +38,6 @@ type nilUnsafeTestError struct {
 }
 
 type blankMessageTestError struct{}
-
-type simpleTestError struct {
-	message string
-}
 
 func (e *cycleTestError) Error() string {
 	return "cycle"
@@ -77,13 +73,6 @@ func (e *nilUnsafeTestError) Unwrap() error {
 
 func (blankMessageTestError) Error() string {
 	return "   "
-}
-
-func (e *simpleTestError) Error() string {
-	if e == nil {
-		return ""
-	}
-	return e.message
 }
 
 // 错误链摘要会在 nil 输入时返回零值，并对多层包装提取首尾信息。
@@ -208,12 +197,35 @@ func TestUnwrapErrors(t *testing.T) {
 	}
 }
 
+// 请求日志属性提取会在 nil 输入时返回空，并对 5xx 错误补充低噪音诊断字段。
+func TestRequestErrorLogAttrs(t *testing.T) {
+	if got := requestErrorLogAttrs(nil, nil); got != nil {
+		t.Fatalf("requestErrorLogAttrs(nil, nil) = %#v, want nil", got)
+	}
+
+	httpErr := errx.NewHTTPErrorWithCause(http.StatusInternalServerError, "internal_error", "", errors.New("db timeout"))
+	attrs := requestErrorLogAttrs(httpErr, httpErr)
+	if len(attrs) == 0 {
+		t.Fatal("requestErrorLogAttrs() = nil, want attrs")
+	}
+
+	values := attrsToMap(attrs)
+	if got := values["error.code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
+	}
+	if _, exists := values["error.root_message"]; exists {
+		t.Fatalf("error.root_message unexpectedly present: %#v", values["error.root_message"])
+	}
+
+	clientErr := errx.BadRequest("bad_request", "bad request")
+	if got := requestErrorLogAttrs(clientErr, clientErr); got != nil {
+		t.Fatalf("requestErrorLogAttrs(4xx) = %#v, want nil", got)
+	}
+}
+
 func TestDiagnosticErrorLogAttrs(t *testing.T) {
 	if got := diagnosticErrorLogAttrs(nil, nil); got != nil {
 		t.Fatalf("diagnosticErrorLogAttrs(nil, nil) = %#v, want nil", got)
-	}
-	if got := diagnosticErrorLogAttrsForError(nil, nil, "internal_error"); got != nil {
-		t.Fatalf("diagnosticErrorLogAttrsForError(nil, nil, code) = %#v, want nil", got)
 	}
 
 	canceledErr := errx.NewHTTPErrorWithCause(http.StatusInternalServerError, "internal_error", "", context.Canceled)
@@ -236,14 +248,15 @@ func TestLogServerError(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	defer slog.SetDefault(previousDefault)
 
-	logServerError(nil, nil, nil)
-	logServerError(nil, errx.BadRequest("bad_request", "bad request"), errors.New("client error"))
+	req := httptest.NewRequest(http.MethodGet, "/users/u_1", nil)
+	var responder *ErrorResponder
+	responder.logServerError(nil, nil, nil)
+	responder.logServerError(nil, errx.BadRequest("bad_request", "bad request"), errors.New("client error"))
 	if buf.Len() != 0 {
 		t.Fatalf("logServerError() unexpectedly wrote output: %s", buf.Bytes())
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/users/u_1", nil)
-	logServerError(req, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), errors.New("db timeout"))
+	responder.logServerError(req, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), errors.New("db timeout"))
 	if buf.Len() == 0 {
 		t.Fatal("logServerError() did not write 5xx output")
 	}
@@ -269,49 +282,23 @@ func TestLogServerError(t *testing.T) {
 	}
 }
 
-func TestLogErrorResponseWriteFailureUsesWriteErrorDiagnostics(t *testing.T) {
-	var buf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
-	defer slog.SetDefault(previousDefault)
-
-	req := httptest.NewRequest(http.MethodGet, "/failure", nil)
-	httpErr := errx.NewHTTPErrorWithCause(
-		http.StatusInternalServerError,
-		"internal_error",
-		"Internal Server Error",
-		errors.New("db timeout"),
-	)
-	logErrorResponseWriteFailure(req, httpErr, errors.New("socket closed"))
-	if buf.Len() == 0 {
-		t.Fatal("logErrorResponseWriteFailure() did not write output")
-	}
-
-	logEntry := decodePayload(t, buf.Bytes())
-	if got := logEntry["error.message"]; got != "socket closed" {
-		t.Fatalf("error.message = %#v, want socket closed", got)
-	}
-	if got := logEntry["error.root_message"]; got != "socket closed" {
-		t.Fatalf("error.root_message = %#v, want socket closed", got)
-	}
-}
-
 func TestLogServerErrorAttrs(t *testing.T) {
 	var buf bytes.Buffer
 	previousDefault := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	defer slog.SetDefault(previousDefault)
 
-	logServerErrorAttrs(nil, nil, nil)
-	logServerErrorAttrs(nil, errx.BadRequest("bad_request", "bad request"), []slog.Attr{
+	req := httptest.NewRequest(http.MethodPost, "/users", nil)
+	var responder *ErrorResponder
+	responder.logServerErrorAttrs(nil, nil, nil)
+	responder.logServerErrorAttrs(nil, errx.BadRequest("bad_request", "bad request"), []slog.Attr{
 		slog.String("error.code", "bad_request"),
 	})
 	if buf.Len() != 0 {
 		t.Fatalf("logServerErrorAttrs() unexpectedly wrote output: %s", buf.Bytes())
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/users", nil)
-	logServerErrorAttrs(req, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), []slog.Attr{
+	responder.logServerErrorAttrs(req, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"), []slog.Attr{
 		slog.String("error.code", "internal_error"),
 	})
 	if buf.Len() == 0 {
@@ -352,10 +339,6 @@ func TestErrorForDiagnostics(t *testing.T) {
 }
 
 func TestRequestMetadataAttrs(t *testing.T) {
-	if got := requestMetadataAttrs(nil); got != nil {
-		t.Fatalf("requestMetadataAttrs(nil) = %#v, want nil", got)
-	}
-
 	req := httptest.NewRequest(http.MethodDelete, "/users/u_1", nil)
 	attrs := attrsToMap(requestMetadataAttrs(req))
 	if got := attrs["http.request.method"]; got != http.MethodDelete {
@@ -381,9 +364,9 @@ func TestErrorTypeNameAndLimitErrorLogString(t *testing.T) {
 		t.Fatalf("safeErrorString(blankMessageTestError) = %q, want empty", got)
 	}
 
-	var typedNil error = (*simpleTestError)(nil)
-	if got := errorTypeName(typedNil); got != "*resp.simpleTestError" {
-		t.Fatalf("errorTypeName(typed nil) = %q, want *resp.simpleTestError", got)
+	var typedNil error = (*rawTestError)(nil)
+	if got := errorTypeName(typedNil); got != "*resp.rawTestError" {
+		t.Fatalf("errorTypeName(typed nil) = %q, want *resp.rawTestError", got)
 	}
 
 	if got := limitErrorLogString("   "); got != "" {

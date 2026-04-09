@@ -3,7 +3,6 @@ package resp
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
 // - [✓] `JSON` 在典型小型响应体上的基准性能。
-// - [✓] `JSON` 在 `?pretty` 模式下的额外开销。
 // - [✓] `JSONBlob` 直写原始 JSON 字节的基准性能。
 // - [✓] `WriteError` 在 4xx 校验错误场景下的基准性能。
 // - [✓] `WriteError` 在 5xx 服务端错误场景下的基准性能。
@@ -83,19 +82,6 @@ func BenchmarkJSON_Typical(b *testing.B) {
 	b.ReportAllocs()
 
 	req := httptest.NewRequest(http.MethodGet, "/accounts/acct_123456", nil)
-	w := &benchmarkResponseWriter{header: make(http.Header, 1)}
-
-	for b.Loop() {
-		if err := JSON(w, req, http.StatusOK, benchmarkJSONPayload); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkJSON_TypicalPretty(b *testing.B) {
-	b.ReportAllocs()
-
-	req := httptest.NewRequest(http.MethodGet, "/accounts/acct_123456?pretty", nil)
 	w := &benchmarkResponseWriter{header: make(http.Header, 1)}
 
 	for b.Loop() {

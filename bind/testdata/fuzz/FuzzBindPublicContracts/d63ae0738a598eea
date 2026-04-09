@@ -1,0 +1,5 @@
+go test fuzz v1
+string("POST")
+string("\x95\x95\x95\x95ms")
+string("{\"name\":\"kanata\"}")
+string("application/json")

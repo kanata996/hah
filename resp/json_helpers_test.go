@@ -185,7 +185,7 @@ func TestWriteStatusWritesStatusWithoutBodyOrContentType(t *testing.T) {
 
 // JSON 编码阶段遇到不支持的值时直接返回编码错误。
 func TestEncodeJSONRejectsUnsupportedValue(t *testing.T) {
-	_, err := encodeJSON(make(chan int), "")
+	_, err := encodeJSON(make(chan int))
 	if err == nil || err.Error() != "json: unsupported type: chan int" {
 		t.Fatalf("encodeJSON() error = %v, want unsupported type error", err)
 	}
@@ -199,7 +199,7 @@ func TestEncodeJSONRecoversFromMarshalPanic(t *testing.T) {
 		}
 	}()
 
-	_, err := encodeJSON(panicSuccessJSONValue{}, "")
+	_, err := encodeJSON(panicSuccessJSONValue{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}

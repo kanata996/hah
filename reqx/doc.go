@@ -1,35 +1,37 @@
-// Package reqx 为基于 net/http 的 JSON API 提供请求侧辅助能力。
+// Package reqx 为基于 net/http 的 JSON API 提供请求级规则与校验组合层。
 //
-// 它聚焦在 HTTP 输入边界：
-//   - 将 JSON / query / path / header 值绑定到结构体
+// 它聚焦在 binding 之后的输入治理：
+//   - 在字段校验前执行 Normalize
+//   - 允许 DTO 通过 RequestValidator 声明请求级规则
 //   - 使用 validator/v10 校验绑定后的输入
 //   - 将常见请求违规统一收敛为稳定的 HTTP 错误
 //
 // 典型用法：
-//   - 使用 BindAndValidate 处理 path/query/body 综合绑定
-//   - 使用 BindBody 或 BindAndValidateBody 处理 JSON 请求体
-//   - 使用 BindAndValidateQuery 处理 query DTO
-//   - 使用 BindPathValues / BindHeaders 处理单一来源绑定
-//   - 使用 ParamString / ParamInt / ParamUUID 读取简单 path 参数
+//   - 只做请求绑定时，使用 bind.Bind* 或 hah.Bind*
+//   - 需要 binding + request-rules + validate 时，使用 BindAndValidate*
 //
 // 公开 API：
-//   - 绑定入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
 //   - 绑定并校验入口：BindAndValidate、BindAndValidateBody、
 //     BindAndValidateQuery、BindAndValidatePath、BindAndValidateHeaders
-//   - path helper：ParamString、ParamInt、ParamUUID
-//   - 绑定 option：BindOption、BindBodyOption、BindQueryParamsOption、
-//     BindHeadersOption、WithMaxBodyBytes、DefaultMaxBodyBytes
-//   - DTO 扩展点：Normalizer
-//   - 公开错误码常量：CodeInvalidJSON、CodeUnsupportedMediaType、
-//     CodeRequestTooLarge、CodeInvalidRequest
+//   - DTO 扩展点：RequestValidator、Normalizer
+//   - 请求级规则 helper：RequireBody、InvalidRequest
+//   - 公开错误码常量：CodeInvalidRequest
 //   - 公开违规模型：Violation（字段为 Field、In、Code、Detail）
 //   - 公开 violation code 常量：ViolationCodeInvalid、ViolationCodeRequired、
 //     ViolationCodeUnknown、ViolationCodeType、ViolationCodeMultiple
 //   - 公开 violation in 常量：ViolationInBody、ViolationInQuery、
 //     ViolationInPath、ViolationInHeader、ViolationInRequest
 //
+// BindAndValidate* 的目标约束：
+//   - 组合入口最终会执行结构校验，因此目标必须是非 nil 的 *struct
+//   - 这与 bind.BindBody(...) 可绑定到 slice、map 等 JSON 目标的能力不同
+//
 // 新增、移除、重命名以上导出符号，或改变其公开语义时，应同步更新本注释与 CHANGELOG。
 //
+// body-required 契约：
+//   - RequireBody 沿用默认 binder 的 empty-body 判定：实际读取到零字节 body 视为“没有 body”。
+//   - 综合绑定入口对空 body 不主动报错；是否必填由 RequestValidator 或更上层策略决定。
+//
 // path 输入只依赖 net/http 暴露的 PathValue / Pattern 命名 wildcard 语义，
-// 不依赖任何 router 私有上下文，也不承诺各家 router 的私有 catch-all 语法兼容行为。
+// 不依赖 chi.RouteContext，也不承诺 chi 专有 `*` catch-all 的兼容行为。
 package reqx

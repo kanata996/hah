@@ -11,7 +11,6 @@ import (
 const (
 	jsonContentType        = "application/json"
 	problemJSONContentType = "application/problem+json"
-	defaultJSONIndent      = "  "
 )
 
 var errNilResponseWriter = errors.New("resp: response writer is nil")
@@ -80,10 +79,10 @@ func writeStatus(w http.ResponseWriter, status int) error {
 }
 
 // encodeJSON 使用标准库编码 JSON。
-// 当 indent 非空时，会输出 pretty JSON；两种模式都会保留标准库尾部换行。
+// 标准库会保留尾部换行。
 // 某些自定义 MarshalJSON 实现可能 panic，这里统一恢复为 error，
 // 避免成功响应路径反向把 handler 打崩。
-func encodeJSON(data any, indent string) (body []byte, err error) {
+func encodeJSON(data any) (body []byte, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			body = nil
@@ -93,9 +92,6 @@ func encodeJSON(data any, indent string) (body []byte, err error) {
 
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
-	if indent != "" {
-		enc.SetIndent("", indent)
-	}
 	if err := enc.Encode(data); err != nil {
 		return nil, err
 	}

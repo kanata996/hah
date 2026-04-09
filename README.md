@@ -6,10 +6,11 @@
 
 `hah` 是一个面向 `net/http` 的 JSON API 边界层。
 
-它不接管 router，不定义新的 handler 协议，也不试图包装整个 HTTP 生命周期。当前仓库拆成四个清晰的包边界：
+它不接管 router，不定义新的 handler 协议，也不试图包装整个 HTTP 生命周期。当前仓库拆成五个清晰的包边界：
 
 - `hah`：根包 facade，聚合最常用的绑定、校验和响应写回入口
-- `reqx`：请求侧能力，负责 path/query/header/body 绑定和 `validator/v10` 校验
+- `bind`：请求绑定层，负责 path/query/header/body 到目标值的映射
+- `reqx`：请求规则与校验层，负责 `Normalize`、`RequestValidator` 和 `validator/v10`
 - `errx`：公共 HTTP 错误模型
 - `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
 
@@ -21,6 +22,7 @@
 - 写回标准 JSON 成功响应
 - 写回 `application/problem+json` 错误响应
 - 在 5xx 场景通过 `slog.Default()` 输出独立错误日志
+- 通过 `ErrorResponder` 自定义错误归一化、独立错误日志和 request log 注解
 
 不负责：
 
@@ -80,17 +82,15 @@ func main() {
 - `BindAndValidateQuery`
 - `BindAndValidatePath`
 - `BindAndValidateHeaders`
-- `ParamString`
-- `ParamInt`
-- `ParamUUID`
+- `RequireBody`
 - `WriteError`
+- `ErrorResponder`
+- `NewErrorResponder`
 - `JSON`
-- `JSONPretty`
 - `JSONBlob`
 - `OK`
 - `Created`
 - `NoContent`
-- `WithMaxBodyBytes`
 
 ## 错误响应
 
@@ -110,6 +110,21 @@ func main() {
       "detail": "is required"
     }
   ]
+}
+```
+
+`WriteError(...)` 适合默认行为；如果你需要自定义错误归一化、logger 或 request log 注解，
+可以使用 `ErrorResponder`：
+
+```go
+responder := hah.NewErrorResponder()
+responder.Logger = slog.Default()
+responder.AnnotateRequestLog = func(r *http.Request, attrs []slog.Attr) {
+	// 把 attrs 桥接到你自己的 request logger。
+}
+
+if err := responder.Respond(w, r, err); err != nil {
+	// 只在响应已开始写出或错误响应写出失败时返回非 nil。
 }
 ```
 

@@ -180,7 +180,7 @@ func (a *app) listAccounts(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
 	var req createAccountRequest
-	if err := hah.BindAndValidate(r, &req, hah.WithMaxBodyBytes(1<<20)); err != nil {
+	if err := hah.BindAndValidate(r, &req); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}

@@ -1,0 +1,68 @@
+package req
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"net/http"
+)
+
+type presenceKey struct{}
+
+type presenceState struct {
+	known bool
+	has   bool
+}
+
+type replayReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
+// HasBody reports whether the request body contains at least one byte.
+// It preserves the body stream for later consumers and caches the result on the request.
+func HasBody(r *http.Request) (bool, error) {
+	if r == nil {
+		return false, nil
+	}
+
+	if state, ok := r.Context().Value(presenceKey{}).(presenceState); ok && state.known {
+		return state.has, nil
+	}
+
+	has, err := detectBody(r)
+	if err != nil {
+		return false, err
+	}
+
+	*r = *r.WithContext(context.WithValue(r.Context(), presenceKey{}, presenceState{
+		known: true,
+		has:   has,
+	}))
+	return has, nil
+}
+
+func detectBody(r *http.Request) (bool, error) {
+	if r == nil || r.Body == nil {
+		return false, nil
+	}
+
+	body := r.Body
+	var prefix [1]byte
+	n, err := body.Read(prefix[:])
+	if err != nil && err != io.EOF {
+		if n > 0 {
+			r.Body = &replayReadCloser{
+				Reader: io.MultiReader(bytes.NewReader(prefix[:n]), body),
+				Closer: body,
+			}
+		}
+		return false, err
+	}
+
+	r.Body = &replayReadCloser{
+		Reader: io.MultiReader(bytes.NewReader(prefix[:n]), body),
+		Closer: body,
+	}
+	return n > 0, nil
+}

@@ -11,7 +11,18 @@ import (
 	"sync"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/kanata996/hah/bind"
 )
+
+// 本文件负责 reqx 包的组合校验主流程、validator 初始化，以及字段级 violation 生成辅助。
+//
+// 这里承载的能力包括：
+//   - 对外公开的组合入口：BindAndValidate、BindAndValidateBody、
+//     BindAndValidateQuery、BindAndValidatePath、BindAndValidateHeaders
+//   - 绑定后的固定阶段顺序：Normalize -> ValidateRequest -> validator/v10
+//   - 各输入来源的 validator 实例、字段别名和 tag 优先级策略
+//   - validator.ValidationErrors 到 Violation 的稳定转换
+//   - 组合层目标类型与参数的公共前置校验
 
 type Normalizer interface {
 	Normalize()
@@ -32,50 +43,102 @@ var (
 	validators    map[sourceKind]*validator.Validate
 )
 
-func BindAndValidate[T any](r *http.Request, dst *T, opts ...BindOption) error {
-	if err := Bind(r, dst, opts...); err != nil {
+func BindAndValidate(r *http.Request, target any) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	if err := bind.Bind(r, target); err != nil {
 		return err
 	}
-	return validate(dst, sourceRequest)
+	return postBindValidate(r, target, sourceRequest)
 }
 
-func BindAndValidateBody[T any](r *http.Request, dst *T, opts ...BindBodyOption) error {
-	if err := BindBody(r, dst, opts...); err != nil {
+func BindAndValidateBody(r *http.Request, target any) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	if err := bind.BindBody(r, target); err != nil {
 		return err
 	}
-	return validate(dst, sourceBody)
+	return postBindValidate(r, target, sourceBody)
 }
 
-func BindAndValidateQuery[T any](r *http.Request, dst *T, opts ...BindQueryParamsOption) error {
-	if err := BindQueryParams(r, dst, opts...); err != nil {
+func BindAndValidateQuery(r *http.Request, target any) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	if err := bind.BindQueryParams(r, target); err != nil {
 		return err
 	}
-	return validate(dst, sourceQuery)
+	return postBindValidate(r, target, sourceQuery)
 }
 
-func BindAndValidatePath[T any](r *http.Request, dst *T) error {
-	if err := BindPathValues(r, dst); err != nil {
+func BindAndValidatePath(r *http.Request, target any) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	if err := bind.BindPathValues(r, target); err != nil {
 		return err
 	}
-	return validate(dst, sourcePath)
+	return postBindValidate(r, target, sourcePath)
 }
 
-func BindAndValidateHeaders[T any](r *http.Request, dst *T, opts ...BindHeadersOption) error {
-	if err := BindHeaders(r, dst, opts...); err != nil {
+func BindAndValidateHeaders(r *http.Request, target any) error {
+	if r == nil {
+		return errorsf("request must not be nil")
+	}
+	if target == nil {
+		return errorsf("destination must not be nil")
+	}
+	if err := bind.BindHeaders(r, target); err != nil {
 		return err
 	}
-	return validate(dst, sourceHeader)
+	return postBindValidate(r, target, sourceHeader)
 }
 
-func validate[T any](target *T, source sourceKind) error {
+func postBindValidate(r *http.Request, target any, source sourceKind) error {
 	if err := validateTarget(target); err != nil {
 		return err
 	}
 
-	if normalizer, ok := any(target).(Normalizer); ok {
-		normalizer.Normalize()
+	normalizeTarget(target)
+
+	if err := applyRequestValidation(r, target); err != nil {
+		return err
 	}
 
+	return validateFields(target, source)
+}
+
+func validate(target any, source sourceKind) error {
+	if err := validateTarget(target); err != nil {
+		return err
+	}
+
+	normalizeTarget(target)
+
+	return validateFields(target, source)
+}
+
+func normalizeTarget(target any) {
+	if normalizer, ok := target.(Normalizer); ok {
+		normalizer.Normalize()
+	}
+}
+
+func validateFields(target any, source sourceKind) error {
 	violations, err := validateStruct(target, source)
 	if err != nil {
 		return err
@@ -233,18 +296,8 @@ func validationInput(source sourceKind, target any, err validator.FieldError) st
 	if source != sourceRequest {
 		return violationInForSource(source)
 	}
-
-	fields, ok := resolveValidationFieldPath(target, err.StructNamespace())
-	if !ok {
+	if _, ok := resolveValidationFieldPath(target, err.StructNamespace()); !ok {
 		return ViolationInRequest
-	}
-
-	for i := len(fields) - 1; i >= 0; i-- {
-		for _, tagName := range sourceTagPriority(sourceRequest) {
-			if name := tagValue(fields[i], tagName); name != "" {
-				return violationInForTag(tagName)
-			}
-		}
 	}
 	return ViolationInRequest
 }
