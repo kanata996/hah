@@ -19,6 +19,9 @@
 //   - 成功响应入口：JSON、JSONBlob、OK、Created、NoContent
 //   - 错误响应入口：WriteError
 //   - 自定义错误响应器：ErrorResponder、NewErrorResponder
+//   - ErrorResponder 公开字段：Logger、AsHTTPError、ContextAttrs、
+//     AnnotateRequestLog、RequestLogAttrs
+//   - ErrorResponder 公开方法：Respond
 //   - 公开写回降级类型：ErrorWriteDegraded
 //   - ErrorWriteDegraded 公开字段：Cause、PreservedPublicResponse
 //   - ErrorWriteDegraded 公开方法：Error、Unwrap

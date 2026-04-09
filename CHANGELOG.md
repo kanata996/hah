@@ -22,6 +22,7 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 ### Documentation
 
 - Updated the error-logging documentation to match the current standalone-log contract and the write-failure diagnostic starting point.
+- Aligned package `doc.go` API inventories with the current root `hah` facade and `resp.ErrorResponder` public surface.
 
 ## [v0.2.0] - 2026-04-07
 
