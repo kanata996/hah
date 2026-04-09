@@ -247,6 +247,32 @@ func TestWriteError_DelegatesToResp(t *testing.T) {
 	}
 }
 
+// NewErrorResponder 会通过根包 facade 公开 resp 的可定制错误响应器。
+func TestNewErrorResponder_DelegatesToResp(t *testing.T) {
+	responder := NewErrorResponder()
+	if responder == nil {
+		t.Fatal("NewErrorResponder() = nil")
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
+	rr := httptest.NewRecorder()
+
+	if err := responder.Respond(rr, req, errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")); err != nil {
+		t.Fatalf("Respond() error = %v", err)
+	}
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+
+	body := decodeRootPayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "bad_request" {
+		t.Fatalf("code = %#v, want bad_request", got)
+	}
+	if got := body["detail"]; got != "bad request" {
+		t.Fatalf("detail = %#v, want bad request", got)
+	}
+}
+
 // OK 会通过根包 facade 写回标准 200 JSON 响应。
 func TestOK_DelegatesToResp(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)

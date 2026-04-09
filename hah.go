@@ -19,6 +19,8 @@ type (
 	RequestValidator = reqx.RequestValidator
 	// Normalizer 允许 DTO 在校验前做标准化处理。
 	Normalizer = reqx.Normalizer
+	// ErrorResponder 协调错误收敛、错误响应写回与 5xx 独立错误日志。
+	ErrorResponder = resp.ErrorResponder
 )
 
 // Bind 按默认顺序绑定请求数据：path -> query(GET/DELETE/HEAD) -> body。
@@ -79,6 +81,11 @@ func RequireBody(r *http.Request) error {
 // WriteError 按统一错误对象写回响应。
 func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 	return resp.WriteError(w, r, err)
+}
+
+// NewErrorResponder 返回默认错误响应器，可按需定制错误归一化与日志策略。
+func NewErrorResponder() *ErrorResponder {
+	return resp.NewErrorResponder()
 }
 
 // JSON 写回 JSON 响应。

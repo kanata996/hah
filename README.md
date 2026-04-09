@@ -83,6 +83,8 @@ func main() {
 - `BindAndValidateHeaders`
 - `RequireBody`
 - `WriteError`
+- `ErrorResponder`
+- `NewErrorResponder`
 - `JSON`
 - `JSONBlob`
 - `OK`
