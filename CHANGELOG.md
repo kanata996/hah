@@ -11,7 +11,7 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 - Before `v1.0.0`, breaking changes may still happen in minor releases, but they should be called out explicitly in this changelog.
 - After `v1.0.0`, breaking public API or HTTP contract changes should only ship in a new major version.
 
-## [Unreleased]
+## [v0.3.0] - 2026-04-10
 
 ### Fixed
 
