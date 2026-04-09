@@ -263,15 +263,16 @@ func TestBindBody_JSONContract(t *testing.T) {
 	t.Run("top level null follows default decoder semantics", func(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`
+			Age  int    `json:"age"`
 		}
 
 		req := newJSONRequest(http.MethodPost, "/", `null`)
-		var dst request
+		dst := request{Name: "existing", Age: 17}
 		if err := BindBody(req, &dst); err != nil {
 			t.Fatalf("BindBody() error = %v", err)
 		}
-		if dst.Name != "" {
-			t.Fatalf("name = %q, want empty", dst.Name)
+		if dst.Name != "existing" || dst.Age != 17 {
+			t.Fatalf("dst = %#v, want existing values preserved for top-level null", dst)
 		}
 	})
 
@@ -290,14 +291,18 @@ func TestBindBody_JSONContract(t *testing.T) {
 		}
 	})
 
-	t.Run("type mismatch returns bad request", func(t *testing.T) {
+	t.Run("type mismatch returns bad request and preserves prior decoded fields", func(t *testing.T) {
 		type request struct {
-			Age int `json:"age"`
+			Name string `json:"name"`
+			Age  int    `json:"age"`
 		}
 
-		req := newJSONRequest(http.MethodPost, "/", `{"age":"oops"}`)
-		dst := request{Age: 7}
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","age":"oops"}`)
+		dst := request{Name: "existing", Age: 7}
 		_ = assertHTTPError(t, BindBody(req, &dst), http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		if dst.Name != "kanata" || dst.Age != 7 {
+			t.Fatalf("dst = %#v, want decoded fields preserved and invalid field unchanged", dst)
+		}
 	})
 
 	t.Run("unknown fields are accepted by default", func(t *testing.T) {
@@ -316,26 +321,34 @@ func TestBindBody_JSONContract(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects trailing garbage after valid json", func(t *testing.T) {
+	t.Run("rejects trailing garbage after valid json while preserving first value", func(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`
+			Age  int    `json:"age"`
 		}
 
-		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}xxx`)
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","age":17}xxx`)
 
-		var dst request
+		dst := request{Name: "existing", Age: 7}
 		_ = assertHTTPError(t, BindBody(req, &dst), http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		if dst.Name != "kanata" || dst.Age != 17 {
+			t.Fatalf("dst = %#v, want first JSON value preserved before trailing-garbage error", dst)
+		}
 	})
 
-	t.Run("rejects multiple top level json values", func(t *testing.T) {
+	t.Run("rejects multiple top level json values while preserving first value", func(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`
+			Age  int    `json:"age"`
 		}
 
-		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}{"name":"other"}`)
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","age":17}{"name":"other"}`)
 
-		var dst request
+		dst := request{Name: "existing", Age: 7}
 		_ = assertHTTPError(t, BindBody(req, &dst), http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		if dst.Name != "kanata" || dst.Age != 17 {
+			t.Fatalf("dst = %#v, want first JSON value preserved before multi-value error", dst)
+		}
 	})
 
 	t.Run("object binds to map target", func(t *testing.T) {
@@ -357,6 +370,7 @@ func TestBindBody_JSONContract(t *testing.T) {
 func TestBindBody_RequestTooLarge(t *testing.T) {
 	type request struct {
 		Name string `json:"name"`
+		Age  int    `json:"age"`
 	}
 
 	oversizedName := strings.Repeat("a", int(defaultMaxBodyBytes))
@@ -365,8 +379,11 @@ func TestBindBody_RequestTooLarge(t *testing.T) {
 	req.Header.Set("Content-Type", mimeApplicationJSON)
 	req.ContentLength = int64(len(body))
 
-	var dst request
+	dst := request{Name: "existing", Age: 17}
 	_ = assertHTTPError(t, BindBody(req, &dst), http.StatusRequestEntityTooLarge, CodeRequestTooLarge, "request body is too large")
+	if dst.Name != "existing" || dst.Age != 17 {
+		t.Fatalf("dst = %#v, want existing values preserved on oversized body", dst)
+	}
 }
 
 func TestBindBody_HelperBranches(t *testing.T) {

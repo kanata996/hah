@@ -10,6 +10,7 @@ package bind
 import (
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -60,14 +61,76 @@ func TestDefaultBindConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultBinder_MatchesBindPublicContract(t *testing.T) {
+	t.Run("success path matches Bind", func(t *testing.T) {
+		type request struct {
+			ID   string `param:"id" query:"id" json:"id"`
+			Page int    `query:"page"`
+			Name string `json:"name"`
+		}
+
+		newRequest := func() *http.Request {
+			req := requestWithPathParams(map[string][]string{
+				"id": {"route-id"},
+			})
+			req.Method = http.MethodGet
+			req.URL.RawQuery = "id=query-id&page=7"
+			setRequestBody(req, mimeApplicationJSON, `{"id":"body-id","name":"kanata"}`)
+			return req
+		}
+
+		var binder DefaultBinder
+
+		var got request
+		gotErr := binder.Bind(newRequest(), &got)
+
+		var want request
+		wantErr := Bind(newRequest(), &want)
+
+		if !sameHTTPError(gotErr, wantErr) {
+			t.Fatalf("DefaultBinder.Bind() error = %v, want %v", gotErr, wantErr)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("DefaultBinder.Bind() result = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("stage failure matches Bind", func(t *testing.T) {
+		type request struct {
+			ID   string `param:"id"`
+			Page int    `query:"page"`
+			Age  int    `json:"age"`
+		}
+
+		newRequest := func() *http.Request {
+			req := requestWithPathParams(map[string][]string{
+				"id": {"route-id"},
+			})
+			req.Method = http.MethodGet
+			req.URL.RawQuery = "page=7"
+			setRequestBody(req, mimeApplicationJSON, `{"age":"oops"}`)
+			return req
+		}
+
+		var binder DefaultBinder
+
+		got := request{ID: "existing-id", Page: 3, Age: 1}
+		gotErr := binder.Bind(newRequest(), &got)
+
+		want := request{ID: "existing-id", Page: 3, Age: 1}
+		wantErr := Bind(newRequest(), &want)
+
+		if !sameHTTPError(gotErr, wantErr) {
+			t.Fatalf("DefaultBinder.Bind() error = %v, want %v", gotErr, wantErr)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("DefaultBinder.Bind() result = %#v, want %#v", got, want)
+		}
+	})
+}
+
 func TestBind_InternalBranches(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	var dst struct{}
-
-	var binder DefaultBinder
-	if err := binder.Bind(req, &dst); err != nil {
-		t.Fatalf("DefaultBinder.Bind() error = %v", err)
-	}
 
 	if err := validateBindingDestination(1); err == nil || err.Error() != "bind: destination must not be nil" {
 		t.Fatalf("validateBindingDestination(non-pointer) error = %v", err)

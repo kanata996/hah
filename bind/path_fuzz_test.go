@@ -8,8 +8,6 @@ package bind
 import (
 	"errors"
 	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -35,13 +33,14 @@ func FuzzBindPublicContracts(f *testing.F) {
 			safeMethod = http.MethodGet
 		}
 
-		safeTarget := target
-		if _, err := url.ParseRequestURI(safeTarget); err != nil {
-			safeTarget = "/"
-		}
-
 		newRequest := func() *http.Request {
-			req := httptest.NewRequest(safeMethod, safeTarget, strings.NewReader(body))
+			req, err := http.NewRequest(safeMethod, target, strings.NewReader(body))
+			if err != nil {
+				req, err = http.NewRequest(safeMethod, "/", strings.NewReader(body))
+				if err != nil {
+					t.Fatalf("http.NewRequest() fallback error = %v", err)
+				}
+			}
 			if contentType != "" {
 				req.Header.Set("Content-Type", contentType)
 			}

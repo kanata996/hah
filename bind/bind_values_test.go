@@ -116,12 +116,12 @@ func TestBindPathValues_EmptyValueBindsZeroValue(t *testing.T) {
 		"id": {""},
 	})
 
-	var dst request
+	dst := request{ID: 7}
 	if err := BindPathValues(req, &dst); err != nil {
 		t.Fatalf("BindPathValues() error = %v", err)
 	}
 	if dst.ID != 0 {
-		t.Fatalf("id = %d, want 0", dst.ID)
+		t.Fatalf("id = %d, want 0 after empty path value overwrites existing value", dst.ID)
 	}
 }
 
