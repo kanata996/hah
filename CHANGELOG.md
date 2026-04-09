@@ -11,13 +11,27 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 - Before `v1.0.0`, breaking changes may still happen in minor releases, but they should be called out explicitly in this changelog.
 - After `v1.0.0`, breaking public API or HTTP contract changes should only ship in a new major version.
 
+## [Unreleased]
+
 ## [v0.3.0] - 2026-04-10
+
+### Highlights
+
+- Added a dedicated `bind` package for pure request-source binding, with public `Bind`, `BindBody`, `BindQueryParams`, `BindPathValues`, `BindHeaders`, `Binder`, `DefaultBinder`, and `BindUnmarshaler` APIs.
+- Split request handling responsibilities more clearly: `bind` now owns source-to-DTO mapping, while `reqx` focuses on `BindAndValidate*`, normalization, request-level rules, and validator-based field validation.
+- Standardized the default binding contract around `net/http`: `Bind` now runs `path -> query(GET/DELETE/HEAD) -> body`, keeps header binding explicit, and documents a stable JSON-body contract for empty-body no-op, `application/json`, and size/media-type failures.
 
 ### Fixed
 
 - Clarified `resp.WriteError(...)` logging behavior so ordinary `4xx` responses still do not emit standalone error logs; only `5xx` failures and error-response write failures produce independent `slog.Default()` records.
 - Fixed error-response write-failure diagnostics to log the actual `writeErr` chain instead of falling back to the original `errx.HTTPError` cause, so `"resp: failed to write error response"` now points at the real write-path failure.
 - Re-exported `resp.ErrorResponder` and `resp.NewErrorResponder()` from the root `hah` facade so the new customizable error-responder API is available as a public root-package entry point.
+
+### Breaking
+
+- Introduced the standalone `bind` package and moved the default binding implementation out of `reqx`; code that imported `reqx` for binding-only behavior should migrate to `bind`.
+- Replaced the previous generic, option-based root `hah.Bind*` wrappers with non-generic thin wrappers over `bind`, and removed the old root aliases for request binding options such as `BindOption`, `BindBodyOption`, `BindQueryParamsOption`, `BindHeadersOption`, and `DefaultMaxBodyBytes`.
+- Narrowed `reqx` to the validation composition layer, so its public surface now centers on `BindAndValidate*`, `RequestValidator`, `Normalizer`, `RequireBody`, `InvalidRequest`, and public violations rather than the old bind-only helpers.
 
 ### Documentation
 
