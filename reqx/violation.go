@@ -6,6 +6,16 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
+// 本文件负责 reqx 对外公开的违规模型、错误码和 invalid_request 错误包络。
+//
+// 这里承载的能力包括：
+//   - 公开的顶层错误码常量
+//   - 公开的 violation code / violation in 常量
+//   - Violation 结构及默认 detail 规范化
+//   - 422 invalid_request 错误的统一构造
+
+const CodeInvalidRequest = "invalid_request"
+
 const (
 	ViolationCodeInvalid  = "invalid"
 	ViolationCodeRequired = "required"
@@ -36,10 +46,6 @@ type Violation struct {
 	In     string `json:"in,omitempty"`
 	Code   string `json:"code"`
 	Detail string `json:"detail"`
-}
-
-func invalidFieldError(violation Violation) error {
-	return invalidFieldsError([]Violation{violation})
 }
 
 func invalidFieldsError(violations []Violation) error {

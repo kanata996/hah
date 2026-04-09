@@ -1,20 +1,21 @@
 package resp
 
-// 本文件负责“独立错误日志输出”。
+// 本文件负责“错误请求日志注解”，而不是“统一错误日志输出”。
 //
 // 定位：
-//   - 这里服务于 WriteError(...) 的内部流程。
-//   - 它不依赖任何 router、request logger 或 tracing 中间件。
-//   - 它只在需要时通过 slog.Default() 输出一条独立错误日志。
+//   - 这里服务于 ErrorResponder 的内部流程。
+//   - 它只负责生成低噪音 request-log attrs 和独立 error log 的诊断 attrs。
+//   - 具体 request log 集成由 ErrorResponder.AnnotateRequestLog hook 决定。
 //
 // 职责：
 //   - 从 error / HTTPError 提取更适合排障的结构化字段。
+//   - request log 只补低噪音诊断字段；独立 error log 保留完整诊断摘要。
 //   - 在不泄露不可控内部对象的前提下，尽量保留原始错误文本、类型以及首层/根因摘要。
-//   - 在错误响应自身写出失败时，额外输出基础设施级异常日志。
+//   - 仅在“错误响应自身写出失败”这类基础设施异常时，额外输出一条独立 error 日志。
 //
 // 要点：
-//   - 普通 4xx 不额外输出独立错误日志。
-//   - 5xx 只输出一条独立错误日志，不再尝试补 access log 字段。
+//   - 普通 4xx / 5xx 不在这里额外打一条重复业务错误日志。
+//   - 诊断字段优先围绕排障，而不是简单镜像对外响应 JSON。
 //   - 诊断链优先从原始 cause 开始，避免 *HTTPError 包装层淹没真正根因。
 
 import (
@@ -41,24 +42,38 @@ type errorChainInfo struct {
 	rootType    string
 }
 
+// requestErrorLogAttrs 生成请求级错误日志字段。
+// 4xx 仅保留外层请求日志；5xx 只补充低噪音、可聚合的诊断字段。
+func requestErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
+	if err == nil || httpErr == nil {
+		return nil
+	}
+
+	status := httpErr.Status()
+	if status < http.StatusInternalServerError {
+		return nil
+	}
+
+	attrs := make([]slog.Attr, 0, 6)
+	attrs = append(attrs, slog.String("error.code", httpErr.Code()))
+	if errors.Is(err, context.Canceled) {
+		attrs = append(attrs, slog.Bool("error.canceled", true))
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		attrs = append(attrs, slog.Bool("error.timeout", true))
+	}
+
+	return attrs
+}
+
 func diagnosticErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
 	if err == nil || httpErr == nil {
 		return nil
 	}
 
-	return diagnosticErrorLogAttrsForError(errorForDiagnostics(err, httpErr), err, httpErr.Code())
-}
-
-func diagnosticErrorLogAttrsForError(diagnosticErr, flagErr error, code string) []slog.Attr {
-	if diagnosticErr == nil {
-		return nil
-	}
-
-	chain := buildErrorChainInfo(diagnosticErr)
+	chain := buildErrorChainInfo(errorForDiagnostics(err, httpErr))
 	attrs := make([]slog.Attr, 0, 7)
-	if strings.TrimSpace(code) != "" {
-		attrs = append(attrs, slog.String("error.code", code))
-	}
+	attrs = append(attrs, slog.String("error.code", httpErr.Code()))
 	if chain.message != "" {
 		attrs = append(attrs, slog.String("error.message", chain.message))
 	}
@@ -72,10 +87,10 @@ func diagnosticErrorLogAttrsForError(diagnosticErr, flagErr error, code string) 
 	if chain.rootType != "" {
 		attrs = append(attrs, slog.String("error.root_type", chain.rootType))
 	}
-	if errors.Is(flagErr, context.Canceled) {
+	if errors.Is(err, context.Canceled) {
 		attrs = append(attrs, slog.Bool("error.canceled", true))
 	}
-	if errors.Is(flagErr, context.DeadlineExceeded) {
+	if errors.Is(err, context.DeadlineExceeded) {
 		attrs = append(attrs, slog.Bool("error.timeout", true))
 	}
 
@@ -96,21 +111,21 @@ func errorForDiagnostics(err error, httpErr *errx.HTTPError) error {
 
 // logErrorResponseWriteFailure 只记录“错误响应自身写出失败”的异常。
 // 这是基础设施级问题，不属于普通业务失败，因此需要单独打一条 error 日志。
-func logErrorResponseWriteFailure(r *http.Request, httpErr *errx.HTTPError, err error) {
+func (r *ErrorResponder) logErrorResponseWriteFailure(req *http.Request, httpErr *errx.HTTPError, err error) {
 	if err == nil || httpErr == nil {
 		return
 	}
 
 	ctx := context.Background()
-	if r != nil {
-		ctx = r.Context()
+	if req != nil {
+		ctx = req.Context()
 	}
 
 	attrs := []slog.Attr{
 		slog.Int("http.response.status_code", httpErr.Status()),
 	}
-	attrs = append(attrs, diagnosticErrorLogAttrsForError(err, err, httpErr.Code())...)
-	attrs = append(attrs, requestMetadataAttrs(r)...)
+	attrs = append(attrs, diagnosticErrorLogAttrs(err, httpErr)...)
+	attrs = append(attrs, r.contextAttrs(ctx)...)
 
 	var degraded *ErrorWriteDegraded
 	if errors.As(err, &degraded) && degraded != nil {
@@ -120,35 +135,35 @@ func logErrorResponseWriteFailure(r *http.Request, httpErr *errx.HTTPError, err 
 		)
 	}
 
-	slog.Default().LogAttrs(ctx, slog.LevelError, "resp: failed to write error response", attrs...)
+	r.logger().LogAttrs(ctx, slog.LevelError, "resp: failed to write error response", attrs...)
 }
 
 // logServerError 记录一次独立的 5xx 错误日志，便于在 access log 之外排查问题。
-func logServerError(r *http.Request, httpErr *errx.HTTPError, err error) {
+func (r *ErrorResponder) logServerError(req *http.Request, httpErr *errx.HTTPError, err error) {
 	if err == nil || httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
 		return
 	}
 
-	logServerErrorAttrs(r, httpErr, diagnosticErrorLogAttrs(err, httpErr))
+	r.logServerErrorAttrs(req, httpErr, diagnosticErrorLogAttrs(err, httpErr))
 }
 
-func logServerErrorAttrs(r *http.Request, httpErr *errx.HTTPError, diagnosticAttrs []slog.Attr) {
+func (r *ErrorResponder) logServerErrorAttrs(req *http.Request, httpErr *errx.HTTPError, diagnosticAttrs []slog.Attr) {
 	if httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
 		return
 	}
 
 	ctx := context.Background()
-	if r != nil {
-		ctx = r.Context()
+	if req != nil {
+		ctx = req.Context()
 	}
 
 	attrs := []slog.Attr{
 		slog.Int("http.response.status_code", httpErr.Status()),
 	}
 	attrs = append(attrs, diagnosticAttrs...)
-	attrs = append(attrs, requestMetadataAttrs(r)...)
+	attrs = append(attrs, r.contextAttrs(ctx)...)
 
-	slog.Default().LogAttrs(ctx, slog.LevelError, "resp: request failed with server error", attrs...)
+	r.logger().LogAttrs(ctx, slog.LevelError, "resp: request failed with server error", attrs...)
 }
 
 // buildErrorChainInfo 把错误链整理成适合日志输出的摘要结构。
@@ -305,22 +320,4 @@ func limitErrorLogString(value string) string {
 		return trimmed
 	}
 	return trimmed[:maxLoggedErrorStringBytes] + "...(truncated)"
-}
-
-func requestMetadataAttrs(r *http.Request) []slog.Attr {
-	if r == nil {
-		return nil
-	}
-
-	attrs := make([]slog.Attr, 0, 2)
-	if method := strings.TrimSpace(r.Method); method != "" {
-		attrs = append(attrs, slog.String("http.request.method", method))
-	}
-	if r.URL != nil {
-		if path := strings.TrimSpace(r.URL.Path); path != "" {
-			attrs = append(attrs, slog.String("url.path", path))
-		}
-	}
-
-	return attrs
 }

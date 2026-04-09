@@ -5,7 +5,7 @@ package resp
 // 定位：
 //   - 这里是 WriteError(...) 的主实现文件。
 //   - 它关注的是把任意 error 收敛成稳定的 HTTP 错误响应并写回客户端。
-//   - 与之配套的独立错误日志逻辑位于 error_log.go，避免响应写回和日志输出混在一起。
+//   - 与之配套的请求日志注解逻辑位于 error_log.go，避免响应写回和日志字段提取混在一起。
 //
 // 职责：
 //   - 统一 error -> HTTPError 的收敛规则。
@@ -49,34 +49,15 @@ type ErrorWriteDegraded struct {
 //
 // 职责分为三步：
 //   - 先把任意 error 收敛为可稳定写回的 HTTPError；
-//   - 再在需要时输出一条独立错误日志；
+//   - 再给当前 request log 补充低噪音 `error.*` 诊断字段；
 //   - 最后按统一错误响应契约写回客户端。
 //
 // 约束：
 //   - 对 HEAD 请求仅写状态码，不写 body；
 //   - 若能明确判断响应已经开始写出，则不再尝试二次改写响应；
-//   - 普通 4xx 不额外输出独立错误日志。
+//   - 普通 4xx / 5xx 不在这里额外输出一条重复业务错误日志。
 func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
-	if err == nil {
-		return nil
-	}
-
-	httpErr := asHTTPError(err)
-
-	var responseStartedErr *responseWriteError
-	if errors.As(err, &responseStartedErr) && responseStartedErr != nil && responseStartedErr.responseStarted {
-		logServerError(r, httpErr, err)
-		return err
-	}
-	if responseAlreadyStarted(w) {
-		logServerError(r, httpErr, err)
-		return err
-	}
-
-	logServerError(r, httpErr, err)
-	writeErr := writeHTTPError(w, r, httpErr)
-	logErrorResponseWriteFailure(r, httpErr, writeErr)
-	return writeErr
+	return defaultErrorResponder.Respond(w, r, err)
 }
 
 // responseAlreadyStarted 仅在 writer 显式暴露响应状态时判断是否已经开始写出。

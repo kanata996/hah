@@ -5,6 +5,7 @@
 适用范围：
 
 - 根包 `hah`
+- `bind`
 - `reqx`
 - `errx`
 - `resp`
@@ -150,15 +151,15 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 至少覆盖：
 
-- facade 是否正确暴露 `reqx` / `resp` 的核心入口
+- facade 是否正确暴露 `bind` / `reqx` / `resp` 的核心入口
 - 根包 helper 的行为是否与底层包一致
 - README 中承诺的示例路径是否能被测试支撑
 
 若 facade 只是透传，也应至少有代表性测试，防止签名、返回值或行为漂移。
 
-### 3.2 `reqx`
+### 3.2 `bind`
 
-`reqx` 是请求边界核心包，测试必须覆盖输入来源、顺序、校验和错误语义。
+`bind` 是请求输入映射层，测试必须覆盖输入来源、绑定顺序和 body 契约。
 
 至少覆盖：
 
@@ -166,15 +167,26 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 - `Bind(...)` 的绑定顺序与覆盖规则
 - 空 body、错误 `Content-Type`、超大 body、未知字段
 - DTO 已有值时的保留语义
-- 绑定失败时不发生部分落值
-- `Normalize()` 在校验前执行
-- 校验错误字段名映射到请求 tag，而不是 Go 字段名
-- 常见 violation 的状态码、错误码、detail 与结构化错误项
+- 绑定失败时的已写入值保留规则
 - path/query/header/body 的单源 API 与综合 API 一致性
 
-若改动影响绑定顺序、默认值、字段覆盖或错误映射，必须补回归测试。
+若改动影响绑定顺序、默认值、字段覆盖或 body 契约，必须补回归测试。
 
-### 3.3 `errx`
+### 3.3 `reqx`
+
+`reqx` 是请求边界核心包，测试必须覆盖输入来源、顺序、校验和错误语义。
+
+至少覆盖：
+
+- `Normalize()` 在校验前执行
+- `RequestValidator` 在字段校验前执行
+- 校验错误字段名映射到请求 tag，而不是 Go 字段名
+- 常见 violation 的状态码、错误码、detail 与结构化错误项
+- `RequireBody` 与组合入口的 body-required 契约
+
+若改动影响请求规则执行顺序、字段错误映射或公开错误语义，必须补回归测试。
+
+### 3.4 `errx`
 
 `errx` 是公共 HTTP 错误模型，测试必须覆盖标准化规则、cause 语义和快捷构造器。
 
@@ -189,18 +201,18 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 若改动影响任何公开字段、默认值、状态快捷构造或 cause 暴露规则，必须补直接回归测试。
 
-### 3.4 `resp`
+### 3.5 `resp`
 
 `resp` 是响应边界核心包，测试必须覆盖成功响应、错误响应和错误收敛。
 
 至少覆盖：
 
 - `OK` / `Created` / `NoContent`
-- `JSON` / `JSONPretty` / `JSONBlob`
+- `JSON` / `JSONBlob`
 - `errx.HTTPError` 与 `WriteError(...)` 的协作契约：状态码、错误码、标题、详情、公开错误项
 - `WriteError(...)` 的 error 收敛和 problem JSON 写回
 - 非法状态码、无响应体状态、`nil writer`、`nil request`
-- pretty 行为和 raw bytes 透传行为
+- raw bytes 透传行为
 - 内部 cause 不泄漏到公开响应
 - context canceled / timeout 的公共错误语义
 - 错误响应降级路径和响应已开始写出路径
@@ -235,7 +247,7 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
   - 非法状态码报错
   - `nil writer` / bodyless status / `nil request`
 
-- `reqx.BindBody(...)`
+- `bind.BindBody(...)`
   - 正常 body 绑定成功
   - 非 JSON `Content-Type` 报错
   - 空 body 保持原值或 no-op

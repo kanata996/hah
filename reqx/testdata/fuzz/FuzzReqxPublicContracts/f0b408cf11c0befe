@@ -1,6 +1,0 @@
-go test fuzz v1
-byte(':')
-byte('\x04')
-string("\xff")
-string("0")
-string("0+json")

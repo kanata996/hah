@@ -8,7 +8,7 @@
 - 保留 `chi` 常用中间件：`RequestID`、`RealIP`、`Timeout`、`Heartbeat`
 - 用 `traceid.Middleware` 生成/透传 `TraceId`，并把它带到 `httplog` 和 `slog` 上下文
 - 用 `httplog/v3` 输出结构化 access log，并补 `request.id`
-- 直接复用 `chi v5` 对 `net/http` `PathValue` 的原生支持
+- 在 handler 入口把 `chi.RouteContext` 显式桥接到 `net/http` `PathValue` / `Pattern` 契约
 - `DELETE` 路由额外演示 `hah.BindAndValidateHeaders(...)` 的 header 绑定
 
 主要路由：
@@ -23,7 +23,7 @@
 
 1. `middleware.RequestID` 生成 request ID，`traceid.Middleware` 生成或透传 `TraceId`。
 2. `httplog/v3` 输出结构化 request log，并记录 `request.id` / `trace.id`。
-3. `chi v5` 在路由命中后直接把路径参数回填到 `net/http` 的 `PathValue` 契约。
+3. handler 入口先把 `chi.RouteContext` 回填到 `net/http` 的 `PathValue` / `Pattern` 契约。
 4. handler 用 `hah.BindAndValidate(...)`、`hah.BindAndValidatePath(...)`、`hah.BindAndValidateHeaders(...)` 处理输入。
 5. 领域层直接返回 `errx` 公共错误；失败路径统一走 `hah.WriteError(...)`。
 6. 成功路径统一走 `hah.OK(...)`、`hah.Created(...)` 和 `hah.NoContent(...)`。

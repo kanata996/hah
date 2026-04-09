@@ -6,10 +6,11 @@
 
 `hah` 是一个面向 `net/http` 的 JSON API 边界层。
 
-它不接管 router，不定义新的 handler 协议，也不试图包装整个 HTTP 生命周期。当前仓库拆成四个清晰的包边界：
+它不接管 router，不定义新的 handler 协议，也不试图包装整个 HTTP 生命周期。当前仓库拆成五个清晰的包边界：
 
 - `hah`：根包 facade，聚合最常用的绑定、校验和响应写回入口
-- `reqx`：请求侧能力，负责 path/query/header/body 绑定和 `validator/v10` 校验
+- `bind`：请求绑定层，负责 path/query/header/body 到目标值的映射
+- `reqx`：请求规则与校验层，负责 `Normalize`、`RequestValidator` 和 `validator/v10`
 - `errx`：公共 HTTP 错误模型
 - `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
 
@@ -80,17 +81,13 @@ func main() {
 - `BindAndValidateQuery`
 - `BindAndValidatePath`
 - `BindAndValidateHeaders`
-- `ParamString`
-- `ParamInt`
-- `ParamUUID`
+- `RequireBody`
 - `WriteError`
 - `JSON`
-- `JSONPretty`
 - `JSONBlob`
 - `OK`
 - `Created`
 - `NoContent`
-- `WithMaxBodyBytes`
 
 ## 错误响应
 
