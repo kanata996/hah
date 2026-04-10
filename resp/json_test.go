@@ -14,8 +14,10 @@ import (
 // [✓] JSON 拒绝 nil writer、非法状态码、无响应体状态和不可编码值；OK 拒绝 nil writer、nil data 和不可编码值
 // [✓] Created 拒绝 nil data、不可编码值和 nil writer
 // [✓] JSONBlob 直接原样透传 JSON 字节，不做合法性校验，并拒绝 nil writer、非法状态和无响应体状态
+// [✓] JSONBlob 在 nil body 和空 body 下的透传行为
 // [✓] NoContent 只写 204 状态，不写 body，也不设置 Content-Type；nil writer 会返回错误
 // [✓] writeJSON / writeSuccess 会把编码错误和状态校验错误直接向上返回
+// [✓] Created / OK 拒绝编码为 JSON null 的 typed nil 指针数据
 
 type payloadMap map[string]any
 
@@ -252,6 +254,42 @@ func TestJSONBlobPassesThroughInvalidJSONBytes(t *testing.T) {
 	}
 }
 
+// JSONBlob 在 nil body 时仍正常透传空内容。
+func TestJSONBlobWritesNilBody(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := JSONBlob(rr, http.StatusOK, nil); err != nil {
+		t.Fatalf("JSONBlob() error = %v", err)
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if rr.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", rr.Body.String())
+	}
+}
+
+// JSONBlob 在空切片 body 时仍正常透传空内容。
+func TestJSONBlobWritesEmptyBody(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := JSONBlob(rr, http.StatusOK, []byte{}); err != nil {
+		t.Fatalf("JSONBlob() error = %v", err)
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if rr.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", rr.Body.String())
+	}
+}
+
 // JSONBlob 也会拒绝空的 ResponseWriter。
 func TestJSONBlobRejectsNilWriter(t *testing.T) {
 	err := JSONBlob(nil, http.StatusOK, []byte(`{"id":"u_1"}`))
@@ -323,6 +361,34 @@ func TestCreatedRejectsNilData(t *testing.T) {
 
 	if err := Created(rr, nil); err == nil || err.Error() != "resp: data must exist and must not encode to null" {
 		t.Fatalf("Created() error = %v, want non-null data error", err)
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
+// Created 也会拒绝非 nil 接口但值为 nil 指针的数据，因为它编码为 JSON null。
+func TestCreatedRejectsTypedNilPointer(t *testing.T) {
+	type user struct {
+		ID string `json:"id"`
+	}
+	var data *user // non-nil interface, nil pointer, encodes to "null"
+	rr := httptest.NewRecorder()
+
+	if err := Created(rr, data); err == nil || err.Error() != "resp: data must exist and must not encode to null" {
+		t.Fatalf("Created() error = %v, want non-null data error", err)
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
+// OK 也会拒绝非 nil 接口但值为 nil 指针的数据，因为它编码为 JSON null。
+func TestOKRejectsTypedNilPointer(t *testing.T) {
+	type user struct {
+		ID string `json:"id"`
+	}
+	var data *user
+	rr := httptest.NewRecorder()
+
+	if err := OK(rr, data); err == nil || err.Error() != "resp: data must exist and must not encode to null" {
+		t.Fatalf("OK() error = %v, want non-null data error", err)
 	}
 	assertRecorderHasNoBodyOrContentType(t, rr)
 }
