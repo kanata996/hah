@@ -90,8 +90,8 @@ func BindQueryParams(r *http.Request, target any) error {
 	if r == nil {
 		return errorsf("request must not be nil")
 	}
-	if err := validateKeyValueBindingDestination(target); err != nil {
-		return err
+	if target == nil {
+		return errorsf("destination must not be nil")
 	}
 
 	return bindQueryParamsDefault(r, target)
@@ -102,8 +102,8 @@ func BindPathValues(r *http.Request, target any) error {
 	if r == nil {
 		return errorsf("request must not be nil")
 	}
-	if err := validateKeyValueBindingDestination(target); err != nil {
-		return err
+	if target == nil {
+		return errorsf("destination must not be nil")
 	}
 
 	return bindPathValuesDefault(r, target)
@@ -114,8 +114,8 @@ func BindHeaders(r *http.Request, target any) error {
 	if r == nil {
 		return errorsf("request must not be nil")
 	}
-	if err := validateKeyValueBindingDestination(target); err != nil {
-		return err
+	if target == nil {
+		return errorsf("destination must not be nil")
 	}
 
 	return bindHeadersDefault(r, target)
@@ -159,31 +159,6 @@ func validateBindingDestination(target any) error {
 		return errorsf("destination must not be nil")
 	}
 	return nil
-}
-
-func validateKeyValueBindingDestination(target any) error {
-	if err := validateBindingDestination(target); err != nil {
-		return err
-	}
-
-	targetType := reflect.TypeOf(target).Elem()
-	stringType := reflect.TypeOf("")
-	sliceOfStringType := reflect.TypeOf([]string(nil))
-
-	if targetType.Kind() == reflect.Struct {
-		return nil
-	}
-	if targetType.Kind() == reflect.Map && targetType.Key() == stringType {
-		elemType := targetType.Elem()
-		if elemType == stringType || elemType == sliceOfStringType {
-			return nil
-		}
-		if elemType.Kind() == reflect.Interface && elemType.NumMethod() == 0 {
-			return nil
-		}
-	}
-
-	return errorsf("destination must be a non-nil pointer to struct or supported map")
 }
 
 func errorsf(format string, args ...any) error {

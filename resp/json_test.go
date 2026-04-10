@@ -218,6 +218,37 @@ func TestJSONBlobHeadWritesHeadersWithoutBody(t *testing.T) {
 	}
 }
 
+func TestJSONBlobHeadRejectsNilWriter(t *testing.T) {
+	req := httptest.NewRequest(http.MethodHead, "/", nil)
+
+	err := JSONBlob(nil, req, http.StatusOK, []byte(`{"id":"u_1"}`))
+	if err == nil || err.Error() != "resp: response writer is nil" {
+		t.Fatalf("JSONBlob() error = %v, want response writer is nil", err)
+	}
+}
+
+func TestJSONBlobHeadRejectsInvalidStatus(t *testing.T) {
+	req := httptest.NewRequest(http.MethodHead, "/", nil)
+	rr := httptest.NewRecorder()
+
+	err := JSONBlob(rr, req, 1000, []byte(`{"id":"u_1"}`))
+	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
+		t.Fatalf("JSONBlob() error = %v, want invalid HTTP status", err)
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
+func TestJSONBlobHeadRejectsBodylessStatus(t *testing.T) {
+	req := httptest.NewRequest(http.MethodHead, "/", nil)
+	rr := httptest.NewRecorder()
+
+	err := JSONBlob(rr, req, http.StatusNoContent, []byte(`{"id":"u_1"}`))
+	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 204" {
+		t.Fatalf("JSONBlob() error = %v, want bodyless status error", err)
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
 // JSONBlob 直接透传字节，不负责校验其是否是合法 JSON。
 func TestJSONBlobPassesThroughInvalidJSONBytes(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

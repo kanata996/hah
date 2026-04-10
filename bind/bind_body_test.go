@@ -176,36 +176,30 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 		)
 	})
 
-	t.Run("rejects unsupported content type before reading the full body", func(t *testing.T) {
+	t.Run("surfaces later body read errors before unsupported content type", func(t *testing.T) {
+		wantErr := errors.New("read failed")
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.ContentLength = -1
 		req.Header.Set("Content-Type", "text/plain")
-		req.Body = &byteThenReadErrorCloser{err: errors.New("read failed")}
+		req.Body = &byteThenReadErrorCloser{err: wantErr}
 
 		var dst request
-		_ = assertHTTPError(
-			t,
-			BindBody(req, &dst),
-			http.StatusUnsupportedMediaType,
-			CodeUnsupportedMediaType,
-			"Content-Type must be application/json",
-		)
+		if err := BindBody(req, &dst); !errors.Is(err, wantErr) {
+			t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+		}
 	})
 
-	t.Run("rejects malformed content type before surfacing later body read errors", func(t *testing.T) {
+	t.Run("surfaces later body read errors before malformed content type", func(t *testing.T) {
+		wantErr := errors.New("read failed")
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.ContentLength = -1
 		req.Header.Set("Content-Type", `application/json; charset="utf-8`)
-		req.Body = &byteThenReadErrorCloser{err: errors.New("read failed")}
+		req.Body = &byteThenReadErrorCloser{err: wantErr}
 
 		var dst request
-		_ = assertHTTPError(
-			t,
-			BindBody(req, &dst),
-			http.StatusUnsupportedMediaType,
-			CodeUnsupportedMediaType,
-			"Content-Type must be application/json",
-		)
+		if err := BindBody(req, &dst); !errors.Is(err, wantErr) {
+			t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+		}
 	})
 }
 

@@ -39,14 +39,6 @@ func bindBodyDefault(r *http.Request, target any, cfg bindBodyConfig) error {
 		return nil
 	}
 
-	mediaType, err := bodyMediaType(r)
-	if err != nil {
-		return unsupportedMediaTypeError()
-	}
-	if mediaType != mimeApplicationJSON {
-		return unsupportedMediaTypeError()
-	}
-
 	body, err := readBody(r.Body, cfg.maxBodyBytes)
 	if err != nil {
 		if errors.Is(err, errRequestTooLarge) {
@@ -55,7 +47,17 @@ func bindBodyDefault(r *http.Request, target any, cfg bindBodyConfig) error {
 		return err
 	}
 
-	return decodeJSONBody(body, target, cfg.allowUnknownFields)
+	mediaType, err := bodyMediaType(r)
+	if err != nil {
+		return unsupportedMediaTypeError()
+	}
+
+	switch mediaType {
+	case mimeApplicationJSON:
+		return decodeJSONBody(body, target, cfg.allowUnknownFields)
+	default:
+		return unsupportedMediaTypeError()
+	}
 }
 
 // bodyMediaType 解析请求头中的主 media type。
