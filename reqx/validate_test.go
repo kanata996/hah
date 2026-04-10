@@ -6,6 +6,8 @@ package reqx
 // - [✓] `BindAndValidate*` 在各来源下都会返回请求 tag 字段名、规范化 header 名与稳定的 violation 包络。
 // - [✓] 内部 `validate`、`postBindValidate`、`validateStruct`、`validateTarget` 会维持稳定目标契约。
 // - [✓] validator 初始化、字段别名、tag 优先级、来源推断与 panic 分支都会产出稳定结果。
+// - [✓] 嵌套 struct 校验失败时 violation 字段路径会包含完整的嵌套层级。
+// - [✓] 仅实现 Normalizer 不实现 RequestValidator 的 DTO 在绑定校验时只执行 normalize 不触发请求级规则。
 
 import (
 	"errors"
@@ -880,4 +882,57 @@ func TestTagValueAdditionalBranches(t *testing.T) {
 	if got := tagValue(skipTagField, "json"); got != "" {
 		t.Fatalf("tagValue(skip tag) = %q, want empty", got)
 	}
+}
+
+// 嵌套 struct 校验失败时，violation 字段路径应包含完整嵌套层级。
+func TestBindAndValidateBody_NestedStructViolationFieldPath(t *testing.T) {
+	type address struct {
+		City string `json:"city" validate:"required"`
+	}
+	type request struct {
+		Item struct {
+			Addr address `json:"addr"`
+		} `json:"item"`
+	}
+
+	req := newJSONRequest(http.MethodPost, "/", `{"item":{"addr":{}}}`)
+	var dst request
+	violation := assertSingleViolation(t, BindAndValidateBody(req, &dst))
+	want := Violation{
+		Field:  "item.addr.city",
+		In:     ViolationInBody,
+		Code:   ViolationCodeRequired,
+		Detail: "is required",
+	}
+	if violation != want {
+		t.Fatalf("violation = %#v, want %#v", violation, want)
+	}
+}
+
+// 仅实现 Normalizer 不实现 RequestValidator 的 DTO 只触发 normalize，不触发请求级规则。
+func TestBindAndValidateBody_NormalizerOnlyWithoutRequestValidator(t *testing.T) {
+	var events []string
+	dst := normalizerOnlyRequest{events: &events, Name: ""}
+	req := newJSONRequest(http.MethodPost, "/", `{"name":"  kanata  "}`)
+
+	err := BindAndValidateBody(req, &dst)
+	if err != nil {
+		t.Fatalf("BindAndValidateBody() error = %v", err)
+	}
+	if dst.Name != "kanata" {
+		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
+	if !reflect.DeepEqual(events, []string{"normalize"}) {
+		t.Fatalf("events = %#v, want [normalize] only", events)
+	}
+}
+
+type normalizerOnlyRequest struct {
+	Name   string    `json:"name" validate:"required"`
+	events *[]string `json:"-"`
+}
+
+func (r *normalizerOnlyRequest) Normalize() {
+	*r.events = append(*r.events, "normalize")
+	r.Name = strings.TrimSpace(r.Name)
 }
