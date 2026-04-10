@@ -282,7 +282,6 @@ func validationCode(tag string) string {
 	}
 }
 
-
 func violationInForSource(source sourceKind) string {
 	if input, ok := violationInputsBySource[source]; ok {
 		return input

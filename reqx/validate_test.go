@@ -479,7 +479,6 @@ func TestPostBindValidateRejectsInvalidTarget(t *testing.T) {
 	}
 }
 
-
 // validateStruct 返回的校验错误会被转换为 violation 列表。
 func TestValidateStructValidationErrors(t *testing.T) {
 	target := &struct {
@@ -534,7 +533,6 @@ func TestValidateFieldsReturnsInvalidValidationError(t *testing.T) {
 		t.Fatalf("error = %T, want *validator.InvalidValidationError", err)
 	}
 }
-
 
 func TestReqxValidationHelperBranches(t *testing.T) {
 	if !validateNoSpace(fakeFieldLevel{field: reflect.ValueOf("kanata")}) {
@@ -638,7 +636,6 @@ func TestViolationInputHelpers(t *testing.T) {
 		}
 	}
 }
-
 
 func TestTagValueAdditionalBranches(t *testing.T) {
 	type request struct {
