@@ -13,6 +13,28 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.3.1] - 2026-04-10
+
+### Highlights
+
+- Simplified the success-response API surface in `hah` / `resp` so common JSON writers are easier to call in plain `net/http` handlers and tests.
+- Hardened `bind` contracts around body reads, string-source mapping, and edge-case no-op behavior to make request decoding more predictable.
+- Refined response writing and error fallback behavior so JSON output, HEAD-like writers, and `ErrorResponder` paths behave more consistently.
+
+### Fixed
+
+- Aligned error-response writing with `net/http` default HEAD semantics instead of keeping a separate HEAD-only branch.
+- Fixed `ErrorResponder` fallback so a custom `AsHTTPError` hook returning `nil` still falls back to the default HTTP error mapping.
+- Improved degraded write-path diagnostics and related regression coverage for response helpers.
+
+### Breaking
+
+- Removed the unused `*http.Request` parameter from success-response helpers in `hah` / `resp`: `JSON`, `JSONBlob`, `OK`, `Created`, and `NoContent`.
+
+### Documentation
+
+- Refreshed `README.md` as the primary official doc, added feature and installation sections, and aligned supporting docs with the current behavior.
+
 ## [v0.3.0] - 2026-04-10
 
 ### Highlights
