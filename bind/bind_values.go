@@ -36,10 +36,7 @@ func bindPathValuesDefault(r *http.Request, target any) error {
 			params[name] = []string{r.PathValue(name)}
 		}
 	}
-	if err := bindDataDefault(target, params, "param"); err != nil {
-		return badRequestWrap(err)
-	}
-	return nil
+	return bindStringSourceDefault(target, params, "param")
 }
 
 // bindQueryParamsDefault 负责把 query 参数绑定到目标对象。
@@ -48,10 +45,7 @@ func bindQueryParamsDefault(r *http.Request, target any) error {
 	if r != nil && r.URL != nil {
 		params = r.URL.Query()
 	}
-	if err := bindDataDefault(target, params, "query"); err != nil {
-		return badRequestWrap(err)
-	}
-	return nil
+	return bindStringSourceDefault(target, params, "query")
 }
 
 // bindHeadersDefault 负责把 header 参数绑定到目标对象。
@@ -82,10 +76,7 @@ func bindHeadersDefault(r *http.Request, target any) error {
 			params[canonical] = append(params[canonical], append([]string(nil), r.Header[key]...)...)
 		}
 	}
-	if err := bindDataDefault(target, params, "header"); err != nil {
-		return badRequestWrap(err)
-	}
-	return nil
+	return bindStringSourceDefault(target, params, "header")
 }
 
 // badRequestWrap 把字符串源绑定阶段的普通错误统一收敛为 400。
@@ -100,6 +91,14 @@ func badRequestWrap(err error) error {
 	}
 
 	return errx.NewHTTPErrorWithCause(http.StatusBadRequest, "", "", err)
+}
+
+// bindStringSourceDefault 为 path/query/header 这类字符串源复用同一套错误边界。
+func bindStringSourceDefault(target any, data map[string][]string, tag string) error {
+	if err := bindDataDefault(target, data, tag); err != nil {
+		return badRequestWrap(err)
+	}
+	return nil
 }
 
 // bindDataDefault 按 tag 和字段类型把字符串输入写入目标对象。
@@ -120,6 +119,7 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 	stringType := reflect.TypeOf("")
 	sliceOfStringType := reflect.TypeOf([]string(nil))
 
+	// map 目标只支持 string key，并且只接受 bind 契约里显式允许的值类型。
 	if typ.Kind() == reflect.Map && typ.Key() == stringType {
 		elemType := typ.Elem()
 		isElemInterface := elemType.Kind() == reflect.Interface && elemType.NumMethod() == 0
@@ -172,6 +172,7 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 		}
 
 		if inputFieldName == "" {
+			// 未显式标注输入名时，仅递归进入普通嵌套 struct；自定义解码字段保持自行接管。
 			if _, ok := structField.Addr().Interface().(BindUnmarshaler); !ok && structFieldKind == reflect.Struct {
 				if err := bindDataDefault(structField.Addr().Interface(), data, tag); err != nil {
 					return err
@@ -199,6 +200,7 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 			continue
 		}
 
+		// 多值自定义解码拥有最高优先级，用于字段自行决定如何消费重复输入。
 		if ok, err := unmarshalInputsToFieldDefault(typeField.Type.Kind(), inputValue, structField); ok {
 			if err != nil {
 				return err
@@ -207,6 +209,7 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 		}
 
 		formatTag := typeField.Tag.Get("format")
+		// 单值自定义解码和 format 驱动的 time 解析在标量转换前执行。
 		if ok, err := unmarshalInputToFieldDefault(typeField.Type.Kind(), inputValue[0], structField, formatTag); ok {
 			if err != nil {
 				return err
@@ -214,10 +217,7 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 			continue
 		}
 
-		if structFieldKind == reflect.Pointer {
-			structFieldKind = structField.Elem().Kind()
-			structField = structField.Elem()
-		}
+		structField, structFieldKind = concreteFieldValueDefault(structField, structFieldKind)
 
 		if structFieldKind == reflect.Slice {
 			sliceOf := structField.Type().Elem().Kind()
@@ -242,12 +242,7 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 
 // unmarshalInputsToFieldDefault 优先尝试多值自定义解码接口。
 func unmarshalInputsToFieldDefault(valueKind reflect.Kind, values []string, field reflect.Value) (bool, error) {
-	if valueKind == reflect.Pointer {
-		if field.IsNil() {
-			field.Set(reflect.New(field.Type().Elem()))
-		}
-		field = field.Elem()
-	}
+	field, _ = concreteFieldValueDefault(field, valueKind)
 
 	fieldIValue := field.Addr().Interface()
 	unmarshaler, ok := fieldIValue.(bindMultipleUnmarshaler)
@@ -259,12 +254,7 @@ func unmarshalInputsToFieldDefault(valueKind reflect.Kind, values []string, fiel
 
 // unmarshalInputToFieldDefault 优先尝试单值自定义解码接口和 time format 解析。
 func unmarshalInputToFieldDefault(valueKind reflect.Kind, value string, field reflect.Value, formatTag string) (bool, error) {
-	if valueKind == reflect.Pointer {
-		if field.IsNil() {
-			field.Set(reflect.New(field.Type().Elem()))
-		}
-		field = field.Elem()
-	}
+	field, _ = concreteFieldValueDefault(field, valueKind)
 
 	fieldIValue := field.Addr().Interface()
 	if formatTag != "" {
@@ -294,9 +284,9 @@ func setWithProperTypeDefault(valueKind reflect.Kind, value string, structField 
 		return err
 	}
 
+	structField, valueKind = concreteFieldValueDefault(structField, valueKind)
+
 	switch valueKind {
-	case reflect.Pointer:
-		return setWithProperTypeDefault(structField.Elem().Kind(), value, structField.Elem())
 	case reflect.Int:
 		return setIntFieldDefault(value, 0, structField)
 	case reflect.Int8:
@@ -329,6 +319,18 @@ func setWithProperTypeDefault(valueKind reflect.Kind, value string, structField 
 		return errors.New("unknown type")
 	}
 	return nil
+}
+
+// concreteFieldValueDefault 为写入流程统一处理指针字段：必要时分配，并返回可写入的具体值。
+func concreteFieldValueDefault(field reflect.Value, kind reflect.Kind) (reflect.Value, reflect.Kind) {
+	if kind != reflect.Pointer {
+		return field, kind
+	}
+	if field.IsNil() {
+		field.Set(reflect.New(field.Type().Elem()))
+	}
+	field = field.Elem()
+	return field, field.Kind()
 }
 
 func setIntFieldDefault(value string, bitSize int, field reflect.Value) error {
