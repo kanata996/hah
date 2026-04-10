@@ -252,7 +252,7 @@ func unmarshalInputToFieldDefault(valueKind reflect.Kind, value string, field re
 	if valueKind == reflect.Pointer {
 		elemType := reflect.PointerTo(field.Type().Elem())
 		_, isTime := reflect.New(field.Type().Elem()).Interface().(*time.Time)
-		if !(formatTag != "" && isTime) &&
+		if (formatTag == "" || !isTime) &&
 			!elemType.Implements(reflect.TypeFor[BindUnmarshaler]()) &&
 			!elemType.Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) {
 			return false, nil
