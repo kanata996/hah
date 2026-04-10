@@ -122,16 +122,6 @@ func postBindValidate(r *http.Request, target any, source sourceKind) error {
 	return validateFields(target, source)
 }
 
-func validate(target any, source sourceKind) error {
-	if err := validateTarget(target); err != nil {
-		return err
-	}
-
-	normalizeTarget(target)
-
-	return validateFields(target, source)
-}
-
 func normalizeTarget(target any) {
 	if normalizer, ok := target.(Normalizer); ok {
 		normalizer.Normalize()
@@ -177,7 +167,7 @@ func validateStruct(target any, source sourceKind) ([]Violation, error) {
 	// validator/v10's Struct contract returns only nil,
 	// InvalidValidationError, or ValidationErrors.
 	validationErrs := err.(validator.ValidationErrors)
-	return violationsFromValidation(source, target, validationErrs), nil
+	return violationsFromValidation(source, validationErrs), nil
 }
 
 func validatorFor(source sourceKind) *validator.Validate {
@@ -221,7 +211,7 @@ func validateNoSpace(fl validator.FieldLevel) bool {
 	return !strings.ContainsRune(field.String(), ' ')
 }
 
-func violationsFromValidation(source sourceKind, target any, errs validator.ValidationErrors) []Violation {
+func violationsFromValidation(source sourceKind, errs validator.ValidationErrors) []Violation {
 	if len(errs) == 0 {
 		return nil
 	}
@@ -242,7 +232,7 @@ func violationsFromValidation(source sourceKind, target any, errs validator.Vali
 		seen[field] = struct{}{}
 		entries = append(entries, entry{
 			field: field,
-			in:    validationInput(source, target, validationErr),
+			in:    violationInForSource(source),
 			code:  validationCode(validationErr.Tag()),
 		})
 	}
@@ -292,94 +282,12 @@ func validationCode(tag string) string {
 	}
 }
 
-func validationInput(source sourceKind, target any, err validator.FieldError) string {
-	if source != sourceRequest {
-		return violationInForSource(source)
-	}
-	if _, ok := resolveValidationFieldPath(target, err.StructNamespace()); !ok {
-		return ViolationInRequest
-	}
-	return ViolationInRequest
-}
 
 func violationInForSource(source sourceKind) string {
 	if input, ok := violationInputsBySource[source]; ok {
 		return input
 	}
 	return ViolationInRequest
-}
-
-func violationInForTag(tagName string) string {
-	if input, ok := violationInputsByTag[tagName]; ok {
-		return input
-	}
-	return ViolationInRequest
-}
-
-func resolveValidationFieldPath(target any, structNamespace string) ([]reflect.StructField, bool) {
-	t := reflect.TypeOf(target)
-	for t != nil && t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if t == nil || t.Kind() != reflect.Struct {
-		return nil, false
-	}
-
-	path := parseStructNamespace(structNamespace)
-	if len(path) == 0 {
-		return nil, false
-	}
-
-	current := t
-	fields := make([]reflect.StructField, 0, len(path))
-	for _, name := range path[:len(path)-1] {
-		field, ok := current.FieldByName(name)
-		if !ok {
-			return nil, false
-		}
-		fields = append(fields, field)
-
-		next := field.Type
-		for next.Kind() == reflect.Pointer || next.Kind() == reflect.Slice || next.Kind() == reflect.Array {
-			next = next.Elem()
-		}
-		if next.Kind() != reflect.Struct {
-			return nil, false
-		}
-		current = next
-	}
-
-	field, ok := current.FieldByName(path[len(path)-1])
-	if !ok {
-		return nil, false
-	}
-	fields = append(fields, field)
-	return fields, true
-}
-
-func parseStructNamespace(namespace string) []string {
-	namespace = strings.TrimSpace(namespace)
-	if namespace == "" {
-		return nil
-	}
-
-	parts := strings.Split(namespace, ".")
-	if len(parts) <= 1 {
-		return nil
-	}
-
-	path := make([]string, 0, len(parts)-1)
-	for _, part := range parts[1:] {
-		if bracket := strings.Index(part, "["); bracket >= 0 {
-			part = part[:bracket]
-		}
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		path = append(path, part)
-	}
-	return path
 }
 
 func fieldAlias(field reflect.StructField, source sourceKind) string {
@@ -428,12 +336,6 @@ var (
 		sourcePath:    ViolationInPath,
 		sourceHeader:  ViolationInHeader,
 		sourceRequest: ViolationInRequest,
-	}
-	violationInputsByTag = map[string]string{
-		"json":   ViolationInBody,
-		"query":  ViolationInQuery,
-		"param":  ViolationInPath,
-		"header": ViolationInHeader,
 	}
 )
 
