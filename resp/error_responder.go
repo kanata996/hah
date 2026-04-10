@@ -9,14 +9,13 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-// ErrorResponder coordinates HTTP error normalization, request-log enrichment,
-// error response writing, and independent 5xx error logging.
+// ErrorResponder 协调 HTTP 错误标准化、请求日志注解、错误响应写回和独立 5xx 错误日志。
 //
-// The zero value is usable and keeps resp on a pure net/http baseline:
-//   - Logger falls back to slog.Default()
-//   - AsHTTPError falls back to resp's default normalization
-//   - ContextAttrs / AnnotateRequestLog are no-ops
-//   - RequestLogAttrs falls back to resp's default low-noise 5xx attrs
+// 零值可用，且保持 resp 在纯 net/http 基线上：
+//   - Logger 回退到 slog.Default()
+//   - AsHTTPError 回退到 resp 的默认标准化
+//   - ContextAttrs / AnnotateRequestLog 为 no-op
+//   - RequestLogAttrs 回退到 resp 内置的低噪音 5xx 属性
 type ErrorResponder struct {
 	Logger             *slog.Logger
 	AsHTTPError        func(error) *errx.HTTPError
@@ -27,12 +26,16 @@ type ErrorResponder struct {
 
 var defaultErrorResponder ErrorResponder
 
-// NewErrorResponder returns a responder with the default pure net/http
-// behavior. Callers may mutate the returned value to customize strategy.
+// NewErrorResponder 返回一个具有默认纯 net/http 行为的响应器。
+// 调用方可修改返回值的字段来自定义策略。
 func NewErrorResponder() *ErrorResponder {
 	return &ErrorResponder{}
 }
 
+// Respond 把任意 error 收敛为稳定的 HTTP 错误响应并写回客户端。
+//
+// 流程：先标准化 error → 检查响应是否已开始 → 注解请求日志 → 记录 5xx 独立日志 → 写回错误响应。
+// 若传入 nil error 则为 no-op。
 func (r *ErrorResponder) Respond(w http.ResponseWriter, req *http.Request, err error) error {
 	if err == nil {
 		return nil
