@@ -263,7 +263,7 @@ func (a *app) listAccounts(w http.ResponseWriter, r *http.Request) {
 		payload["trace_id"] = traceID
 	}
 
-	if err := hah.OK(w, r, payload); err != nil {
+	if err := hah.OK(w, payload); err != nil {
 		_ = hah.WriteError(w, r, err)
 	}
 }
@@ -283,7 +283,7 @@ func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := hah.Created(w, r, acct); err != nil {
+	if err := hah.Created(w, acct); err != nil {
 		_ = hah.WriteError(w, r, err)
 	}
 }
@@ -303,7 +303,7 @@ func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := hah.OK(w, r, acct); err != nil {
+	if err := hah.OK(w, acct); err != nil {
 		_ = hah.WriteError(w, r, err)
 	}
 }
@@ -329,7 +329,7 @@ func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("X-Deleted-By", headers.Actor)
-	if err := hah.NoContent(w, r); err != nil {
+	if err := hah.NoContent(w); err != nil {
 		_ = hah.WriteError(w, r, err)
 	}
 }

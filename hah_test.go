@@ -275,10 +275,9 @@ func TestNewErrorResponder_DelegatesToResp(t *testing.T) {
 
 // OK 会通过根包 facade 写回标准 200 JSON 响应。
 func TestOK_DelegatesToResp(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
-	if err := OK(rr, req, map[string]any{"id": "u_1"}); err != nil {
+	if err := OK(rr, map[string]any{"id": "u_1"}); err != nil {
 		t.Fatalf("OK() error = %v", err)
 	}
 	if rr.Code != http.StatusOK {
@@ -293,10 +292,9 @@ func TestOK_DelegatesToResp(t *testing.T) {
 
 // JSON 会通过根包 facade 直接写回紧凑 JSON。
 func TestJSON_DelegatesToResp(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
-	if err := JSON(rr, req, http.StatusAccepted, map[string]any{"id": "u_1"}); err != nil {
+	if err := JSON(rr, http.StatusAccepted, map[string]any{"id": "u_1"}); err != nil {
 		t.Fatalf("JSON() error = %v", err)
 	}
 	if rr.Code != http.StatusAccepted {
@@ -309,10 +307,9 @@ func TestJSON_DelegatesToResp(t *testing.T) {
 
 // JSONBlob 会通过根包 facade 直接写回原始 JSON 字节。
 func TestJSONBlob_DelegatesToResp(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
-	if err := JSONBlob(rr, req, http.StatusAccepted, []byte(`{"id":"u_1"}`)); err != nil {
+	if err := JSONBlob(rr, http.StatusAccepted, []byte(`{"id":"u_1"}`)); err != nil {
 		t.Fatalf("JSONBlob() error = %v", err)
 	}
 	if rr.Code != http.StatusAccepted {
@@ -325,10 +322,9 @@ func TestJSONBlob_DelegatesToResp(t *testing.T) {
 
 // Created 会通过根包 facade 写回标准 201 JSON 响应。
 func TestCreated_DelegatesToResp(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
-	if err := Created(rr, req, map[string]any{"id": "u_1"}); err != nil {
+	if err := Created(rr, map[string]any{"id": "u_1"}); err != nil {
 		t.Fatalf("Created() error = %v", err)
 	}
 	if rr.Code != http.StatusCreated {
@@ -343,10 +339,9 @@ func TestCreated_DelegatesToResp(t *testing.T) {
 
 // NoContent 会通过根包 facade 写回标准 204 响应。
 func TestNoContent_DelegatesToResp(t *testing.T) {
-	req := httptest.NewRequest(http.MethodDelete, "/accounts/u_1", nil)
 	rr := httptest.NewRecorder()
 
-	if err := NoContent(rr, req); err != nil {
+	if err := NoContent(rr); err != nil {
 		t.Fatalf("NoContent() error = %v", err)
 	}
 	if rr.Code != http.StatusNoContent {

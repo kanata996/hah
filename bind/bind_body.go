@@ -24,13 +24,15 @@ import (
 
 // bindBodyDefault 实现默认 body 绑定契约。
 func bindBodyDefault(r *http.Request, target any, cfg bindBodyConfig) error {
-	if r == nil {
-		return errorsf("request must not be nil")
-	}
-	if err := validateBindingDestination(target); err != nil {
+	if err := validateBindInputs(r, target); err != nil {
 		return err
 	}
+	return bindBodyValidated(r, target, cfg)
+}
 
+// bindBodyValidated 假定 request 和 target 已完成前置校验，只执行 body 绑定本身。
+func bindBodyValidated(r *http.Request, target any, cfg bindBodyConfig) error {
+	// 先探测是否真的存在 body，这样零字节请求可以在 Content-Type 校验前直接 no-op。
 	hasBody, err := req.HasBody(r)
 	if err != nil {
 		return err
@@ -39,6 +41,7 @@ func bindBodyDefault(r *http.Request, target any, cfg bindBodyConfig) error {
 		return nil
 	}
 
+	// 读取优先于 media type 语义判断，确保底层 I/O 错误不会被 415 掩盖。
 	body, err := readBody(r.Body, cfg.maxBodyBytes)
 	if err != nil {
 		if errors.Is(err, errRequestTooLarge) {
@@ -52,6 +55,7 @@ func bindBodyDefault(r *http.Request, target any, cfg bindBodyConfig) error {
 		return unsupportedMediaTypeError()
 	}
 
+	// 默认 body binder 只分发到显式支持的媒体类型实现。
 	switch mediaType {
 	case mimeApplicationJSON:
 		return decodeJSONBody(body, target, cfg.allowUnknownFields)
@@ -88,6 +92,7 @@ func decodeJSONBody(body []byte, target any, allowUnknownFields bool) error {
 		return mapJSONBodyDecodeError(err)
 	}
 	var extra any
+	// 第二次 decode 只用于验证“恰好一个 JSON 值”的契约，不消费业务结果。
 	if err := dec.Decode(&extra); err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil

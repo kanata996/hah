@@ -138,6 +138,24 @@ func TestBindPathValues_BindingErrorsAreBadRequest(t *testing.T) {
 	_ = assertHTTPError(t, BindPathValues(req, &dst), http.StatusBadRequest, "bad_request", "Bad Request")
 }
 
+func TestBindPathValues_NameMatchingIsCaseSensitive(t *testing.T) {
+	type request struct {
+		ID string `param:"id"`
+	}
+
+	req := requestWithPathParams(map[string][]string{
+		"ID": {"route-id"},
+	})
+
+	dst := request{ID: "existing"}
+	if err := BindPathValues(req, &dst); err != nil {
+		t.Fatalf("BindPathValues() error = %v", err)
+	}
+	if dst.ID != "existing" {
+		t.Fatalf("id = %q, want existing value preserved on mismatched case", dst.ID)
+	}
+}
+
 func TestBindQueryParams_BindsSupportedTypes(t *testing.T) {
 	type request struct {
 		Page   int        `query:"page"`
@@ -267,6 +285,22 @@ func TestBindQueryParams_RepeatedScalarUsesFirstValue(t *testing.T) {
 	}
 }
 
+func TestBindQueryParams_NameMatchingIsCaseSensitive(t *testing.T) {
+	type request struct {
+		Page int `query:"page"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?PAGE=7", nil)
+
+	dst := request{Page: 3}
+	if err := BindQueryParams(req, &dst); err != nil {
+		t.Fatalf("BindQueryParams() error = %v", err)
+	}
+	if dst.Page != 3 {
+		t.Fatalf("page = %d, want existing value preserved on mismatched case", dst.Page)
+	}
+}
+
 func TestBindQueryParams_BindingErrorsAreBadRequest(t *testing.T) {
 	type request struct {
 		Page int `query:"page"`
@@ -336,6 +370,34 @@ func TestBindHeaders_HandlesTrimmedAndRepeatedKeys(t *testing.T) {
 			t.Fatalf("request_id = %q, want req-1", dst.RequestID)
 		}
 	})
+
+	t.Run("canonical key wins over case variants", func(t *testing.T) {
+		type request struct {
+			RequestID string `header:"x-request-id"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header = http.Header{
+			"x-request-id": {"req-2"},
+			"X-Request-Id": {"req-1"},
+		}
+
+		var dst request
+		if err := BindHeaders(req, &dst); err != nil {
+			t.Fatalf("BindHeaders() error = %v", err)
+		}
+		if dst.RequestID != "req-1" {
+			t.Fatalf("request_id = %q, want canonical value req-1", dst.RequestID)
+		}
+
+		sliceMap := map[string][]string(nil)
+		if err := BindHeaders(req, &sliceMap); err != nil {
+			t.Fatalf("BindHeaders(map[string][]string) error = %v", err)
+		}
+		if !reflect.DeepEqual(sliceMap["X-Request-Id"], []string{"req-1"}) {
+			t.Fatalf("sliceMap[X-Request-Id] = %#v, want [req-1]", sliceMap["X-Request-Id"])
+		}
+	})
 }
 
 func TestBindHeaders_BindingErrorsAreBadRequest(t *testing.T) {
@@ -372,6 +434,42 @@ func TestBindQueryParamsAndHeadersMissingInputsPreserveExistingValues(t *testing
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		dst := request{TraceID: "existing"}
+		if err := BindHeaders(req, &dst); err != nil {
+			t.Fatalf("BindHeaders() error = %v", err)
+		}
+		if dst.TraceID != "existing" {
+			t.Fatalf("trace_id = %q, want existing", dst.TraceID)
+		}
+	})
+}
+
+func TestBindHeaders_EmptyValueListsAreIgnored(t *testing.T) {
+	type request struct {
+		TraceID string `header:"x-trace-id"`
+	}
+
+	t.Run("nil slice", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header = http.Header{
+			"X-Trace-Id": nil,
+		}
+
+		dst := request{TraceID: "existing"}
+		if err := BindHeaders(req, &dst); err != nil {
+			t.Fatalf("BindHeaders() error = %v", err)
+		}
+		if dst.TraceID != "existing" {
+			t.Fatalf("trace_id = %q, want existing", dst.TraceID)
+		}
+	})
+
+	t.Run("empty slice", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header = http.Header{
+			"X-Trace-Id": {},
+		}
+
 		dst := request{TraceID: "existing"}
 		if err := BindHeaders(req, &dst); err != nil {
 			t.Fatalf("BindHeaders() error = %v", err)
@@ -439,6 +537,23 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		if intMap != nil {
 			t.Fatalf("intMap = %#v, want nil no-op", intMap)
 		}
+
+		type stringKey string
+		keyMap := map[stringKey]string(nil)
+		if err := bindDataDefault(&keyMap, map[string][]string{"name": {"kanata"}}, "query"); err != nil {
+			t.Fatalf("bindDataDefault(map[custom]string) error = %v", err)
+		}
+		if keyMap != nil {
+			t.Fatalf("keyMap = %#v, want nil no-op", keyMap)
+		}
+
+		stringerMap := map[string]fmt.Stringer(nil)
+		if err := bindDataDefault(&stringerMap, map[string][]string{"name": {"kanata"}}, "query"); err != nil {
+			t.Fatalf("bindDataDefault(map[string]fmt.Stringer) error = %v", err)
+		}
+		if stringerMap != nil {
+			t.Fatalf("stringerMap = %#v, want nil no-op", stringerMap)
+		}
 	})
 
 	t.Run("scalar destination rules", func(t *testing.T) {
@@ -448,6 +563,20 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		}
 		if err := bindDataDefault(&value, map[string][]string{"n": {"1"}}, "query"); err != nil {
 			t.Fatalf("bindDataDefault(query scalar) error = %v", err)
+		}
+	})
+
+	t.Run("empty value lists are ignored for struct fields", func(t *testing.T) {
+		type request struct {
+			Page int `query:"page"`
+		}
+
+		dst := request{Page: 3}
+		if err := bindDataDefault(&dst, map[string][]string{"page": {}}, "query"); err != nil {
+			t.Fatalf("bindDataDefault(empty values) error = %v", err)
+		}
+		if dst.Page != 3 {
+			t.Fatalf("page = %d, want existing value preserved", dst.Page)
 		}
 	})
 

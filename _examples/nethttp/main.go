@@ -156,7 +156,7 @@ func newServer(store *accountStore) http.Handler {
 }
 
 func (a *app) healthz(w http.ResponseWriter, r *http.Request) {
-	if err := hah.OK(w, r, map[string]string{"status": "ok"}); err != nil {
+	if err := hah.OK(w, map[string]string{"status": "ok"}); err != nil {
 		_ = hah.WriteError(w, r, err)
 	}
 }
@@ -169,7 +169,7 @@ func (a *app) listAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items := a.store.list(req.OrgID, req.Name)
-	if err := hah.OK(w, r, map[string]any{
+	if err := hah.OK(w, map[string]any{
 		"org_id": req.OrgID,
 		"count":  len(items),
 		"items":  items,
@@ -191,7 +191,7 @@ func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := hah.Created(w, r, acct); err != nil {
+	if err := hah.Created(w, acct); err != nil {
 		_ = hah.WriteError(w, r, err)
 	}
 }
@@ -209,7 +209,7 @@ func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := hah.OK(w, r, acct); err != nil {
+	if err := hah.OK(w, acct); err != nil {
 		_ = hah.WriteError(w, r, err)
 	}
 }
@@ -226,7 +226,7 @@ func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := hah.NoContent(w, r); err != nil {
+	if err := hah.NoContent(w); err != nil {
 		_ = hah.WriteError(w, r, err)
 	}
 }

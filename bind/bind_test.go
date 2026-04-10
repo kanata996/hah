@@ -50,6 +50,38 @@ func TestBind_PublicEntryPointsRejectInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestBind_SingleSourcePublicAPIsMatchBindNoopSemanticsForUnsupportedTargets(t *testing.T) {
+	queryReq := httptest.NewRequest(http.MethodGet, "/?page=1", nil)
+	pathReq := requestWithPathParams(map[string][]string{"id": {"1"}})
+	headerReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	headerReq.Header.Set("X-Request-Id", "req-1")
+
+	scalar := 1
+	if err := BindQueryParams(queryReq, &scalar); err != nil {
+		t.Fatalf("BindQueryParams(scalar) error = %v", err)
+	}
+	if err := BindPathValues(pathReq, &scalar); err != nil {
+		t.Fatalf("BindPathValues(scalar) error = %v", err)
+	}
+	if err := BindHeaders(headerReq, &scalar); err != nil {
+		t.Fatalf("BindHeaders(scalar) error = %v", err)
+	}
+	if err := Bind(queryReq, &scalar); err != nil {
+		t.Fatalf("Bind(scalar) error = %v", err)
+	}
+
+	unsupportedMap := map[string]int(nil)
+	if err := BindQueryParams(queryReq, &unsupportedMap); err != nil {
+		t.Fatalf("BindQueryParams(map[string]int) error = %v", err)
+	}
+	if err := Bind(queryReq, &unsupportedMap); err != nil {
+		t.Fatalf("Bind(map[string]int) error = %v", err)
+	}
+	if unsupportedMap != nil {
+		t.Fatalf("unsupportedMap = %#v, want nil no-op", unsupportedMap)
+	}
+}
+
 func TestDefaultBindConfig(t *testing.T) {
 	cfg := defaultBindConfig()
 

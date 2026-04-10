@@ -10,7 +10,7 @@ package resp
 // 职责：
 //   - 统一 error -> HTTPError 的收敛规则。
 //   - 统一错误 JSON 对象的编码与写回。
-//   - 处理 HEAD 请求、响应已开始写出、errors 序列化失败等边界。
+//   - 处理错误响应写出、响应已开始写出、errors 序列化失败等边界。
 //
 // 要点：
 //   - 对外响应契约稳定优先，不泄露内部原始错误对象。
@@ -53,7 +53,7 @@ type ErrorWriteDegraded struct {
 //   - 最后按统一错误响应契约写回客户端。
 //
 // 约束：
-//   - 对 HEAD 请求仅写状态码，不写 body；
+//   - 对 HEAD 等请求沿用 net/http 默认语义：handler 仍正常写回，最终 body 是否发出由底层决定；
 //   - 若能明确判断响应已经开始写出，则不再尝试二次改写响应；
 //   - 普通 4xx / 5xx 不在这里额外输出一条重复业务错误日志。
 func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
@@ -118,7 +118,10 @@ func (e *ErrorWriteDegraded) Error() string {
 	if e == nil || e.Cause == nil {
 		return "resp: error response errors were dropped"
 	}
-	return "resp: error response errors were dropped: " + e.Cause.Error()
+	if cause := safeErrorString(e.Cause); cause != "" {
+		return "resp: error response errors were dropped: " + cause
+	}
+	return "resp: error response errors were dropped"
 }
 
 // Unwrap 返回降级的底层原因，便于 errors.Is / errors.As 继续判断。
@@ -130,18 +133,12 @@ func (e *ErrorWriteDegraded) Unwrap() error {
 }
 
 // writeHTTPError 负责把已经收敛好的 HTTPError 写回到响应。
-// 这里不再做错误语义推断，只处理 HEAD 与普通请求的写回分支。
-func writeHTTPError(w http.ResponseWriter, r *http.Request, httpErr *errx.HTTPError) error {
+// 这里不再做错误语义推断，统一走 JSON 错误写回路径；
+// 对 HEAD 等请求也复用正常的 Write 回调链路，保持与 net/http 默认行为一致。
+func writeHTTPError(w http.ResponseWriter, httpErr *errx.HTTPError) error {
 	if httpErr == nil {
 		return nil
 	}
-	if r != nil && r.Method == http.MethodHead {
-		if w != nil {
-			w.Header().Set("Content-Type", problemJSONContentType)
-		}
-		return writeStatus(w, httpErr.Status())
-	}
-
 	return writeErrorPayload(w, httpErr)
 }
 

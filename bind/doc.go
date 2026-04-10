@@ -10,6 +10,10 @@
 //   - header：请求头
 //   - json：请求 body
 //
+// 名称匹配规则：
+//   - query / param 标签按精确名字匹配
+//   - header 标签按 HTTP header 规则做不区分大小写匹配
+//
 // json body 当前只支持 application/json，并使用 Go 标准库 encoding/json 解码；
 // 也不接受 application/*+json。
 //

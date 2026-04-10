@@ -39,7 +39,7 @@
 
 1. `asHTTPError(err)`
 2. `logServerError(r, httpErr, err)`
-3. `writeHTTPError(w, r, httpErr)`
+3. `writeHTTPError(w, httpErr)`
 4. `logErrorResponseWriteFailure(r, httpErr, writeErr)`
 5. 返回 `writeErr`
 

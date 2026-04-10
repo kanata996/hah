@@ -52,7 +52,7 @@ func (r *ErrorResponder) Respond(w http.ResponseWriter, req *http.Request, err e
 
 	r.annotateRequestLog(req, r.requestLogAttrs(err, httpErr))
 	r.logServerError(req, httpErr, err)
-	writeErr := writeHTTPError(w, req, httpErr)
+	writeErr := writeHTTPError(w, httpErr)
 	r.logErrorResponseWriteFailure(req, httpErr, writeErr)
 	return writeErr
 }
@@ -66,7 +66,9 @@ func (r *ErrorResponder) logger() *slog.Logger {
 
 func (r *ErrorResponder) httpError(err error) *errx.HTTPError {
 	if r != nil && r.AsHTTPError != nil {
-		return r.AsHTTPError(err)
+		if httpErr := r.AsHTTPError(err); httpErr != nil {
+			return httpErr
+		}
 	}
 	return asHTTPError(err)
 }

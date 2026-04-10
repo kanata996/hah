@@ -46,24 +46,10 @@ func writeJSONBytes(w http.ResponseWriter, status int, body []byte) error {
 // writeJSONBytesWithContentType 以指定 JSON 媒体类型写出原始 JSON 字节切片。
 // 调用方需要自行保证 body 已经是合法 JSON。
 func writeJSONBytesWithContentType(w http.ResponseWriter, status int, contentType string, body []byte) error {
-	if w == nil {
-		return errNilResponseWriter
-	}
-	if err := validateHTTPStatus(status); err != nil {
+	if err := validateJSONBodyWrite(w, status, "JSON body writers"); err != nil {
 		return err
 	}
-	if err := validateStatusAllowsBody(status, "JSON body writers"); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.WriteHeader(status)
-	if _, err := w.Write(body); err != nil {
-		return &responseWriteError{
-			cause:           err,
-			responseStarted: true,
-		}
-	}
-	return nil
+	return writePreparedJSONBytes(w, status, contentType, body)
 }
 
 // writeStatus 仅写出状态码，不包含响应体。

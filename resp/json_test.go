@@ -10,7 +10,7 @@ import (
 
 // 测试清单：
 // [✓] Created / JSON / JSONBlob 按约定写出 JSON、状态码和 Content-Type
-// [✓] Created / JSON / OK 稳定输出紧凑 JSON；所有 success writer 在 nil request 下也安全
+// [✓] Created / JSON / OK 稳定输出紧凑 JSON；接口不依赖 request 上下文
 // [✓] JSON 拒绝 nil writer、非法状态码、无响应体状态和不可编码值；OK 拒绝 nil writer、nil data 和不可编码值
 // [✓] Created 拒绝 nil data、不可编码值和 nil writer
 // [✓] JSONBlob 直接原样透传 JSON 字节，不做合法性校验，并拒绝 nil writer、非法状态和无响应体状态
@@ -21,10 +21,9 @@ type payloadMap map[string]any
 
 // Created 会以 201 状态直接写出 JSON 对象。
 func TestCreatedWritesDirectPayload(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/v1/accounts", nil)
 	rr := httptest.NewRecorder()
 
-	err := Created(rr, req, map[string]any{"id": "u_1"})
+	err := Created(rr, map[string]any{"id": "u_1"})
 	if err != nil {
 		t.Fatalf("Created() error = %v", err)
 	}
@@ -42,11 +41,11 @@ func TestCreatedWritesDirectPayload(t *testing.T) {
 	}
 }
 
-// Created 在 request 为 nil 时也能安全写出紧凑 JSON。
-func TestCreatedAllowsNilRequest(t *testing.T) {
+// Created 不需要 request 也能安全写出紧凑 JSON。
+func TestCreatedWritesCompactJSONWithoutRequest(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	if err := Created(rr, nil, map[string]any{"id": "u_1"}); err != nil {
+	if err := Created(rr, map[string]any{"id": "u_1"}); err != nil {
 		t.Fatalf("Created() error = %v", err)
 	}
 	if body := rr.Body.String(); body != "{\"id\":\"u_1\"}\n" {
@@ -56,10 +55,9 @@ func TestCreatedAllowsNilRequest(t *testing.T) {
 
 // JSON 会按指定成功状态直接写出 JSON 对象。
 func TestJSONWritesDirectPayload(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := JSON(rr, req, http.StatusAccepted, map[string]any{"id": "u_1"})
+	err := JSON(rr, http.StatusAccepted, map[string]any{"id": "u_1"})
 	if err != nil {
 		t.Fatalf("JSON() error = %v", err)
 	}
@@ -79,10 +77,9 @@ func TestJSONWritesDirectPayload(t *testing.T) {
 
 // JSON 显式允许把 nil 数据编码为公开的 null 响应体。
 func TestJSONAllowsNilData(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	if err := JSON(rr, req, http.StatusOK, nil); err != nil {
+	if err := JSON(rr, http.StatusOK, nil); err != nil {
 		t.Fatalf("JSON() error = %v", err)
 	}
 	if rr.Code != http.StatusOK {
@@ -93,11 +90,11 @@ func TestJSONAllowsNilData(t *testing.T) {
 	}
 }
 
-// JSON 在 request 为 nil 时也会输出紧凑 JSON。
-func TestJSONAllowsNilRequest(t *testing.T) {
+// JSON 不需要 request 也会输出紧凑 JSON。
+func TestJSONWritesCompactJSONWithoutRequest(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	if err := JSON(rr, nil, http.StatusOK, map[string]any{"id": "u_1"}); err != nil {
+	if err := JSON(rr, http.StatusOK, map[string]any{"id": "u_1"}); err != nil {
 		t.Fatalf("JSON() error = %v", err)
 	}
 	if body := rr.Body.String(); body != "{\"id\":\"u_1\"}\n" {
@@ -105,9 +102,44 @@ func TestJSONAllowsNilRequest(t *testing.T) {
 	}
 }
 
+func TestJSONWriterCanCooperateWithHeadLikeWriter(t *testing.T) {
+	inner := &headLikeResponseWriter{}
+	w := &writeCallbackResponseWriter{ResponseWriter: inner}
+	body, err := encodeJSON(map[string]any{"id": "u_1"})
+	if err != nil {
+		t.Fatalf("encodeJSON() error = %v", err)
+	}
+
+	if err := JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"}); err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+	if inner.status != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", inner.status, http.StatusAccepted)
+	}
+	if got := inner.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if got := inner.Header().Get("Content-Length"); got != "13" {
+		t.Fatalf("Content-Length = %q, want %d", got, len(body))
+	}
+	if w.writeCalls != 1 {
+		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
+	}
+}
+
+func TestJSONWithoutRequestContextStillValidatesPayload(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	err := JSON(rr, http.StatusOK, make(chan int))
+	if err == nil || err.Error() != "json: unsupported type: chan int" {
+		t.Fatalf("JSON() error = %v, want unsupported type error", err)
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
 // Created 会拒绝空的 ResponseWriter。
 func TestCreatedRejectsNilWriter(t *testing.T) {
-	err := Created(nil, httptest.NewRequest(http.MethodPost, "/v1/accounts", nil), map[string]any{"id": "u_1"})
+	err := Created(nil, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: response writer is nil" {
 		t.Fatalf("Created() error = %v, want response writer is nil", err)
 	}
@@ -115,7 +147,7 @@ func TestCreatedRejectsNilWriter(t *testing.T) {
 
 // JSON 也会拒绝空的 ResponseWriter。
 func TestJSONRejectsNilWriter(t *testing.T) {
-	err := JSON(nil, nil, http.StatusOK, map[string]any{"id": "u_1"})
+	err := JSON(nil, http.StatusOK, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: response writer is nil" {
 		t.Fatalf("JSON() error = %v, want response writer is nil", err)
 	}
@@ -123,10 +155,9 @@ func TestJSONRejectsNilWriter(t *testing.T) {
 
 // JSONBlob 会原样写出已编码好的 JSON 字节。
 func TestJSONBlobWritesRawJSONBytes(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := JSONBlob(rr, req, http.StatusAccepted, []byte(`{"id":"u_1"}`))
+	err := JSONBlob(rr, http.StatusAccepted, []byte(`{"id":"u_1"}`))
 	if err != nil {
 		t.Fatalf("JSONBlob() error = %v", err)
 	}
@@ -142,11 +173,11 @@ func TestJSONBlobWritesRawJSONBytes(t *testing.T) {
 	}
 }
 
-// JSONBlob 在 request 为 nil 时也会原样写出 JSON 字节。
-func TestJSONBlobAllowsNilRequest(t *testing.T) {
+// JSONBlob 不需要 request 也会原样写出 JSON 字节。
+func TestJSONBlobWritesRawJSONWithoutRequest(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	if err := JSONBlob(rr, nil, http.StatusAccepted, []byte(`{"id":"u_1"}`)); err != nil {
+	if err := JSONBlob(rr, http.StatusAccepted, []byte(`{"id":"u_1"}`)); err != nil {
 		t.Fatalf("JSONBlob() error = %v", err)
 	}
 	if rr.Code != http.StatusAccepted {
@@ -160,12 +191,60 @@ func TestJSONBlobAllowsNilRequest(t *testing.T) {
 	}
 }
 
-// JSONBlob 直接透传字节，不负责校验其是否是合法 JSON。
-func TestJSONBlobPassesThroughInvalidJSONBytes(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+func TestJSONBlobCanCooperateWithHeadLikeWriter(t *testing.T) {
+	inner := &headLikeResponseWriter{}
+	w := &writeCallbackResponseWriter{ResponseWriter: inner}
+	body := []byte(`{"id":"u_1"}`)
+
+	if err := JSONBlob(w, http.StatusAccepted, body); err != nil {
+		t.Fatalf("JSONBlob() error = %v", err)
+	}
+	if inner.status != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", inner.status, http.StatusAccepted)
+	}
+	if got := inner.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if got := inner.Header().Get("Content-Length"); got != "12" {
+		t.Fatalf("Content-Length = %q, want %d", got, len(body))
+	}
+	if w.writeCalls != 1 {
+		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
+	}
+}
+
+func TestJSONBlobRejectsNilWriterWithoutRequest(t *testing.T) {
+	err := JSONBlob(nil, http.StatusOK, []byte(`{"id":"u_1"}`))
+	if err == nil || err.Error() != "resp: response writer is nil" {
+		t.Fatalf("JSONBlob() error = %v, want response writer is nil", err)
+	}
+}
+
+func TestJSONBlobRejectsInvalidStatusWithoutRequest(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	if err := JSONBlob(rr, req, http.StatusOK, []byte(`{"id":`)); err != nil {
+	err := JSONBlob(rr, 1000, []byte(`{"id":"u_1"}`))
+	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
+		t.Fatalf("JSONBlob() error = %v, want invalid HTTP status", err)
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
+func TestJSONBlobRejectsBodylessStatusWithoutRequest(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	err := JSONBlob(rr, http.StatusNoContent, []byte(`{"id":"u_1"}`))
+	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 204" {
+		t.Fatalf("JSONBlob() error = %v, want bodyless status error", err)
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
+// JSONBlob 直接透传字节，不负责校验其是否是合法 JSON。
+func TestJSONBlobPassesThroughInvalidJSONBytes(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := JSONBlob(rr, http.StatusOK, []byte(`{"id":`)); err != nil {
 		t.Fatalf("JSONBlob() error = %v", err)
 	}
 	if body := rr.Body.String(); body != `{"id":` {
@@ -175,7 +254,7 @@ func TestJSONBlobPassesThroughInvalidJSONBytes(t *testing.T) {
 
 // JSONBlob 也会拒绝空的 ResponseWriter。
 func TestJSONBlobRejectsNilWriter(t *testing.T) {
-	err := JSONBlob(nil, nil, http.StatusOK, []byte(`{"id":"u_1"}`))
+	err := JSONBlob(nil, http.StatusOK, []byte(`{"id":"u_1"}`))
 	if err == nil || err.Error() != "resp: response writer is nil" {
 		t.Fatalf("JSONBlob() error = %v, want response writer is nil", err)
 	}
@@ -183,10 +262,9 @@ func TestJSONBlobRejectsNilWriter(t *testing.T) {
 
 // JSONBlob 也必须拒绝不允许响应体的状态码。
 func TestJSONBlobRejectsBodylessStatus(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := JSONBlob(rr, req, http.StatusNoContent, []byte(`{"id":"u_1"}`))
+	err := JSONBlob(rr, http.StatusNoContent, []byte(`{"id":"u_1"}`))
 	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 204" {
 		t.Fatalf("JSONBlob() error = %v, want bodyless status error", err)
 	}
@@ -200,10 +278,9 @@ func TestJSONBlobRejectsBodylessStatus(t *testing.T) {
 
 // JSONBlob 也会拒绝非法的 HTTP 状态码。
 func TestJSONBlobRejectsInvalidStatus(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := JSONBlob(rr, req, 1000, []byte(`{"id":"u_1"}`))
+	err := JSONBlob(rr, 1000, []byte(`{"id":"u_1"}`))
 	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
 		t.Fatalf("JSONBlob() error = %v, want invalid HTTP status", err)
 	}
@@ -211,10 +288,9 @@ func TestJSONBlobRejectsInvalidStatus(t *testing.T) {
 
 // JSON 在编码不支持的值时会直接返回错误。
 func TestJSONRejectsUnsupportedValue(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := JSON(rr, req, http.StatusOK, make(chan int))
+	err := JSON(rr, http.StatusOK, make(chan int))
 	if err == nil || err.Error() != "json: unsupported type: chan int" {
 		t.Fatalf("JSON() error = %v, want unsupported type error", err)
 	}
@@ -223,7 +299,6 @@ func TestJSONRejectsUnsupportedValue(t *testing.T) {
 
 // 自定义 MarshalJSON 即使 panic，JSON 也应返回错误而不是把 panic 冒出到 handler。
 func TestJSONRecoversFromMarshalPanic(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
 	defer func() {
@@ -232,7 +307,7 @@ func TestJSONRecoversFromMarshalPanic(t *testing.T) {
 		}
 	}()
 
-	err := JSON(rr, req, http.StatusOK, panicSuccessJSONValue{})
+	err := JSON(rr, http.StatusOK, panicSuccessJSONValue{})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -244,21 +319,44 @@ func TestJSONRecoversFromMarshalPanic(t *testing.T) {
 
 // Created 语义要求显式数据，nil 数据会被拒绝。
 func TestCreatedRejectsNilData(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/v1/accounts", nil)
 	rr := httptest.NewRecorder()
 
-	if err := Created(rr, req, nil); err == nil || err.Error() != "resp: data must exist and must not encode to null" {
+	if err := Created(rr, nil); err == nil || err.Error() != "resp: data must exist and must not encode to null" {
 		t.Fatalf("Created() error = %v, want non-null data error", err)
 	}
 	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
+func TestOKCanCooperateWithHeadLikeWriter(t *testing.T) {
+	inner := &headLikeResponseWriter{}
+	w := &writeCallbackResponseWriter{ResponseWriter: inner}
+	body, err := encodeJSON(map[string]any{"id": "u_1"})
+	if err != nil {
+		t.Fatalf("encodeJSON() error = %v", err)
+	}
+
+	if err := OK(w, map[string]any{"id": "u_1"}); err != nil {
+		t.Fatalf("OK() error = %v", err)
+	}
+	if inner.status != http.StatusOK {
+		t.Fatalf("status = %d, want %d", inner.status, http.StatusOK)
+	}
+	if got := inner.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if got := inner.Header().Get("Content-Length"); got != "13" {
+		t.Fatalf("Content-Length = %q, want %d", got, len(body))
+	}
+	if w.writeCalls != 1 {
+		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
+	}
+}
+
 // Created 在编码不支持的值时会直接返回错误。
 func TestCreatedRejectsUnsupportedValue(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/v1/accounts", nil)
 	rr := httptest.NewRecorder()
 
-	err := Created(rr, req, make(chan int))
+	err := Created(rr, make(chan int))
 	if err == nil || err.Error() != "json: unsupported type: chan int" {
 		t.Fatalf("Created() error = %v, want unsupported type error", err)
 	}
@@ -267,10 +365,9 @@ func TestCreatedRejectsUnsupportedValue(t *testing.T) {
 
 // JSON 会拒绝非法的 HTTP 状态码。
 func TestJSONRejectsInvalidStatus(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := JSON(rr, req, 1000, map[string]any{"id": "u_1"})
+	err := JSON(rr, 1000, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
 		t.Fatalf("JSON() error = %v, want invalid HTTP status", err)
 	}
@@ -278,10 +375,9 @@ func TestJSONRejectsInvalidStatus(t *testing.T) {
 
 // JSON 不能把 payload 写到 205/204/304 这类不允许响应体的状态上。
 func TestJSONRejectsBodylessStatus(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := JSON(rr, req, http.StatusResetContent, map[string]any{"id": "u_1"})
+	err := JSON(rr, http.StatusResetContent, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 205" {
 		t.Fatalf("JSON() error = %v, want bodyless status error", err)
 	}
@@ -293,11 +389,11 @@ func TestJSONRejectsBodylessStatus(t *testing.T) {
 	}
 }
 
-// OK 在 request 为 nil 时也能安全写出紧凑 JSON。
-func TestOKAllowsNilRequest(t *testing.T) {
+// OK 不需要 request 也能安全写出紧凑 JSON。
+func TestOKWritesCompactJSONWithoutRequest(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	if err := OK(rr, nil, map[string]any{"id": "u_1"}); err != nil {
+	if err := OK(rr, map[string]any{"id": "u_1"}); err != nil {
 		t.Fatalf("OK() error = %v", err)
 	}
 	if body := rr.Body.String(); body != "{\"id\":\"u_1\"}\n" {
@@ -307,10 +403,9 @@ func TestOKAllowsNilRequest(t *testing.T) {
 
 // OK 语义要求显式数据，nil 数据会被拒绝。
 func TestOKRejectsNilData(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	if err := OK(rr, req, nil); err == nil || err.Error() != "resp: data must exist and must not encode to null" {
+	if err := OK(rr, nil); err == nil || err.Error() != "resp: data must exist and must not encode to null" {
 		t.Fatalf("OK() error = %v, want non-null data error", err)
 	}
 	assertRecorderHasNoBodyOrContentType(t, rr)
@@ -318,10 +413,9 @@ func TestOKRejectsNilData(t *testing.T) {
 
 // OK 在编码不支持的值时会直接返回错误。
 func TestOKRejectsUnsupportedValue(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := OK(rr, req, make(chan int))
+	err := OK(rr, make(chan int))
 	if err == nil || err.Error() != "json: unsupported type: chan int" {
 		t.Fatalf("OK() error = %v, want unsupported type error", err)
 	}
@@ -330,7 +424,7 @@ func TestOKRejectsUnsupportedValue(t *testing.T) {
 
 // OK 会拒绝空的 ResponseWriter。
 func TestOKRejectsNilWriter(t *testing.T) {
-	err := OK(nil, httptest.NewRequest(http.MethodGet, "/", nil), map[string]any{"id": "u_1"})
+	err := OK(nil, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: response writer is nil" {
 		t.Fatalf("OK() error = %v, want response writer is nil", err)
 	}
@@ -338,10 +432,9 @@ func TestOKRejectsNilWriter(t *testing.T) {
 
 // NoContent 只写 204 状态，不产生响应体。
 func TestNoContentWritesBodylessStatus(t *testing.T) {
-	req := httptest.NewRequest(http.MethodDelete, "/", nil)
 	rr := httptest.NewRecorder()
 
-	if err := NoContent(rr, req); err != nil {
+	if err := NoContent(rr); err != nil {
 		t.Fatalf("NoContent() error = %v", err)
 	}
 	if rr.Code != http.StatusNoContent {
@@ -357,17 +450,17 @@ func TestNoContentWritesBodylessStatus(t *testing.T) {
 
 // NoContent 也会拒绝空的 ResponseWriter。
 func TestNoContentRejectsNilWriter(t *testing.T) {
-	err := NoContent(nil, nil)
+	err := NoContent(nil)
 	if err == nil || err.Error() != "resp: response writer is nil" {
 		t.Fatalf("NoContent() error = %v, want response writer is nil", err)
 	}
 }
 
-// NoContent 在 request 为 nil 时也能安全返回。
-func TestNoContentAllowsNilRequest(t *testing.T) {
+// NoContent 不需要 request 也能安全返回。
+func TestNoContentWithoutRequest(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	if err := NoContent(rr, nil); err != nil {
+	if err := NoContent(rr); err != nil {
 		t.Fatalf("NoContent() error = %v", err)
 	}
 	if rr.Code != http.StatusNoContent {

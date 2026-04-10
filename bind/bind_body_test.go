@@ -175,6 +175,32 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 			"Content-Type must be application/json",
 		)
 	})
+
+	t.Run("surfaces later body read errors before unsupported content type", func(t *testing.T) {
+		wantErr := errors.New("read failed")
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.ContentLength = -1
+		req.Header.Set("Content-Type", "text/plain")
+		req.Body = &byteThenReadErrorCloser{err: wantErr}
+
+		var dst request
+		if err := BindBody(req, &dst); !errors.Is(err, wantErr) {
+			t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+		}
+	})
+
+	t.Run("surfaces later body read errors before malformed content type", func(t *testing.T) {
+		wantErr := errors.New("read failed")
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.ContentLength = -1
+		req.Header.Set("Content-Type", `application/json; charset="utf-8`)
+		req.Body = &byteThenReadErrorCloser{err: wantErr}
+
+		var dst request
+		if err := BindBody(req, &dst); !errors.Is(err, wantErr) {
+			t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+		}
+	})
 }
 
 func TestBindBody_EmptyBodyContract(t *testing.T) {

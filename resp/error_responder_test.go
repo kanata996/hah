@@ -206,6 +206,97 @@ func TestErrorResponderRespondUsesCustomHooks(t *testing.T) {
 	}
 }
 
+func TestErrorResponderRespondFallsBackWhenCustomAsHTTPErrorReturnsNil(t *testing.T) {
+	responder := &ErrorResponder{
+		AsHTTPError: func(error) *errx.HTTPError {
+			return nil
+		},
+	}
+
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	req := httptest.NewRequest(http.MethodGet, "/fallback", nil)
+	rr := httptest.NewRecorder()
+
+	if err := responder.Respond(rr, req, errors.New("boom")); err != nil {
+		t.Fatalf("Respond() error = %v", err)
+	}
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "internal_error" {
+		t.Fatalf("code = %#v, want internal_error", got)
+	}
+	if defaultBuf.Len() == 0 {
+		t.Fatal("default logger did not capture output")
+	}
+}
+
+func TestErrorResponderRespondPropagatesAsHTTPErrorPanics(t *testing.T) {
+	responder := &ErrorResponder{
+		AsHTTPError: func(error) *errx.HTTPError {
+			panic("boom")
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/panic-as-http-error", nil)
+	rr := httptest.NewRecorder()
+
+	assertPanicsWithValue(t, "boom", func() {
+		_ = responder.Respond(rr, req, errors.New("db timeout"))
+	})
+}
+
+func TestErrorResponderRespondFallsBackWhenRequestLogAttrsPanics(t *testing.T) {
+	responder := &ErrorResponder{
+		RequestLogAttrs: func(error, *errx.HTTPError) []slog.Attr {
+			panic("boom")
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/panic-request-log-attrs", nil)
+	rr := httptest.NewRecorder()
+
+	assertPanicsWithValue(t, "boom", func() {
+		_ = responder.Respond(rr, req, errors.New("db timeout"))
+	})
+}
+
+func TestErrorResponderRespondPropagatesAnnotateRequestLogPanics(t *testing.T) {
+	responder := &ErrorResponder{
+		AnnotateRequestLog: func(*http.Request, []slog.Attr) {
+			panic("boom")
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/panic-annotate", nil)
+	rr := httptest.NewRecorder()
+
+	assertPanicsWithValue(t, "boom", func() {
+		_ = responder.Respond(rr, req, errors.New("db timeout"))
+	})
+}
+
+func TestErrorResponderRespondPropagatesContextAttrsPanics(t *testing.T) {
+	responder := &ErrorResponder{
+		ContextAttrs: func(context.Context) []slog.Attr {
+			panic("boom")
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/panic-context-attrs", nil)
+	rr := httptest.NewRecorder()
+
+	assertPanicsWithValue(t, "boom", func() {
+		_ = responder.Respond(rr, req, errors.New("db timeout"))
+	})
+}
+
 // 5xx 错误会给请求日志补充低噪音诊断字段，但不写入关联字段或详细诊断链。
 func TestErrorResponderEnrichesRequestLog(t *testing.T) {
 	captured := &capturedRequestLog{}
@@ -391,4 +482,20 @@ func TestErrorResponderDoesNotEnrichRequestLogFor4xx(t *testing.T) {
 	if defaultBuf.Len() != 0 {
 		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
 	}
+}
+
+func assertPanicsWithValue(t *testing.T, want any, fn func()) {
+	t.Helper()
+
+	defer func() {
+		recovered := recover()
+		if recovered == nil {
+			t.Fatal("expected panic, got nil")
+		}
+		if recovered != want {
+			t.Fatalf("panic = %#v, want %#v", recovered, want)
+		}
+	}()
+
+	fn()
 }
