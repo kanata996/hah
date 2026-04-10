@@ -118,7 +118,10 @@ func (e *ErrorWriteDegraded) Error() string {
 	if e == nil || e.Cause == nil {
 		return "resp: error response errors were dropped"
 	}
-	return "resp: error response errors were dropped: " + e.Cause.Error()
+	if cause := safeErrorString(e.Cause); cause != "" {
+		return "resp: error response errors were dropped: " + cause
+	}
+	return "resp: error response errors were dropped"
 }
 
 // Unwrap 返回降级的底层原因，便于 errors.Is / errors.As 继续判断。

@@ -55,15 +55,19 @@ func main() {
 	mux.HandleFunc("POST /orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
 		var req createAccountRequest
 		if err := hah.BindAndValidate(r, &req); err != nil {
-			_ = hah.WriteError(w, r, err)
+			if writeErr := hah.WriteError(w, r, err); writeErr != nil {
+				log.Printf("write error response failed: %v", writeErr)
+			}
 			return
 		}
 
-		_ = hah.Created(w, r, map[string]any{
+		if err := hah.Created(w, r, map[string]any{
 			"id":     "acct_123",
 			"org_id": req.OrgID,
 			"name":   req.Name,
-		})
+		}); err != nil {
+			log.Printf("write success response failed: %v", err)
+		}
 	})
 
 	log.Fatal(http.ListenAndServe(":8080", mux))
@@ -116,6 +120,9 @@ func main() {
 `WriteError(...)` 适合默认行为；如果你需要自定义错误归一化、logger 或 request log 注解，
 可以使用 `ErrorResponder`：
 
+`WriteError(...)` / `ErrorResponder.Respond(...)` 的返回值表示响应边界自身异常
+（例如响应已经开始写出，或错误响应写出失败）；生产代码通常应至少记录这个错误。
+
 ```go
 responder := hah.NewErrorResponder()
 responder.Logger = slog.Default()
@@ -123,8 +130,8 @@ responder.AnnotateRequestLog = func(r *http.Request, attrs []slog.Attr) {
 	// 把 attrs 桥接到你自己的 request logger。
 }
 
-if err := responder.Respond(w, r, err); err != nil {
-	// 只在响应已开始写出或错误响应写出失败时返回非 nil。
+if writeErr := responder.Respond(w, r, err); writeErr != nil {
+	slog.Error("write error response failed", "err", writeErr)
 }
 ```
 

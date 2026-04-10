@@ -535,6 +535,14 @@ func TestErrorWriteDegradedMethods(t *testing.T) {
 	if got := err.Unwrap(); !errors.Is(got, cause) {
 		t.Fatalf("Unwrap() = %v, want %v", got, cause)
 	}
+
+	if got := (&ErrorWriteDegraded{Cause: blankWriteCause{}}).Error(); got != "resp: error response errors were dropped" {
+		t.Fatalf("blank cause Error() = %q, want default message", got)
+	}
+
+	if got := (&ErrorWriteDegraded{Cause: panicWriteCause{}}).Error(); !strings.Contains(got, "resp: error response errors were dropped: panic calling Error()") {
+		t.Fatalf("panic cause Error() = %q, want panic fallback text", got)
+	}
 }
 
 // asHTTPError 会保留已有 HTTPError，并对 nil 输入保持安全。

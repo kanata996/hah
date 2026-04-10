@@ -50,6 +50,28 @@ func TestBind_PublicEntryPointsRejectInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestBind_SingleSourcePublicAPIsRejectUnsupportedDestinations(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/?page=1", nil)
+	pathReq := requestWithPathParams(map[string][]string{"id": {"1"}})
+	want := "bind: destination must be a non-nil pointer to struct or supported map"
+
+	scalar := 1
+	if err := BindQueryParams(req, &scalar); err == nil || err.Error() != want {
+		t.Fatalf("BindQueryParams(scalar) error = %v", err)
+	}
+	if err := BindPathValues(pathReq, &scalar); err == nil || err.Error() != want {
+		t.Fatalf("BindPathValues(scalar) error = %v", err)
+	}
+	if err := BindHeaders(req, &scalar); err == nil || err.Error() != want {
+		t.Fatalf("BindHeaders(scalar) error = %v", err)
+	}
+
+	unsupportedMap := map[string]int(nil)
+	if err := BindQueryParams(req, &unsupportedMap); err == nil || err.Error() != want {
+		t.Fatalf("BindQueryParams(map[string]int) error = %v", err)
+	}
+}
+
 func TestDefaultBindConfig(t *testing.T) {
 	cfg := defaultBindConfig()
 
@@ -137,6 +159,15 @@ func TestBind_InternalBranches(t *testing.T) {
 	}
 	if err := validateBindingDestination(nil); err == nil || err.Error() != "bind: destination must not be nil" {
 		t.Fatalf("validateBindingDestination(nil) error = %v", err)
+	}
+	if err := validateKeyValueBindingDestination(&struct{}{}); err != nil {
+		t.Fatalf("validateKeyValueBindingDestination(struct) error = %v", err)
+	}
+	if err := validateKeyValueBindingDestination(&map[string]any{}); err != nil {
+		t.Fatalf("validateKeyValueBindingDestination(map[string]any) error = %v", err)
+	}
+	if err := validateKeyValueBindingDestination(new(int)); err == nil || err.Error() != "bind: destination must be a non-nil pointer to struct or supported map" {
+		t.Fatalf("validateKeyValueBindingDestination(int) error = %v", err)
 	}
 	if err := errorsf("boom %d", 1); err == nil || err.Error() != "bind: boom 1" {
 		t.Fatalf("errorsf() = %v", err)

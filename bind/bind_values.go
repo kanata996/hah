@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -57,12 +58,28 @@ func bindQueryParamsDefault(r *http.Request, target any) error {
 func bindHeadersDefault(r *http.Request, target any) error {
 	params := map[string][]string{}
 	if r != nil {
-		for key, values := range r.Header {
-			trimmed := strings.TrimSpace(key)
-			if trimmed == "" {
+		keys := make([]string, 0, len(r.Header))
+		for key := range r.Header {
+			if strings.TrimSpace(key) == "" {
 				continue
 			}
-			params[textproto.CanonicalMIMEHeaderKey(trimmed)] = values
+			keys = append(keys, key)
+		}
+		sort.Slice(keys, func(i, j int) bool {
+			left := strings.TrimSpace(keys[i])
+			right := strings.TrimSpace(keys[j])
+			leftCanonical := textproto.CanonicalMIMEHeaderKey(left)
+			rightCanonical := textproto.CanonicalMIMEHeaderKey(right)
+			if leftCanonical != rightCanonical {
+				return leftCanonical < rightCanonical
+			}
+			return left < right
+		})
+
+		for _, key := range keys {
+			trimmed := strings.TrimSpace(key)
+			canonical := textproto.CanonicalMIMEHeaderKey(trimmed)
+			params[canonical] = append(params[canonical], append([]string(nil), r.Header[key]...)...)
 		}
 	}
 	if err := bindDataDefault(target, params, "header"); err != nil {
@@ -100,11 +117,14 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 	typ = typ.Elem()
 	val = val.Elem()
 
-	if typ.Kind() == reflect.Map && typ.Key().Kind() == reflect.String {
-		elemKind := typ.Elem().Kind()
-		isElemInterface := elemKind == reflect.Interface
-		isElemString := elemKind == reflect.String
-		isElemSliceOfStrings := elemKind == reflect.Slice && typ.Elem().Elem().Kind() == reflect.String
+	stringType := reflect.TypeOf("")
+	sliceOfStringType := reflect.TypeOf([]string(nil))
+
+	if typ.Kind() == reflect.Map && typ.Key() == stringType {
+		elemType := typ.Elem()
+		isElemInterface := elemType.Kind() == reflect.Interface && elemType.NumMethod() == 0
+		isElemString := elemType == stringType
+		isElemSliceOfStrings := elemType == sliceOfStringType
 		if !isElemSliceOfStrings && !isElemString && !isElemInterface {
 			return nil
 		}
@@ -161,7 +181,7 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 		}
 
 		inputValue, exists := data[inputFieldName]
-		if !exists {
+		if !exists && tag == "header" {
 			for key, values := range data {
 				if strings.EqualFold(key, inputFieldName) {
 					inputValue = values
@@ -171,6 +191,11 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 			}
 		}
 		if !exists {
+			continue
+		}
+		if len(inputValue) == 0 {
+			// Malformed source entries with no concrete values should be ignored
+			// instead of panicking or overwriting existing data.
 			continue
 		}
 

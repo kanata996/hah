@@ -175,6 +175,38 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 			"Content-Type must be application/json",
 		)
 	})
+
+	t.Run("rejects unsupported content type before reading the full body", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.ContentLength = -1
+		req.Header.Set("Content-Type", "text/plain")
+		req.Body = &byteThenReadErrorCloser{err: errors.New("read failed")}
+
+		var dst request
+		_ = assertHTTPError(
+			t,
+			BindBody(req, &dst),
+			http.StatusUnsupportedMediaType,
+			CodeUnsupportedMediaType,
+			"Content-Type must be application/json",
+		)
+	})
+
+	t.Run("rejects malformed content type before surfacing later body read errors", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.ContentLength = -1
+		req.Header.Set("Content-Type", `application/json; charset="utf-8`)
+		req.Body = &byteThenReadErrorCloser{err: errors.New("read failed")}
+
+		var dst request
+		_ = assertHTTPError(
+			t,
+			BindBody(req, &dst),
+			http.StatusUnsupportedMediaType,
+			CodeUnsupportedMediaType,
+			"Content-Type must be application/json",
+		)
+	})
 }
 
 func TestBindBody_EmptyBodyContract(t *testing.T) {
