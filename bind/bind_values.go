@@ -231,11 +231,15 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 }
 
 // unmarshalInputsToFieldDefault 优先尝试多值自定义解码接口。
+// 对指针字段，先通过类型探测接口是否匹配，避免在不匹配时产生指针分配副作用。
 func unmarshalInputsToFieldDefault(valueKind reflect.Kind, values []string, field reflect.Value) (bool, error) {
-	field, _ = concreteFieldValueDefault(field, valueKind)
+	if valueKind == reflect.Pointer &&
+		!reflect.PointerTo(field.Type().Elem()).Implements(reflect.TypeFor[bindMultipleUnmarshaler]()) {
+		return false, nil
+	}
 
-	fieldIValue := field.Addr().Interface()
-	unmarshaler, ok := fieldIValue.(bindMultipleUnmarshaler)
+	field, _ = concreteFieldValueDefault(field, valueKind)
+	unmarshaler, ok := field.Addr().Interface().(bindMultipleUnmarshaler)
 	if !ok {
 		return false, nil
 	}
@@ -243,7 +247,18 @@ func unmarshalInputsToFieldDefault(valueKind reflect.Kind, values []string, fiel
 }
 
 // unmarshalInputToFieldDefault 优先尝试单值自定义解码接口和 time format 解析。
+// 对指针字段，先通过类型探测接口是否匹配，避免在不匹配时产生指针分配副作用。
 func unmarshalInputToFieldDefault(valueKind reflect.Kind, value string, field reflect.Value, formatTag string) (bool, error) {
+	if valueKind == reflect.Pointer {
+		elemType := reflect.PointerTo(field.Type().Elem())
+		_, isTime := reflect.New(field.Type().Elem()).Interface().(*time.Time)
+		if !(formatTag != "" && isTime) &&
+			!elemType.Implements(reflect.TypeFor[BindUnmarshaler]()) &&
+			!elemType.Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) {
+			return false, nil
+		}
+	}
+
 	field, _ = concreteFieldValueDefault(field, valueKind)
 
 	fieldIValue := field.Addr().Interface()
