@@ -6,6 +6,8 @@ package bind
 // - [✓] BindBody 支持标准 decoder 目标，包括 struct、slice、map。
 // - [✓] BindBody 在 body 过大时返回稳定的 413 契约，并保留已有值。
 // - [✓] body 相关内部辅助维持稳定契约，包括 media type、读 body 和错误映射。
+// - [✓] bindBodyDefault 在 DisallowUnknownFields 下拒绝包含未声明字段的请求。
+// - [✓] BindBody 在 req.Body 为 nil 时保持 no-op。
 
 import (
 	"bytes"
@@ -479,5 +481,52 @@ func TestBindBody_HelperBranches(t *testing.T) {
 	readErrAfterProbeReq.Body = &byteThenReadErrorCloser{err: wantErr}
 	if err := bindBodyDefault(readErrAfterProbeReq, &payload{}, defaultBindConfig().body); !errors.Is(err, wantErr) {
 		t.Fatalf("bindBodyDefault(read error after probe) = %v, want %v", err, wantErr)
+	}
+}
+
+func TestBindBody_DisallowUnknownFieldsViaConfig(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	strictCfg := bindBodyConfig{
+		maxBodyBytes:       defaultMaxBodyBytes,
+		allowUnknownFields: false,
+	}
+
+	t.Run("rejects unknown fields when disallowed", func(t *testing.T) {
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","extra":1}`)
+
+		var dst request
+		_ = assertHTTPError(t, bindBodyDefault(req, &dst, strictCfg), http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+	})
+
+	t.Run("accepts known fields only when disallowed", func(t *testing.T) {
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+
+		var dst request
+		if err := bindBodyDefault(req, &dst, strictCfg); err != nil {
+			t.Fatalf("bindBodyDefault() error = %v", err)
+		}
+		if dst.Name != "kanata" {
+			t.Fatalf("name = %q, want kanata", dst.Name)
+		}
+	})
+}
+
+func TestBindBody_NilBodyIsNoop(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Body = nil
+
+	dst := request{Name: "existing"}
+	if err := BindBody(req, &dst); err != nil {
+		t.Fatalf("BindBody(nil body) error = %v", err)
+	}
+	if dst.Name != "existing" {
+		t.Fatalf("name = %q, want existing value preserved", dst.Name)
 	}
 }

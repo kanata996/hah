@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/kanata996/hah/errx"
@@ -18,6 +19,7 @@ import (
 // - [✓] `NewErrorResponder` 与零值 `ErrorResponder` 的默认 fallback 契约。
 // - [✓] `ErrorResponder` 的自定义 `Logger` / `AsHTTPError` / `ContextAttrs` / `RequestLogAttrs` / `AnnotateRequestLog` 会通过 `Respond` 生效。
 // - [✓] `ErrorResponder` 仅在 5xx 请求日志补低噪音 `error.*` 字段，并对 canceled / timeout 保持稳定标记；4xx 不补这些字段也不额外打独立错误日志。
+// - [✓] `Respond` 对 nil error / nil request / nil writer 的边界安全退化。
 
 func TestNewErrorResponderRespondUsesDefaultFallbacks(t *testing.T) {
 	responder := NewErrorResponder()
@@ -481,6 +483,65 @@ func TestErrorResponderDoesNotEnrichRequestLogFor4xx(t *testing.T) {
 	}
 	if defaultBuf.Len() != 0 {
 		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
+	}
+}
+
+// nil 错误是纯 no-op，不写入任何响应内容。
+func TestErrorResponderRespondNilErrorIsNoop(t *testing.T) {
+	responder := NewErrorResponder()
+	rr := httptest.NewRecorder()
+
+	if err := responder.Respond(rr, httptest.NewRequest(http.MethodGet, "/", nil), nil); err != nil {
+		t.Fatalf("Respond() error = %v", err)
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want recorder default %d", rr.Code, http.StatusOK)
+	}
+	if rr.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "" {
+		t.Fatalf("Content-Type = %q, want empty", got)
+	}
+}
+
+// request 为空时，Respond 也应写出稳定的公共错误响应而不 panic。
+func TestErrorResponderRespondNilRequestStillWritesErrorResponse(t *testing.T) {
+	responder := NewErrorResponder()
+	rr := httptest.NewRecorder()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("Respond() panicked: %v", recovered)
+		}
+	}()
+
+	if err := responder.Respond(rr, nil, errors.New("db timeout")); err != nil {
+		t.Fatalf("Respond() error = %v", err)
+	}
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "internal_error" {
+		t.Fatalf("code = %#v, want internal_error", got)
+	}
+}
+
+// ResponseWriter 为空时，Respond 会返回错误而不 panic。
+func TestErrorResponderRespondRejectsNilWriter(t *testing.T) {
+	responder := NewErrorResponder()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("Respond() panicked: %v", recovered)
+		}
+	}()
+
+	err := responder.Respond(nil, httptest.NewRequest(http.MethodGet, "/", nil), errors.New("db timeout"))
+	if err == nil || !strings.Contains(err.Error(), "response writer is nil") {
+		t.Fatalf("Respond() error = %v, want response writer is nil", err)
 	}
 }
 

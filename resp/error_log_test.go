@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/kanata996/hah/errx"
 )
@@ -20,6 +21,7 @@ import (
 // [✓] 诊断起点优先使用 HTTPError 的内部 cause，没有 cause 时回退原始 error
 // [✓] 请求日志字段仅在 5xx 场景补充低噪音诊断字段；关联字段与 root cause 诊断保持稳定
 // [✓] 错误类型名与错误文本裁剪对 nil、空白、超长输入保持稳定
+// [✓] 超长文本截断会对齐 UTF-8 rune 边界，不产生非法序列
 
 type cycleTestError struct{}
 
@@ -380,6 +382,30 @@ func TestErrorTypeNameAndLimitErrorLogString(t *testing.T) {
 	got := limitErrorLogString(long)
 	if !strings.HasSuffix(got, "...(truncated)") {
 		t.Fatalf("limitErrorLogString(long) = %q, want truncated suffix", got)
+	}
+}
+
+// 超长文本截断会对齐 UTF-8 rune 边界，不会在多字节字符中间切割。
+func TestLimitErrorLogStringPreservesUTF8Boundary(t *testing.T) {
+	// 构造一个刚好在 maxLoggedErrorStringBytes 边界处有多字节字符的字符串。
+	// "世" 是 3 字节的 UTF-8 字符。
+	padding := strings.Repeat("a", maxLoggedErrorStringBytes-1)
+	// padding(1023字节) + "世"(3字节) = 1026 字节，超过 1024 字节限制。
+	// 截断点落在 "世" 的第 2 个字节处，应回退到 padding 末尾。
+	input := padding + "世"
+	got := limitErrorLogString(input)
+
+	if !strings.HasSuffix(got, "...(truncated)") {
+		t.Fatalf("limitErrorLogString() = %q, want truncated suffix", got)
+	}
+	// 截断后去掉 suffix，剩余部分应是完整的 UTF-8。
+	core := strings.TrimSuffix(got, "...(truncated)")
+	if !utf8.ValidString(core) {
+		t.Fatalf("truncated core is not valid UTF-8: %q", core)
+	}
+	// 截断后应不包含那个被截断的多字节字符。
+	if strings.Contains(core, "世") {
+		t.Fatalf("truncated core contains partial multibyte char: %q", core)
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 // [✓] asHTTPError 会保留 HTTPError，并把 context/普通 error 收敛为稳定公共语义
 // [✓] problem payload 会按 includeErrors 开关决定是否暴露公开 errors
 // [✓] `WriteError` 默认 responder 会在 5xx 输出独立错误日志，并在错误响应写出失败时输出失败日志
+// [✓] WriteError 能正确写出包含多个 details 对象的 errors 数组
 
 type failingWriter struct {
 	header http.Header
@@ -229,6 +230,41 @@ func TestWriteErrorPreservesExplicitPublicFields(t *testing.T) {
 	assertPublicErrorObject(t, errors[0], map[string]any{
 		"field": "name",
 		"code":  "required",
+	})
+}
+
+// 多个 details 对象应圆整进入 problem JSON 的 errors 数组。
+func TestWriteErrorMultipleDetails(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/users", nil)
+	rr := httptest.NewRecorder()
+
+	err := WriteError(rr, req, errx.NewHTTPError(
+		http.StatusUnprocessableEntity,
+		"validation_failed",
+		"request validation failed",
+		map[string]any{"field": "name", "code": "required"},
+		map[string]any{"field": "email", "code": "invalid"},
+	))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnprocessableEntity)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	errors, ok := body["errors"].([]any)
+	if !ok || len(errors) != 2 {
+		t.Fatalf("errors = %#v, want 2 items", body["errors"])
+	}
+	assertPublicErrorObject(t, errors[0], map[string]any{
+		"field": "name",
+		"code":  "required",
+	})
+	assertPublicErrorObject(t, errors[1], map[string]any{
+		"field": "email",
+		"code":  "invalid",
 	})
 }
 

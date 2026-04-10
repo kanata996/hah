@@ -4,8 +4,10 @@ package reqx
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
 // - [✓] `BindAndValidate*` 包装器会优先执行 bind，并在公开返回值中暴露稳定的成功/失败语义。
 // - [✓] `BindAndValidate*` 在各来源下都会返回请求 tag 字段名、规范化 header 名与稳定的 violation 包络。
-// - [✓] 内部 `validate`、`postBindValidate`、`validateStruct`、`validateTarget` 会维持稳定目标契约。
-// - [✓] validator 初始化、字段别名、tag 优先级、来源推断与 panic 分支都会产出稳定结果。
+// - [✓] 内部 `postBindValidate`、`validateStruct`、`validateTarget` 会维持稳定目标契约。
+// - [✓] validator 初始化、字段别名、tag 优先级与 panic 分支都会产出稳定结果。
+// - [✓] 嵌套 struct 校验失败时 violation 字段路径会包含完整的嵌套层级。
+// - [✓] 仅实现 Normalizer 不实现 RequestValidator 的 DTO 在绑定校验时只执行 normalize 不触发请求级规则。
 
 import (
 	"errors"
@@ -15,7 +17,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
@@ -478,27 +479,6 @@ func TestPostBindValidateRejectsInvalidTarget(t *testing.T) {
 	}
 }
 
-// validate 会覆盖成功、typed nil 和非结构体目标分支。
-func TestValidateBranches(t *testing.T) {
-	type request struct {
-		Name string `validate:"required"`
-	}
-
-	if err := validate(&request{Name: "ok"}, sourceBody); err != nil {
-		t.Fatalf("validate(success) error = %v", err)
-	}
-
-	var nilTarget *request
-	if err := validate(nilTarget, sourceBody); err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
-		t.Fatalf("validate(typed nil) error = %v", err)
-	}
-
-	value := 1
-	if err := validate(&value, sourceBody); err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
-		t.Fatalf("validate(non-struct) error = %v", err)
-	}
-}
-
 // validateStruct 返回的校验错误会被转换为 violation 列表。
 func TestValidateStructValidationErrors(t *testing.T) {
 	target := &struct {
@@ -541,114 +521,16 @@ func TestValidateStructReturnsInvalidValidationError(t *testing.T) {
 	}
 }
 
-// validator 拒绝 time.Time 时，validate 会直接透传该错误。
-func TestValidateReturnsInvalidValidationError(t *testing.T) {
-	now := time.Now()
-
-	err := validate(&now, sourceBody)
+// validateFields 透传 validateStruct 的 InvalidValidationError。
+func TestValidateFieldsReturnsInvalidValidationError(t *testing.T) {
+	err := validateFields(1, sourceBody)
 	if err == nil {
-		t.Fatal("validate() error = nil")
+		t.Fatal("validateFields() error = nil")
 	}
 
 	var invalidErr *validator.InvalidValidationError
 	if !errors.As(err, &invalidErr) {
 		t.Fatalf("error = %T, want *validator.InvalidValidationError", err)
-	}
-}
-
-// validate 会按 source 选择稳定的字段别名和 in 值。
-func TestValidate_UsesSourceSpecificFieldAliases(t *testing.T) {
-	t.Run("body uses json tag", func(t *testing.T) {
-		var dst struct {
-			DisplayName string `json:"display_name" validate:"required,nospace"`
-		}
-
-		violation := assertSingleViolation(t, validate(&dst, sourceBody))
-		if violation.Field != "display_name" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
-			t.Fatalf("violation = %#v", violation)
-		}
-	})
-
-	t.Run("query uses query tag", func(t *testing.T) {
-		var dst struct {
-			Cursor string `query:"cursor" validate:"required"`
-		}
-
-		violation := assertSingleViolation(t, validate(&dst, sourceQuery))
-		if violation.Field != "cursor" || violation.In != ViolationInQuery || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
-			t.Fatalf("violation = %#v", violation)
-		}
-	})
-
-	t.Run("path uses param tag", func(t *testing.T) {
-		var dst struct {
-			UUID string `param:"uuid" validate:"required,uuid"`
-		}
-
-		violation := assertSingleViolation(t, validate(&dst, sourcePath))
-		if violation.Field != "uuid" || violation.In != ViolationInPath || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
-			t.Fatalf("violation = %#v", violation)
-		}
-	})
-
-	t.Run("headers use canonical header tag", func(t *testing.T) {
-		var dst struct {
-			RequestID string `header:"x-request-id" validate:"required"`
-		}
-
-		violation := assertSingleViolation(t, validate(&dst, sourceHeader))
-		if violation.Field != "X-Request-Id" || violation.In != ViolationInHeader || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
-			t.Fatalf("violation = %#v", violation)
-		}
-	})
-}
-
-// validate(sourceRequest) 会按请求标签选择字段别名，但统一以 request 作为 in 值。
-func TestValidateRequest_UsesRequestFieldAliases(t *testing.T) {
-	var dst struct {
-		ID      string `param:"id" validate:"required"`
-		Cursor  string `query:"cursor" validate:"required"`
-		Name    string `json:"name" validate:"required"`
-		TraceID string `header:"x-trace-id" validate:"required"`
-		Plain   string `validate:"required"`
-	}
-
-	violations := assertViolations(t, validate(&dst, sourceRequest))
-	if len(violations) != 5 {
-		t.Fatalf("violations len = %d, want 5", len(violations))
-	}
-
-	got := map[string]Violation{}
-	for _, violation := range violations {
-		got[violation.Field] = violation
-	}
-
-	want := map[string]string{
-		"id":         ViolationInRequest,
-		"cursor":     ViolationInRequest,
-		"name":       ViolationInRequest,
-		"X-Trace-Id": ViolationInRequest,
-		"Plain":      ViolationInRequest,
-	}
-	for field, wantIn := range want {
-		violation, ok := got[field]
-		if !ok {
-			t.Fatalf("missing violation for %q in %#v", field, got)
-		}
-		if violation.In != wantIn || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
-			t.Fatalf("violation[%q] = %#v", field, violation)
-		}
-	}
-}
-
-// validate(sourceRequest) 会透传统一的空目标参数错误。
-func TestValidateRequest_NilDestinationReturnsError(t *testing.T) {
-	err := validate(nil, sourceRequest)
-	if err == nil {
-		t.Fatal("validate() error = nil")
-	}
-	if got := err.Error(); got != "reqx: target must not be nil" {
-		t.Fatalf("error = %q, want reqx: target must not be nil", got)
 	}
 }
 
@@ -704,7 +586,7 @@ func TestSourceTagPriority_UsesBodyPriority(t *testing.T) {
 }
 
 func TestViolationsFromValidationAndFieldPathBranches(t *testing.T) {
-	if got := violationsFromValidation(sourceBody, nil, nil); got != nil {
+	if got := violationsFromValidation(sourceBody, nil); got != nil {
 		t.Fatalf("violationsFromValidation(nil) = %#v, want nil", got)
 	}
 
@@ -713,7 +595,7 @@ func TestViolationsFromValidationAndFieldPathBranches(t *testing.T) {
 		fakeFieldError{tag: "min", namespace: "Req.a", field: "a", typ: reflect.TypeOf("")},
 		fakeFieldError{tag: "required", namespace: "Req.a", field: "a", typ: reflect.TypeOf("")},
 	}
-	violations := violationsFromValidation(sourceRequest, nil, errs)
+	violations := violationsFromValidation(sourceRequest, errs)
 	if len(violations) != 2 {
 		t.Fatalf("violations len = %d, want 2", len(violations))
 	}
@@ -739,18 +621,6 @@ func TestViolationsFromValidationAndFieldPathBranches(t *testing.T) {
 }
 
 func TestViolationInputHelpers(t *testing.T) {
-	testTags := map[string]string{
-		"json":    ViolationInBody,
-		"query":   ViolationInQuery,
-		"param":   ViolationInPath,
-		"header":  ViolationInHeader,
-		"unknown": ViolationInRequest,
-	}
-	for tag, want := range testTags {
-		if got := violationInForTag(tag); got != want {
-			t.Fatalf("violationInForTag(%q) = %q, want %q", tag, got, want)
-		}
-	}
 
 	testSources := map[sourceKind]string{
 		sourceBody:      ViolationInBody,
@@ -764,99 +634,6 @@ func TestViolationInputHelpers(t *testing.T) {
 		if got := violationInForSource(source); got != want {
 			t.Fatalf("violationInForSource(%q) = %q, want %q", source, got, want)
 		}
-	}
-}
-
-func TestResolveValidationFieldPathAndNamespaceParsing(t *testing.T) {
-	type nestedItem struct {
-		Value string `header:"x-value"`
-	}
-	type request struct {
-		Nested []*nestedItem `json:"nested"`
-		Plain  string        `json:"plain"`
-	}
-
-	fields, ok := resolveValidationFieldPath(&request{}, "request.Nested[0].Value")
-	if !ok {
-		t.Fatal("resolveValidationFieldPath() = false, want true")
-	}
-	if len(fields) != 2 {
-		t.Fatalf("len(fields) = %d, want 2", len(fields))
-	}
-	if fields[0].Name != "Nested" || fields[1].Name != "Value" {
-		t.Fatalf("fields = %#v, want [Nested Value]", fields)
-	}
-
-	testCases := []struct {
-		name      string
-		target    any
-		namespace string
-	}{
-		{name: "nil target", target: nil, namespace: "request.Name"},
-		{name: "empty namespace", target: &request{}, namespace: ""},
-		{name: "root only", target: &request{}, namespace: "request"},
-		{name: "missing field", target: &request{}, namespace: "request.Missing"},
-		{name: "missing intermediate field", target: &request{}, namespace: "request.Nested[0].Missing.Value"},
-		{name: "non-struct intermediate", target: &request{}, namespace: "request.Plain.Value"},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			if _, ok := resolveValidationFieldPath(tc.target, tc.namespace); ok {
-				t.Fatalf("resolveValidationFieldPath(%#v, %q) = true, want false", tc.target, tc.namespace)
-			}
-		})
-	}
-
-	if got := parseStructNamespace(" request.Nested[0].Value "); !reflect.DeepEqual(got, []string{"Nested", "Value"}) {
-		t.Fatalf("parseStructNamespace() = %#v", got)
-	}
-	if got := parseStructNamespace(""); got != nil {
-		t.Fatalf("parseStructNamespace(empty) = %#v, want nil", got)
-	}
-	if got := parseStructNamespace("request"); got != nil {
-		t.Fatalf("parseStructNamespace(root) = %#v, want nil", got)
-	}
-	if got := parseStructNamespace("request..Nested[0]..Value"); !reflect.DeepEqual(got, []string{"Nested", "Value"}) {
-		t.Fatalf("parseStructNamespace(skip empty) = %#v", got)
-	}
-}
-
-func TestValidationInputForRequestUsesTagPriorityAndFallback(t *testing.T) {
-	type request struct {
-		ID      string `param:"id" validate:"required"`
-		Cursor  string `query:"cursor" validate:"required"`
-		Name    string `json:"name" validate:"required"`
-		TraceID string `header:"x-trace-id" validate:"required"`
-		Plain   string `validate:"required"`
-	}
-
-	target := &request{}
-	err := validatorFor(sourceRequest).Struct(target)
-	if err == nil {
-		t.Fatal("validatorFor(sourceRequest).Struct() error = nil")
-	}
-
-	validationErrs := err.(validator.ValidationErrors)
-	violations := violationsFromValidation(sourceRequest, target, validationErrs)
-	got := map[string]string{}
-	for _, violation := range violations {
-		got[violation.Field] = violation.In
-	}
-
-	want := map[string]string{
-		"id":         ViolationInRequest,
-		"cursor":     ViolationInRequest,
-		"name":       ViolationInRequest,
-		"X-Trace-Id": ViolationInRequest,
-		"Plain":      ViolationInRequest,
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("request violations = %#v, want %#v", got, want)
-	}
-
-	if got := validationInput(sourceRequest, 1, validationErrs[0]); got != ViolationInRequest {
-		t.Fatalf("validationInput(fallback) = %q, want request", got)
 	}
 }
 
@@ -880,4 +657,57 @@ func TestTagValueAdditionalBranches(t *testing.T) {
 	if got := tagValue(skipTagField, "json"); got != "" {
 		t.Fatalf("tagValue(skip tag) = %q, want empty", got)
 	}
+}
+
+// 嵌套 struct 校验失败时，violation 字段路径应包含完整嵌套层级。
+func TestBindAndValidateBody_NestedStructViolationFieldPath(t *testing.T) {
+	type address struct {
+		City string `json:"city" validate:"required"`
+	}
+	type request struct {
+		Item struct {
+			Addr address `json:"addr"`
+		} `json:"item"`
+	}
+
+	req := newJSONRequest(http.MethodPost, "/", `{"item":{"addr":{}}}`)
+	var dst request
+	violation := assertSingleViolation(t, BindAndValidateBody(req, &dst))
+	want := Violation{
+		Field:  "item.addr.city",
+		In:     ViolationInBody,
+		Code:   ViolationCodeRequired,
+		Detail: "is required",
+	}
+	if violation != want {
+		t.Fatalf("violation = %#v, want %#v", violation, want)
+	}
+}
+
+// 仅实现 Normalizer 不实现 RequestValidator 的 DTO 只触发 normalize，不触发请求级规则。
+func TestBindAndValidateBody_NormalizerOnlyWithoutRequestValidator(t *testing.T) {
+	var events []string
+	dst := normalizerOnlyRequest{events: &events, Name: ""}
+	req := newJSONRequest(http.MethodPost, "/", `{"name":"  kanata  "}`)
+
+	err := BindAndValidateBody(req, &dst)
+	if err != nil {
+		t.Fatalf("BindAndValidateBody() error = %v", err)
+	}
+	if dst.Name != "kanata" {
+		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
+	if !reflect.DeepEqual(events, []string{"normalize"}) {
+		t.Fatalf("events = %#v, want [normalize] only", events)
+	}
+}
+
+type normalizerOnlyRequest struct {
+	Name   string    `json:"name" validate:"required"`
+	events *[]string `json:"-"`
+}
+
+func (r *normalizerOnlyRequest) Normalize() {
+	*r.events = append(*r.events, "normalize")
+	r.Name = strings.TrimSpace(r.Name)
 }

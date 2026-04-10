@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/kanata996/hah/errx"
 )
@@ -313,6 +314,7 @@ func safeErrorString(err error) (message string) {
 }
 
 // limitErrorLogString 对错误文本做长度限制，避免单条日志过大。
+// 截断位置会对齐到 UTF-8 rune 边界，避免产生非法 UTF-8 序列。
 func limitErrorLogString(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -321,7 +323,12 @@ func limitErrorLogString(value string) string {
 	if len(trimmed) <= maxLoggedErrorStringBytes {
 		return trimmed
 	}
-	return trimmed[:maxLoggedErrorStringBytes] + "...(truncated)"
+	// 从限制位置向前回退到最近的完整 rune 边界。
+	cut := maxLoggedErrorStringBytes
+	for cut > 0 && !utf8.RuneStart(trimmed[cut]) {
+		cut--
+	}
+	return trimmed[:cut] + "...(truncated)"
 }
 
 func requestMetadataAttrs(req *http.Request) []slog.Attr {

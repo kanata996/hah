@@ -2,6 +2,7 @@ package errx
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 )
 
@@ -159,9 +160,7 @@ func cloneErrors(errors []any) []any {
 	if len(errors) == 0 {
 		return nil
 	}
-	cloned := make([]any, len(errors))
-	copy(cloned, errors)
-	return cloned
+	return slices.Clone(errors)
 }
 
 // normalizeErrorStatus 把非法或越界状态码收敛到 500。
@@ -199,6 +198,8 @@ func normalizeErrorCode(status int, code string) string {
 		return "unprocessable_entity"
 	case http.StatusTooManyRequests:
 		return "too_many_requests"
+	// 503/504 通常由基础设施层（网关/反向代理）生成，业务代码不常直接构造，
+	// 因此只保留标准化映射，不提供快捷构造器。
 	case http.StatusServiceUnavailable:
 		return "service_unavailable"
 	case http.StatusGatewayTimeout:
