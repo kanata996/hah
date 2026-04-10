@@ -13,6 +13,15 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.3.2] - 2026-04-10
+
+### Highlights
+
+- Hardened test coverage across `bind`, `reqx`, `resp`, and `errx`, adding cases for boundary conditions and edge scenarios.
+- Fixed the binding-stage type detection logic for `time.Time` and improved UTF-8 safety when truncating error logs.
+- Optimized pointer-field deserialization to reduce unnecessary memory allocations.
+- Simplified `errx` error wrapping and stack formatting, and removed unused validation helper code.
+
 ## [v0.3.1] - 2026-04-10
 
 ### Highlights
