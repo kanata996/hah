@@ -6,18 +6,18 @@
 
 `hah` 是一个面向 `net/http` 的 JSON API 边界层，专注于把请求绑定、输入治理和响应写回收敛成一套稳定、克制、可组合的接口。
 
-它不接管 router，不定义新的 handler 协议，也不试图包装整个 HTTP 生命周期。无论你使用标准库 `ServeMux`、`chi`，还是已有的中间件栈，都可以只在 HTTP 边界引入 `hah`。
+它只处理 HTTP 边界。它不接管 router，不定义新的 handler 协议，也不包装整个 HTTP 生命周期。你可以把它接到 `ServeMux`、`chi` 或现有中间件栈后面。
 
 ## 特性
 
-- 面向 `net/http` 设计，保留标准 handler 与现有 router 的控制权
+- 面向 `net/http` 设计，保留标准 handler 和 router 控制权
 - 支持把 path、query、header、body `Bind` 到 DTO
 - 提供默认组合入口：`Bind` -> Normalize -> `RequestValidator` -> `validator/v10`
 - 把常见请求违规收敛为稳定的公开 HTTP 错误
 - 内置 JSON 成功响应与 `application/problem+json` 错误响应
 - 在 `5xx` 场景输出独立错误日志，并支持 request log 注解
-- 根包提供开箱即用 facade，也支持按需直接使用 `bind`、`reqx`、`resp`、`errx`
-- 适合渐进接入现有服务，而不是要求整体迁移到一套新框架
+- 根包提供常用 facade，也支持直接使用 `bind`、`reqx`、`resp`、`errx`
+- 适合渐进接入现有服务，不要求整体迁移
 
 ## 安装
 
@@ -31,13 +31,13 @@
 go get github.com/kanata996/hah@latest
 ```
 
-大多数场景直接导入根包即可：
+大多数场景直接导入根包：
 
 ```go
 import "github.com/kanata996/hah"
 ```
 
-如果你需要更细粒度的控制，也可以直接导入子包：
+需要更细粒度控制时，也可以直接导入子包：
 
 ```go
 import (
@@ -50,9 +50,9 @@ import (
 
 ## 包边界
 
-仓库当前拆成五个清晰的包边界：
+仓库分成五个包：
 
-- `hah`：根包 facade，聚合最常用的绑定、校验和响应写回入口
+- `hah`：根包 facade，聚合常用的绑定、校验和响应写回入口
 - `bind`：请求绑定层，负责 path/query/header/body 到目标值的映射
 - `reqx`：请求规则与校验层，负责 `Normalize`、`RequestValidator` 和 `validator/v10`
 - `errx`：共享公共 HTTP 错误模型
@@ -63,7 +63,7 @@ import (
 `hah` 负责：
 
 - 绑定 path/query/header/body 到结构体
-- 在绑定后执行 Normalize 和 `validator/v10` 校验
+- 在 `Bind` 后执行 Normalize 和 `validator/v10` 校验
 - 把常见请求违规收敛成稳定的公开 HTTP 错误
 - 写回标准 JSON 成功响应
 - 写回 `application/problem+json` 错误响应
@@ -144,7 +144,7 @@ func main() {
 
 ## 错误响应
 
-`WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，并写成 `application/problem+json`：
+`WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成 `application/problem+json`：
 
 ```json
 {
@@ -163,9 +163,9 @@ func main() {
 }
 ```
 
-`WriteError(...)` 适合默认行为；如果你需要自定义错误归一化、logger 或 request log 注解，可以使用 `ErrorResponder`。
+默认场景直接用 `WriteError(...)` 即可。需要自定义错误归一化、logger 或 request log 注解时，再使用 `ErrorResponder`。
 
-`WriteError(...)` / `ErrorResponder.Respond(...)` 的返回值表示响应边界自身异常，例如响应已经开始写出，或错误响应写出失败。生产代码通常应至少记录这个错误。
+`WriteError(...)` / `ErrorResponder.Respond(...)` 的返回值表示响应边界自身异常。比如响应已开始写出，或错误响应写出失败。生产代码通常至少要记录这个错误。
 
 ```go
 responder := hah.NewErrorResponder()
@@ -201,7 +201,3 @@ go test ./...
 go test -race ./...
 go test -bench=. ./...
 ```
-
-## 许可证
-
-[MIT](./LICENSE)
