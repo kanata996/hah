@@ -105,6 +105,42 @@ func TestJSONAllowsNilRequest(t *testing.T) {
 	}
 }
 
+func TestJSONHeadWritesHeadersWithoutBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodHead, "/", nil)
+	rr := httptest.NewRecorder()
+	body, err := encodeJSON(map[string]any{"id": "u_1"})
+	if err != nil {
+		t.Fatalf("encodeJSON() error = %v", err)
+	}
+
+	if err := JSON(rr, req, http.StatusAccepted, map[string]any{"id": "u_1"}); err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if got := rr.Header().Get("Content-Length"); got != "13" {
+		t.Fatalf("Content-Length = %q, want %d", got, len(body))
+	}
+	if rr.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty for HEAD", rr.Body.String())
+	}
+}
+
+func TestJSONHeadStillValidatesPayload(t *testing.T) {
+	req := httptest.NewRequest(http.MethodHead, "/", nil)
+	rr := httptest.NewRecorder()
+
+	err := JSON(rr, req, http.StatusOK, make(chan int))
+	if err == nil || err.Error() != "json: unsupported type: chan int" {
+		t.Fatalf("JSON() error = %v, want unsupported type error", err)
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
 // Created 会拒绝空的 ResponseWriter。
 func TestCreatedRejectsNilWriter(t *testing.T) {
 	err := Created(nil, httptest.NewRequest(http.MethodPost, "/v1/accounts", nil), map[string]any{"id": "u_1"})
@@ -157,6 +193,28 @@ func TestJSONBlobAllowsNilRequest(t *testing.T) {
 	}
 	if body := rr.Body.String(); body != `{"id":"u_1"}` {
 		t.Fatalf("body = %q, want raw JSON bytes", body)
+	}
+}
+
+func TestJSONBlobHeadWritesHeadersWithoutBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodHead, "/", nil)
+	rr := httptest.NewRecorder()
+	body := []byte(`{"id":"u_1"}`)
+
+	if err := JSONBlob(rr, req, http.StatusAccepted, body); err != nil {
+		t.Fatalf("JSONBlob() error = %v", err)
+	}
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if got := rr.Header().Get("Content-Length"); got != "12" {
+		t.Fatalf("Content-Length = %q, want %d", got, len(body))
+	}
+	if rr.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty for HEAD", rr.Body.String())
 	}
 }
 
@@ -251,6 +309,31 @@ func TestCreatedRejectsNilData(t *testing.T) {
 		t.Fatalf("Created() error = %v, want non-null data error", err)
 	}
 	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
+func TestOKHeadWritesHeadersWithoutBody(t *testing.T) {
+	req := httptest.NewRequest(http.MethodHead, "/", nil)
+	rr := httptest.NewRecorder()
+	body, err := encodeJSON(map[string]any{"id": "u_1"})
+	if err != nil {
+		t.Fatalf("encodeJSON() error = %v", err)
+	}
+
+	if err := OK(rr, req, map[string]any{"id": "u_1"}); err != nil {
+		t.Fatalf("OK() error = %v", err)
+	}
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if got := rr.Header().Get("Content-Length"); got != "13" {
+		t.Fatalf("Content-Length = %q, want %d", got, len(body))
+	}
+	if rr.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty for HEAD", rr.Body.String())
+	}
 }
 
 // Created 在编码不支持的值时会直接返回错误。
@@ -379,7 +462,7 @@ func TestNoContentAllowsNilRequest(t *testing.T) {
 func TestWriteJSONPropagatesEncodeError(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	err := writeJSON(rr, http.StatusOK, make(chan int))
+	err := writeJSON(rr, nil, http.StatusOK, make(chan int))
 	if err == nil || err.Error() != "json: unsupported type: chan int" {
 		t.Fatalf("writeJSON() error = %v, want unsupported type error", err)
 	}
@@ -388,7 +471,7 @@ func TestWriteJSONPropagatesEncodeError(t *testing.T) {
 
 // writeJSON 会把底层状态校验错误直接向上返回。
 func TestWriteJSONPropagatesStatusValidationError(t *testing.T) {
-	err := writeJSON(httptest.NewRecorder(), 1000, map[string]any{"id": "u_1"})
+	err := writeJSON(httptest.NewRecorder(), nil, 1000, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
 		t.Fatalf("writeJSON() error = %v, want invalid HTTP status", err)
 	}
@@ -398,7 +481,7 @@ func TestWriteJSONPropagatesStatusValidationError(t *testing.T) {
 func TestWriteJSONValidatesStatusBeforeEncoding(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	err := writeJSON(rr, http.StatusNoContent, panicSuccessJSONValue{})
+	err := writeJSON(rr, nil, http.StatusNoContent, panicSuccessJSONValue{})
 	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 204" {
 		t.Fatalf("writeJSON() error = %v, want bodyless status error", err)
 	}
@@ -407,7 +490,7 @@ func TestWriteJSONValidatesStatusBeforeEncoding(t *testing.T) {
 
 // writeSuccess 会拒绝非成功状态码。
 func TestWriteSuccessRejectsInvalidStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), http.StatusBadRequest, map[string]any{"id": "u_1"})
+	err := writeSuccess(httptest.NewRecorder(), nil, http.StatusBadRequest, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: invalid success status 400" {
 		t.Fatalf("writeSuccess() error = %v, want invalid success status", err)
 	}
@@ -415,7 +498,7 @@ func TestWriteSuccessRejectsInvalidStatus(t *testing.T) {
 
 // writeSuccess 也会先拒绝非法的 HTTP 状态码数值。
 func TestWriteSuccessRejectsInvalidHTTPStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), 1000, map[string]any{"id": "u_1"})
+	err := writeSuccess(httptest.NewRecorder(), nil, 1000, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
 		t.Fatalf("writeSuccess() error = %v, want invalid HTTP status", err)
 	}
@@ -423,7 +506,7 @@ func TestWriteSuccessRejectsInvalidHTTPStatus(t *testing.T) {
 
 // writeSuccess 会拒绝无法携带响应体的状态码。
 func TestWriteSuccessRejectsBodylessStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), http.StatusNoContent, map[string]any{"id": "u_1"})
+	err := writeSuccess(httptest.NewRecorder(), nil, http.StatusNoContent, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: success writers with a body cannot use bodyless status 204" {
 		t.Fatalf("writeSuccess() error = %v, want bodyless status error", err)
 	}
@@ -431,7 +514,7 @@ func TestWriteSuccessRejectsBodylessStatus(t *testing.T) {
 
 // writeSuccess 会拒绝 1xx informational 状态。
 func TestWriteSuccessRejectsInformationalStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), http.StatusContinue, map[string]any{"id": "u_1"})
+	err := writeSuccess(httptest.NewRecorder(), nil, http.StatusContinue, map[string]any{"id": "u_1"})
 	if err == nil || err.Error() != "resp: success writers with a body cannot use informational status 100" {
 		t.Fatalf("writeSuccess() error = %v, want informational status error", err)
 	}

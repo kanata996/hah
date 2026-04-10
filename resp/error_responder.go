@@ -66,7 +66,9 @@ func (r *ErrorResponder) logger() *slog.Logger {
 
 func (r *ErrorResponder) httpError(err error) *errx.HTTPError {
 	if r != nil && r.AsHTTPError != nil {
-		return r.AsHTTPError(err)
+		if httpErr := r.AsHTTPError(err); httpErr != nil {
+			return httpErr
+		}
 	}
 	return asHTTPError(err)
 }
