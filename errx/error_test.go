@@ -24,6 +24,9 @@ func (blankWriteCause) Error() string {
 // [✓] Detail 和 Errors 对外暴露标准化后的字段，并在构造时与读取时都做防御性切片拷贝
 // [✓] 常用错误构造器输出稳定的状态码、错误码和公开消息
 // [✓] 状态码、错误码、标题、详情标准化包含 499 特例
+// [✓] errors.Is / errors.As 标准 error 链互操作
+// [✓] 快捷构造器自定义 code/detail 透传
+// [✓] 构造时不传 errors 时 Errors() 返回 nil
 
 // nil 的 HTTPError 接收者应返回一组安全默认值，避免调用方二次判空。
 func TestHTTPErrorNilReceiverUsesSafeDefaults(t *testing.T) {
@@ -336,5 +339,44 @@ func TestNewHTTPErrorSupports499Defaults(t *testing.T) {
 	}
 	if got := err.Detail(); got != "Client Closed Request" {
 		t.Fatalf("Detail() = %q, want Client Closed Request", got)
+	}
+}
+
+// HTTPError 实现了 Unwrap，应支持标准库 errors.Is / errors.As 链式查找。
+func TestHTTPErrorWorksWithErrorsIsAndAs(t *testing.T) {
+	cause := errors.New("db timeout")
+	err := NewHTTPErrorWithCause(http.StatusConflict, "", "", cause)
+
+	if !errors.Is(err, cause) {
+		t.Fatal("errors.Is should find cause through Unwrap chain")
+	}
+
+	var target *HTTPError
+	if !errors.As(err, &target) {
+		t.Fatal("errors.As should match *HTTPError")
+	}
+	if target.Status() != http.StatusConflict {
+		t.Fatalf("matched HTTPError Status() = %d, want %d", target.Status(), http.StatusConflict)
+	}
+}
+
+// 快捷构造器传入自定义 code/detail 时，应透传而非丢弃。
+func TestHTTPErrorConstructorWithCustomCodeAndDetail(t *testing.T) {
+	err := BadRequest("custom_code", "custom detail", "field error")
+
+	if got := err.Code(); got != "custom_code" {
+		t.Fatalf("Code() = %q, want custom_code", got)
+	}
+	if got := err.Detail(); got != "custom detail" {
+		t.Fatalf("Detail() = %q, want %q", got, "custom detail")
+	}
+}
+
+// 构造时不传 errors，Errors() 应返回 nil 而非空切片。
+func TestHTTPErrorErrorsReturnsNilWhenNoErrors(t *testing.T) {
+	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")
+
+	if got := err.Errors(); got != nil {
+		t.Fatalf("Errors() = %#v, want nil", got)
 	}
 }
