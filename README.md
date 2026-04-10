@@ -2,29 +2,75 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/kanata996/hah.svg)](https://pkg.go.dev/github.com/kanata996/hah)
 [![CI](https://github.com/kanata996/hah/workflows/CI/badge.svg)](https://github.com/kanata996/hah/actions/workflows/ci.yml)
-[![Codecov](https://codecov.io/github/kanata996/hah/graph/badge.svg)](https://codecov.io/github.com/kanata996/hah)
+[![Codecov](https://codecov.io/github/kanata996/hah/graph/badge.svg)](https://codecov.io/github/kanata996/hah)
 
-`hah` 是一个面向 `net/http` 的 JSON API 边界层。
+`hah` 是一个面向 `net/http` 的 JSON API 边界层，专注于把请求绑定、输入治理和响应写回收敛成一套稳定、克制、可组合的接口。
 
-它不接管 router，不定义新的 handler 协议，也不试图包装整个 HTTP 生命周期。当前仓库拆成五个清晰的包边界：
+它不接管 router，不定义新的 handler 协议，也不试图包装整个 HTTP 生命周期。无论你使用标准库 `ServeMux`、`chi`，还是已有的中间件栈，都可以只在 HTTP 边界引入 `hah`。
+
+## 特性
+
+- 面向 `net/http` 设计，保留标准 handler 与现有 router 的控制权
+- 支持把 path、query、header、body `Bind` 到 DTO
+- 提供默认组合入口：`Bind` -> Normalize -> `RequestValidator` -> `validator/v10`
+- 把常见请求违规收敛为稳定的公开 HTTP 错误
+- 内置 JSON 成功响应与 `application/problem+json` 错误响应
+- 在 `5xx` 场景输出独立错误日志，并支持 request log 注解
+- 根包提供开箱即用 facade，也支持按需直接使用 `bind`、`reqx`、`resp`、`errx`
+- 适合渐进接入现有服务，而不是要求整体迁移到一套新框架
+
+## 安装
+
+环境要求：
+
+- Go `1.25+`
+
+安装模块：
+
+```bash
+go get github.com/kanata996/hah@latest
+```
+
+大多数场景直接导入根包即可：
+
+```go
+import "github.com/kanata996/hah"
+```
+
+如果你需要更细粒度的控制，也可以直接导入子包：
+
+```go
+import (
+	"github.com/kanata996/hah/bind"
+	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/reqx"
+	"github.com/kanata996/hah/resp"
+)
+```
+
+## 包边界
+
+仓库当前拆成五个清晰的包边界：
 
 - `hah`：根包 facade，聚合最常用的绑定、校验和响应写回入口
 - `bind`：请求绑定层，负责 path/query/header/body 到目标值的映射
 - `reqx`：请求规则与校验层，负责 `Normalize`、`RequestValidator` 和 `validator/v10`
-- `errx`：公共 HTTP 错误模型
+- `errx`：共享公共 HTTP 错误模型
 - `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
 
-## 能力范围
+## 适用范围
+
+`hah` 负责：
 
 - 绑定 path/query/header/body 到结构体
 - 在绑定后执行 Normalize 和 `validator/v10` 校验
 - 把常见请求违规收敛成稳定的公开 HTTP 错误
 - 写回标准 JSON 成功响应
 - 写回 `application/problem+json` 错误响应
-- 在 5xx 场景通过 `slog.Default()` 输出独立错误日志
+- 在 `5xx` 场景通过 `slog.Default()` 输出独立错误日志
 - 通过 `ErrorResponder` 自定义错误归一化、独立错误日志和 request log 注解
 
-不负责：
+`hah` 不负责：
 
 - auth / challenge / rate limit / CORS / redirect
 - router 级 `404/405`
@@ -61,7 +107,7 @@ func main() {
 			return
 		}
 
-		if err := hah.Created(w, r, map[string]any{
+		if err := hah.Created(w, map[string]any{
 			"id":     "acct_123",
 			"org_id": req.OrgID,
 			"name":   req.Name,
@@ -117,11 +163,9 @@ func main() {
 }
 ```
 
-`WriteError(...)` 适合默认行为；如果你需要自定义错误归一化、logger 或 request log 注解，
-可以使用 `ErrorResponder`：
+`WriteError(...)` 适合默认行为；如果你需要自定义错误归一化、logger 或 request log 注解，可以使用 `ErrorResponder`。
 
-`WriteError(...)` / `ErrorResponder.Respond(...)` 的返回值表示响应边界自身异常
-（例如响应已经开始写出，或错误响应写出失败）；生产代码通常应至少记录这个错误。
+`WriteError(...)` / `ErrorResponder.Respond(...)` 的返回值表示响应边界自身异常，例如响应已经开始写出，或错误响应写出失败。生产代码通常应至少记录这个错误。
 
 ```go
 responder := hah.NewErrorResponder()
@@ -140,7 +184,7 @@ if writeErr := responder.Respond(w, r, err); writeErr != nil {
 - `4xx` 不额外输出独立错误日志
 - 正常 `5xx` 会通过 `slog.Default()` 输出一条独立错误日志
 - 如果错误响应本身写出失败，还会额外记录一条写失败日志
-- `HEAD` 请求只写状态和头，不写响应体
+- `HEAD` 场景沿用 `net/http` 默认语义：handler 正常写回，对外是否发送响应体由底层决定
 - 如果响应已经开始写出，不再尝试二次改写响应
 
 ## 示例与命令

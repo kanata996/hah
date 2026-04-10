@@ -81,11 +81,10 @@ func (w *benchmarkResponseWriter) Write(p []byte) (int, error) {
 func BenchmarkJSON_Typical(b *testing.B) {
 	b.ReportAllocs()
 
-	req := httptest.NewRequest(http.MethodGet, "/accounts/acct_123456", nil)
 	w := &benchmarkResponseWriter{header: make(http.Header, 1)}
 
 	for b.Loop() {
-		if err := JSON(w, req, http.StatusOK, benchmarkJSONPayload); err != nil {
+		if err := JSON(w, http.StatusOK, benchmarkJSONPayload); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -97,7 +96,7 @@ func BenchmarkJSONBlob_Typical(b *testing.B) {
 	w := &benchmarkResponseWriter{header: make(http.Header, 1)}
 
 	for b.Loop() {
-		if err := JSONBlob(w, nil, http.StatusOK, benchmarkJSONBlobPayload); err != nil {
+		if err := JSONBlob(w, http.StatusOK, benchmarkJSONBlobPayload); err != nil {
 			b.Fatal(err)
 		}
 	}

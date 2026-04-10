@@ -27,7 +27,11 @@ func bindBodyDefault(r *http.Request, target any, cfg bindBodyConfig) error {
 	if err := validateBindInputs(r, target); err != nil {
 		return err
 	}
+	return bindBodyValidated(r, target, cfg)
+}
 
+// bindBodyValidated 假定 request 和 target 已完成前置校验，只执行 body 绑定本身。
+func bindBodyValidated(r *http.Request, target any, cfg bindBodyConfig) error {
 	// 先探测是否真的存在 body，这样零字节请求可以在 Content-Type 校验前直接 no-op。
 	hasBody, err := req.HasBody(r)
 	if err != nil {

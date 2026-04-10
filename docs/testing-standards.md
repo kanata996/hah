@@ -247,7 +247,7 @@ go test ./<pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 - `resp.JSON(...)`
   - 成功写 JSON
   - 非法状态码报错
-  - `nil writer` / bodyless status / `nil request`
+  - `nil writer` / bodyless status / 无 request 依赖
 
 - `bind.BindBody(...)`
   - 正常 body 绑定成功

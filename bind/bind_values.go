@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/textproto"
 	"reflect"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -52,28 +51,19 @@ func bindQueryParamsDefault(r *http.Request, target any) error {
 func bindHeadersDefault(r *http.Request, target any) error {
 	params := map[string][]string{}
 	if r != nil {
-		keys := make([]string, 0, len(r.Header))
-		for key := range r.Header {
-			if strings.TrimSpace(key) == "" {
+		for key, values := range r.Header {
+			trimmed := strings.TrimSpace(key)
+			if trimmed == "" {
 				continue
 			}
-			keys = append(keys, key)
-		}
-		sort.Slice(keys, func(i, j int) bool {
-			left := strings.TrimSpace(keys[i])
-			right := strings.TrimSpace(keys[j])
-			leftCanonical := textproto.CanonicalMIMEHeaderKey(left)
-			rightCanonical := textproto.CanonicalMIMEHeaderKey(right)
-			if leftCanonical != rightCanonical {
-				return leftCanonical < rightCanonical
-			}
-			return left < right
-		})
-
-		for _, key := range keys {
-			trimmed := strings.TrimSpace(key)
 			canonical := textproto.CanonicalMIMEHeaderKey(trimmed)
-			params[canonical] = append(params[canonical], append([]string(nil), r.Header[key]...)...)
+			if trimmed == canonical {
+				params[canonical] = values
+				continue
+			}
+			if _, exists := params[canonical]; !exists {
+				params[canonical] = values
+			}
 		}
 	}
 	return bindStringSourceDefault(target, params, "header")

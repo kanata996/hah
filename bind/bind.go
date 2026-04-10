@@ -63,19 +63,11 @@ func defaultBindConfig() bindConfig {
 
 // Bind 按默认顺序绑定请求数据：path -> query(GET/DELETE/HEAD) -> body。
 func Bind(r *http.Request, target any) error {
-	if err := validateBindInputs(r, target); err != nil {
-		return err
-	}
-
 	return bindWithConfig(r, target, defaultBindConfig())
 }
 
 // BindBody 只从请求 body 绑定数据。
 func BindBody(r *http.Request, target any) error {
-	if err := validateBindInputs(r, target); err != nil {
-		return err
-	}
-
 	return bindBodyDefault(r, target, defaultBindConfig().body)
 }
 
@@ -108,7 +100,7 @@ func BindHeaders(r *http.Request, target any) error {
 
 // Bind 实现 Binder 接口，使用 bind 包默认的绑定顺序和 body 契约。
 func (b *DefaultBinder) Bind(r *http.Request, target any) error {
-	return Bind(r, target)
+	return bindWithConfig(r, target, defaultBindConfig())
 }
 
 // bindWithConfig 负责串联默认 binder 的各个阶段。
@@ -131,7 +123,7 @@ func bindWithConfig(r *http.Request, target any, cfg bindConfig) error {
 	}
 
 	// body 最后执行，因此它对同名字段拥有最高优先级。
-	return bindBodyDefault(r, target, cfg.body)
+	return bindBodyValidated(r, target, cfg.body)
 }
 
 // validateBindInputs 统一校验公开 Bind* 入口和内部阶段共享的前置条件。

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -17,7 +18,7 @@ import (
 // 测试清单：
 // [✓] WriteError 会把 HTTPError 写成稳定的 problem JSON，并保留显式公共字段
 // [✓] nil error 是 no-op；nil request 与 nil writer 都能安全退化而不 panic
-// [✓] HEAD 请求只写状态和头；非法状态和未知错误会统一收敛且不泄漏内部 cause
+// [✓] HEAD 场景沿用普通 Write 链路，对外仍保持状态和头语义；非法状态和未知错误会统一收敛且不泄漏内部 cause
 // [✓] context canceled / deadline exceeded 会映射为公开错误语义
 // [✓] 公开 errors 无法编码或 panic 时会降级丢弃该字段，并把降级信息返回给调用方
 // [✓] 响应已经开始写出时不会被二次改写，但 5xx 仍会输出独立错误日志
@@ -296,23 +297,32 @@ func TestWriteErrorRejectsNilWriter(t *testing.T) {
 	}
 }
 
-// HEAD 请求写错误时只写状态和头，不写响应体。
+// HEAD 请求写错误时仍走正常 Write 链路，但最终对外只保留状态和头语义。
 func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	req := httptest.NewRequest(http.MethodHead, "/", nil)
-	rr := httptest.NewRecorder()
+	inner := &headLikeResponseWriter{}
+	w := &writeCallbackResponseWriter{ResponseWriter: inner}
+	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "", "detail")
+	body, err := marshalProblemPayload(httpErr)
+	if err != nil {
+		t.Fatalf("marshalProblemPayload() error = %v", err)
+	}
 
-	err := WriteError(rr, req, errx.NewHTTPError(http.StatusBadRequest, "", "", "detail"))
+	err = WriteError(w, req, httpErr)
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	if inner.status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", inner.status, http.StatusBadRequest)
 	}
-	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+	if got := inner.Header().Get("Content-Type"); got != "application/problem+json" {
 		t.Fatalf("Content-Type = %q, want application/problem+json", got)
 	}
-	if rr.Body.Len() != 0 {
-		t.Fatalf("body = %q, want empty", rr.Body.String())
+	if got := inner.Header().Get("Content-Length"); got != strconv.Itoa(len(body)) {
+		t.Fatalf("Content-Length = %q, want %d", got, len(body))
+	}
+	if w.writeCalls != 1 {
+		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
 	}
 }
 
@@ -588,7 +598,7 @@ func TestAsHTTPErrorMapsContextAndUnknownErrors(t *testing.T) {
 func TestWriteHTTPErrorNilHTTPErrorIsNoop(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	if err := writeHTTPError(rr, httptest.NewRequest(http.MethodGet, "/", nil), nil); err != nil {
+	if err := writeHTTPError(rr, nil); err != nil {
 		t.Fatalf("writeHTTPError() error = %v, want nil", err)
 	}
 	if rr.Code != http.StatusOK {
@@ -650,7 +660,7 @@ func TestWriteErrorSkipsRewriteAfterResponseStarted(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
 	defer slog.SetDefault(previousDefault)
 
-	err := OK(w, nil, map[string]any{"id": "u_1"})
+	err := OK(w, map[string]any{"id": "u_1"})
 	if err == nil {
 		t.Fatal("expected write error, got nil")
 	}

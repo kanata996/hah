@@ -89,26 +89,26 @@ func NewErrorResponder() *ErrorResponder {
 }
 
 // JSON 写回 JSON 响应。
-func JSON(w http.ResponseWriter, r *http.Request, status int, data any) error {
-	return resp.JSON(w, r, status, data)
+func JSON(w http.ResponseWriter, status int, data any) error {
+	return resp.JSON(w, status, data)
 }
 
 // JSONBlob 直接写回原始 JSON 字节。
-func JSONBlob(w http.ResponseWriter, r *http.Request, status int, body []byte) error {
-	return resp.JSONBlob(w, r, status, body)
+func JSONBlob(w http.ResponseWriter, status int, body []byte) error {
+	return resp.JSONBlob(w, status, body)
 }
 
 // OK 写回 200 成功响应。
-func OK(w http.ResponseWriter, r *http.Request, data any) error {
-	return resp.OK(w, r, data)
+func OK(w http.ResponseWriter, data any) error {
+	return resp.OK(w, data)
 }
 
 // Created 写回 201 成功响应。
-func Created(w http.ResponseWriter, r *http.Request, data any) error {
-	return resp.Created(w, r, data)
+func Created(w http.ResponseWriter, data any) error {
+	return resp.Created(w, data)
 }
 
 // NoContent 写回 204 成功响应。
-func NoContent(w http.ResponseWriter, r *http.Request) error {
-	return resp.NoContent(w, r)
+func NoContent(w http.ResponseWriter) error {
+	return resp.NoContent(w)
 }

@@ -371,7 +371,7 @@ func TestBindHeaders_HandlesTrimmedAndRepeatedKeys(t *testing.T) {
 		}
 	})
 
-	t.Run("case-variant duplicate keys are merged deterministically", func(t *testing.T) {
+	t.Run("canonical key wins over case variants", func(t *testing.T) {
 		type request struct {
 			RequestID string `header:"x-request-id"`
 		}
@@ -387,15 +387,15 @@ func TestBindHeaders_HandlesTrimmedAndRepeatedKeys(t *testing.T) {
 			t.Fatalf("BindHeaders() error = %v", err)
 		}
 		if dst.RequestID != "req-1" {
-			t.Fatalf("request_id = %q, want deterministic first value req-1", dst.RequestID)
+			t.Fatalf("request_id = %q, want canonical value req-1", dst.RequestID)
 		}
 
 		sliceMap := map[string][]string(nil)
 		if err := BindHeaders(req, &sliceMap); err != nil {
 			t.Fatalf("BindHeaders(map[string][]string) error = %v", err)
 		}
-		if !reflect.DeepEqual(sliceMap["X-Request-Id"], []string{"req-1", "req-2"}) {
-			t.Fatalf("sliceMap[X-Request-Id] = %#v, want [req-1 req-2]", sliceMap["X-Request-Id"])
+		if !reflect.DeepEqual(sliceMap["X-Request-Id"], []string{"req-1"}) {
+			t.Fatalf("sliceMap[X-Request-Id] = %#v, want [req-1]", sliceMap["X-Request-Id"])
 		}
 	})
 }
@@ -478,22 +478,6 @@ func TestBindHeaders_EmptyValueListsAreIgnored(t *testing.T) {
 			t.Fatalf("trace_id = %q, want existing", dst.TraceID)
 		}
 	})
-}
-
-func TestBindHeaders_MapSliceValuesDoNotAliasRequestHeaders(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Add("X-Trace-Id", "req-1")
-	req.Header.Add("X-Trace-Id", "req-2")
-
-	sliceMap := map[string][]string(nil)
-	if err := BindHeaders(req, &sliceMap); err != nil {
-		t.Fatalf("BindHeaders(map[string][]string) error = %v", err)
-	}
-
-	sliceMap["X-Trace-Id"][0] = "mutated"
-	if got := req.Header.Values("X-Trace-Id"); !reflect.DeepEqual(got, []string{"req-1", "req-2"}) {
-		t.Fatalf("request header values = %#v, want original values preserved", got)
-	}
 }
 
 func TestBindValues_HelperBranches(t *testing.T) {

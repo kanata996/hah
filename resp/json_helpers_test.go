@@ -25,6 +25,16 @@ type trackingResponseWriter struct {
 	writeCalls       int
 	status           int
 }
+type headLikeResponseWriter struct {
+	header           http.Header
+	writeHeaderCalls int
+	writeCalls       int
+	status           int
+}
+type writeCallbackResponseWriter struct {
+	http.ResponseWriter
+	writeCalls int
+}
 
 func (panicSuccessJSONValue) MarshalJSON() ([]byte, error) {
 	panic("panic during MarshalJSON")
@@ -53,6 +63,34 @@ func (w *trackingResponseWriter) WriteHeader(status int) {
 func (w *trackingResponseWriter) Write(p []byte) (int, error) {
 	w.writeCalls++
 	return len(p), nil
+}
+
+func (w *headLikeResponseWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *headLikeResponseWriter) WriteHeader(status int) {
+	w.writeHeaderCalls++
+	w.status = status
+}
+
+func (w *headLikeResponseWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	w.writeCalls++
+	if w.Header().Get("Content-Length") == "" {
+		w.Header().Set("Content-Length", strconv.Itoa(len(p)))
+	}
+	return len(p), nil
+}
+
+func (w *writeCallbackResponseWriter) Write(p []byte) (int, error) {
+	w.writeCalls++
+	return w.ResponseWriter.Write(p)
 }
 
 // responseWriteError 在 nil 接收者和普通错误场景下都应提供稳定的错误语义。
