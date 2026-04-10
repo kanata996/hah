@@ -6,6 +6,8 @@ package bind
 // - [✓] 单源公开 API 支持约定的 map 目标语义。
 // - [✓] path/query/header 相关错误统一收敛为 400 bad_request。
 // - [✓] 字符串源绑定的关键内部辅助契约，包括反射写入、自定义解码和 path helper。
+// - [✓] BindHeaders 支持切片字段绑定多值 header。
+// - [✓] BindQueryParams 对指针字段在缺失/空值时的保留与清零语义。
 
 import (
 	"errors"
@@ -878,4 +880,52 @@ func TestPathHelpers(t *testing.T) {
 	if headerDst.Name != "kanata" {
 		t.Fatalf("headerDst.Name = %q, want kanata", headerDst.Name)
 	}
+}
+
+func TestBindHeaders_BindsSliceFields(t *testing.T) {
+	type request struct {
+		Tags []string `header:"x-tags"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Add("X-Tags", "a")
+	req.Header.Add("X-Tags", "b")
+
+	var dst request
+	if err := BindHeaders(req, &dst); err != nil {
+		t.Fatalf("BindHeaders() error = %v", err)
+	}
+	if !reflect.DeepEqual(dst.Tags, []string{"a", "b"}) {
+		t.Fatalf("tags = %#v, want [a b]", dst.Tags)
+	}
+}
+
+func TestBindQueryParams_PointerFieldPreservation(t *testing.T) {
+	type request struct {
+		Page *int `query:"page"`
+	}
+
+	t.Run("nil pointer preserved when query param is missing", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/?other=1", nil)
+
+		var dst request
+		if err := BindQueryParams(req, &dst); err != nil {
+			t.Fatalf("BindQueryParams() error = %v", err)
+		}
+		if dst.Page != nil {
+			t.Fatalf("page = %#v, want nil", dst.Page)
+		}
+	})
+
+	t.Run("empty value allocates pointer and sets zero", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/?page=", nil)
+
+		var dst request
+		if err := BindQueryParams(req, &dst); err != nil {
+			t.Fatalf("BindQueryParams() error = %v", err)
+		}
+		if dst.Page == nil || *dst.Page != 0 {
+			t.Fatalf("page = %#v, want &0", dst.Page)
+		}
+	})
 }
