@@ -125,6 +125,8 @@ func main() {
 
 - `PathParam`
 - `QueryParam`
+- `PathValuesBinder`
+- `QueryParamsBinder`
 - `Bind`
 - `BindBody`
 - `BindAndValidate`

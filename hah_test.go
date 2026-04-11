@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/kanata996/hah/errx"
 	"github.com/kanata996/hah/reqx"
 )
@@ -15,7 +17,7 @@ import (
 // 测试清单：
 // [✓] 根包 facade 会把 bind / reqx / resp 的核心能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
-// [✓] 根包 facade 只暴露当前主路径 API：Bind、BindBody、PathParam、QueryParam、BindAndValidate、RequireBody 与响应入口
+// [✓] 根包 facade 只暴露当前主路径 API：Bind、BindBody、PathParam、QueryParam、PathValuesBinder、QueryParamsBinder、BindAndValidate、RequireBody 与响应入口
 // [✓] README 中承诺的 create account handler 主路径有根包级端到端测试支撑
 
 type rootPayloadMap map[string]any
@@ -77,6 +79,59 @@ func TestQueryParam_DelegatesToReqx(t *testing.T) {
 	}
 	if got != 42 {
 		t.Fatalf("QueryParam() = %d, want 42", got)
+	}
+}
+
+// PathValuesBinder 会通过根包 facade 暴露 reqx 的 path 单字段绑定器。
+func TestPathValuesBinder_DelegatesToReqx(t *testing.T) {
+	req := newRouteRequest(http.MethodGet, "/accounts/42", "id", "42")
+
+	var id int
+	if err := PathValuesBinder(req).MustInt("id", &id).BindErrors(); err != nil {
+		t.Fatalf("PathValuesBinder().BindErrors() error = %v", err)
+	}
+	if id != 42 {
+		t.Fatalf("id = %d, want 42", id)
+	}
+}
+
+// QueryParamsBinder 会通过根包 facade 暴露 reqx 的 query 单字段绑定器。
+func TestQueryParamsBinder_DelegatesToReqx(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts?page=42", nil)
+
+	var page int
+	if err := QueryParamsBinder(req).MustInt("page", &page).BindErrors(); err != nil {
+		t.Fatalf("QueryParamsBinder().BindErrors() error = %v", err)
+	}
+	if page != 42 {
+		t.Fatalf("page = %d, want 42", page)
+	}
+}
+
+// PathValuesBinder 的 UUID shorthand 会通过根包 facade 透传。
+func TestPathValuesBinder_UUIDShortcut(t *testing.T) {
+	want := uuid.New()
+	req := newRouteRequest(http.MethodGet, "/accounts/"+want.String(), "id", want.String())
+
+	var id uuid.UUID
+	if err := PathValuesBinder(req).MustUUID("id", &id).BindErrors(); err != nil {
+		t.Fatalf("PathValuesBinder().MustUUID().BindErrors() error = %v", err)
+	}
+	if id != want {
+		t.Fatalf("id = %v, want %v", id, want)
+	}
+}
+
+// QueryParamsBinder 的时间 shorthand 会通过根包 facade 透传。
+func TestQueryParamsBinder_TimeShortcut(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts?at=2026-04-12T08:30:00Z", nil)
+
+	var at time.Time
+	if err := QueryParamsBinder(req).MustTime("at", &at).BindErrors(); err != nil {
+		t.Fatalf("QueryParamsBinder().MustTime().BindErrors() error = %v", err)
+	}
+	if got := at.UTC().Format(time.RFC3339); got != "2026-04-12T08:30:00Z" {
+		t.Fatalf("at = %q, want 2026-04-12T08:30:00Z", got)
 	}
 }
 

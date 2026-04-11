@@ -12,6 +12,7 @@
 | 目标 | 推荐 API | 说明 |
 | --- | --- | --- |
 | 只取 1 到 2 个 path / query 参数 | `hah.PathParam` / `hah.QueryParam` | 适合轻量读取，不必定义 DTO |
+| 单字段 path / query 需要 `required` / `invalid` violation | `hah.PathValuesBinder` / `hah.QueryParamsBinder` | 适合不定义 DTO，但希望保留 source-aware 结构化错误 |
 | 标准 handler 的默认 happy path | `hah.BindAndValidate` | 默认执行 `path -> query(GET/DELETE/HEAD) -> body`，再做 Normalize / RequestValidator / validator |
 | 只做 body 绑定，不做校验 | `hah.BindBody` | 适合只需要 JSON 解码的场景 |
 | 显式只绑定 query / path / header / body | `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders` / `bind.BindBody` | source-specific binding |
@@ -72,6 +73,45 @@ func handler(w http.ResponseWriter, r *http.Request) {
 tags, err := hah.QueryParam[[]string](r, "tag")
 cursor, err := hah.QueryParam[*uuid.UUID](r, "cursor")
 ```
+
+### source-specific value binder
+
+如果你不想定义 DTO，但希望 path/query 单字段错误返回 `Violation` 风格，可以用 `ValueBinder`：
+
+```go
+var (
+	accountID uuid.UUID
+	limit     int
+)
+
+if err := hah.PathValuesBinder(r).
+	MustBind("account_id", &accountID).
+	BindErrors(); err != nil {
+	_ = hah.WriteError(w, r, err)
+	return
+}
+
+if err := hah.QueryParamsBinder(r).
+	Bind("limit", &limit).
+	BindErrors(); err != nil {
+	_ = hah.WriteError(w, r, err)
+	return
+}
+```
+
+几个公开语义需要注意：
+
+- `Bind(name, &dst)`：参数缺失时 no-op
+- `MustBind(name, &dst)`：参数缺失时返回 `required` violation
+- 常用目标可直接用 typed shorthand，例如 `MustString`、`MustInt`、`MustStrings`、`MustUUID`
+- 时间支持显式格式方法：
+  - `Time` / `MustTime`：RFC3339
+  - `UnixTime` / `MustUnixTime`：10 位秒级 Unix 时间戳
+  - `UnixMilliTime` / `MustUnixMilliTime`：13 位毫秒级 Unix 时间戳
+- 参数存在但解析失败时，返回 `invalid` violation
+- `PathValuesBinder` 的 `in` 固定为 `path`；`QueryParamsBinder` 的 `in` 固定为 `query`
+- 默认 `FailFast(true)`；如果需要一次收集多个字段错误，显式调用 `FailFast(false)`
+- `BindError()` 返回首个错误；`BindErrors()` 返回聚合后的 `invalid_request`
 
 ## 用 `bind` 绑定 DTO
 
