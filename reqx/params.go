@@ -12,32 +12,6 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-// Request 提供面向 *http.Request 的轻量读取视图，不包装 handler 语义。
-type Request struct {
-	r *http.Request
-}
-
-// From 返回一个可直接读取 path/query 参数的请求视图。
-func From(r *http.Request) Request {
-	return Request{r: r}
-}
-
-// PathParam 返回指定名称的 path 参数原始字符串值。
-func (rv Request) PathParam(name string) string {
-	if rv.r == nil {
-		return ""
-	}
-	return rv.r.PathValue(name)
-}
-
-// QueryParam 返回指定名称的 query 参数首个原始字符串值。
-func (rv Request) QueryParam(name string) string {
-	if rv.r == nil || rv.r.URL == nil {
-		return ""
-	}
-	return rv.r.URL.Query().Get(name)
-}
-
 // PathParam 按当前请求参数转换规则读取并解析单个 path 参数。
 func PathParam[T any](r *http.Request, name string) (T, error) {
 	values, exists := pathParamValues(r, name)

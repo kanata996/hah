@@ -7,11 +7,10 @@ import (
 	"strings"
 )
 
-// 本文件负责 bind 包的公开 API 入口、默认 binder 的阶段编排，以及共享基础配置。
+// 本文件负责 bind 包的公开 API 入口、默认绑定阶段编排，以及共享基础配置。
 //
 // 这里集中放：
 //   - 对外公开的核心入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
-//   - 对外公开的核心类型：Binder、DefaultBinder、BindUnmarshaler
 //   - 默认 binder 的阶段顺序：path -> query(GET/DELETE/HEAD) -> body
 //   - 绑定目标的公共前置校验和默认配置
 
@@ -29,14 +28,6 @@ const (
 	// CodeRequestTooLarge 表示请求 body 超出默认大小限制。
 	CodeRequestTooLarge = "request_too_large"
 )
-
-// Binder 定义默认请求绑定器接口。
-type Binder interface {
-	Bind(r *http.Request, target any) error
-}
-
-// DefaultBinder 是面向 JSON API 的默认绑定器。
-type DefaultBinder struct{}
 
 // BindUnmarshaler 允许字段从单个字符串输入值自定义解码。
 type BindUnmarshaler interface {
@@ -96,11 +87,6 @@ func BindHeaders(r *http.Request, target any) error {
 	}
 
 	return bindHeadersDefault(r, target)
-}
-
-// Bind 实现 Binder 接口，使用 bind 包默认的绑定顺序和 body 契约。
-func (b *DefaultBinder) Bind(r *http.Request, target any) error {
-	return bindWithConfig(r, target, defaultBindConfig())
 }
 
 // bindWithConfig 负责串联默认 binder 的各个阶段。

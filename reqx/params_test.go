@@ -2,7 +2,7 @@ package reqx
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `From`、`PathParam`、`QueryParam` 会公开暴露 path/query 原始读取与常见类型绑定的稳定成功语义。
+// - [✓] `PathParam`、`QueryParam` 会公开暴露 path/query 参数的稳定 typed 读取语义。
 // - [✓] `PathParam`、`QueryParam` 在缺值、nil request、非法输入、自定义解码失败和 pointer 目标下会返回稳定的零值或 `bad_request`。
 // - [✓] `QueryParam` 对多值 query 会维持 slice、首值标量与缺失切片的公开契约。
 
@@ -10,7 +10,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strings"
 	"testing"
 
@@ -73,27 +72,6 @@ type failingTextValue string
 
 func (*failingTextValue) UnmarshalText([]byte) error {
 	return errFailingTextValue
-}
-
-func TestFrom_ProvidesRawParamReaders(t *testing.T) {
-	req := requestWithPathParams(map[string][]string{
-		"id": {""},
-	})
-	req.URL = mustParseURL("/accounts?cursor=next&cursor=later")
-
-	reader := From(req)
-	if got := reader.PathParam("id"); got != "" {
-		t.Fatalf("PathParam(id) = %q, want empty string", got)
-	}
-	if got := reader.QueryParam("cursor"); got != "next" {
-		t.Fatalf("QueryParam(cursor) = %q, want next", got)
-	}
-	if got := From(nil).PathParam("id"); got != "" {
-		t.Fatalf("From(nil).PathParam() = %q, want empty string", got)
-	}
-	if got := From(nil).QueryParam("cursor"); got != "" {
-		t.Fatalf("From(nil).QueryParam() = %q, want empty string", got)
-	}
 }
 
 func TestPathParam_BindsSupportedTypes(t *testing.T) {
@@ -574,12 +552,4 @@ func TestQueryParam_MissingSliceReturnsNil(t *testing.T) {
 	if got != nil {
 		t.Fatalf("QueryParam[[]string](missing) = %v, want nil", got)
 	}
-}
-
-func mustParseURL(raw string) *url.URL {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		panic(err)
-	}
-	return parsed
 }

@@ -17,8 +17,7 @@ import (
 // 本文件负责 reqx 包的组合校验主流程、validator 初始化，以及字段级 violation 生成辅助。
 //
 // 这里承载的能力包括：
-//   - 对外公开的组合入口：BindAndValidate、BindAndValidateBody、
-//     BindAndValidateQuery、BindAndValidatePath、BindAndValidateHeaders
+//   - 对外公开的组合入口：BindAndValidate、Validate
 //   - 绑定后的固定阶段顺序：Normalize -> ValidateRequest -> validator/v10
 //   - 各输入来源的 validator 实例、字段别名和 tag 优先级策略
 //   - validator.ValidationErrors 到 Violation 的稳定转换
@@ -28,19 +27,24 @@ type Normalizer interface {
 	Normalize()
 }
 
-type sourceKind string
+// Source 标识校验阶段应采用哪一类输入来源语义。
+//
+// 它决定：
+//   - validator 字段别名优先读取哪些 struct tag
+//   - violation 的 `in` 字段使用哪个公开来源值
+type Source string
 
 const (
-	sourceBody    sourceKind = "json"
-	sourceQuery   sourceKind = "query"
-	sourcePath    sourceKind = "param"
-	sourceHeader  sourceKind = "header"
-	sourceRequest sourceKind = "request"
+	SourceBody    Source = "json"
+	SourceQuery   Source = "query"
+	SourcePath    Source = "param"
+	SourceHeader  Source = "header"
+	SourceRequest Source = "request"
 )
 
 var (
 	validatorOnce sync.Once
-	validators    map[sourceKind]*validator.Validate
+	validators    map[Source]*validator.Validate
 )
 
 func BindAndValidate(r *http.Request, target any) error {
@@ -53,62 +57,27 @@ func BindAndValidate(r *http.Request, target any) error {
 	if err := bind.Bind(r, target); err != nil {
 		return err
 	}
-	return postBindValidate(r, target, sourceRequest)
+	return Validate(r, target, SourceRequest)
 }
 
-func BindAndValidateBody(r *http.Request, target any) error {
+// Validate 在绑定完成后执行 Normalize、请求级规则和字段校验。
+//
+// source 用于确定 tag 别名优先级和 violation 的输入来源语义；它不负责执行绑定。
+// 需要显式来源绑定时，可与 bind 包组合使用，例如：
+//
+//	if err := bind.BindHeaders(r, &dst); err != nil { ... }
+//	if err := reqx.Validate(r, &dst, reqx.SourceHeader); err != nil { ... }
+func Validate(r *http.Request, target any, source Source) error {
 	if r == nil {
 		return errorsf("request must not be nil")
 	}
-	if target == nil {
-		return errorsf("destination must not be nil")
-	}
-	if err := bind.BindBody(r, target); err != nil {
+	if err := validateSource(source); err != nil {
 		return err
 	}
-	return postBindValidate(r, target, sourceBody)
+	return postBindValidate(r, target, source)
 }
 
-func BindAndValidateQuery(r *http.Request, target any) error {
-	if r == nil {
-		return errorsf("request must not be nil")
-	}
-	if target == nil {
-		return errorsf("destination must not be nil")
-	}
-	if err := bind.BindQueryParams(r, target); err != nil {
-		return err
-	}
-	return postBindValidate(r, target, sourceQuery)
-}
-
-func BindAndValidatePath(r *http.Request, target any) error {
-	if r == nil {
-		return errorsf("request must not be nil")
-	}
-	if target == nil {
-		return errorsf("destination must not be nil")
-	}
-	if err := bind.BindPathValues(r, target); err != nil {
-		return err
-	}
-	return postBindValidate(r, target, sourcePath)
-}
-
-func BindAndValidateHeaders(r *http.Request, target any) error {
-	if r == nil {
-		return errorsf("request must not be nil")
-	}
-	if target == nil {
-		return errorsf("destination must not be nil")
-	}
-	if err := bind.BindHeaders(r, target); err != nil {
-		return err
-	}
-	return postBindValidate(r, target, sourceHeader)
-}
-
-func postBindValidate(r *http.Request, target any, source sourceKind) error {
+func postBindValidate(r *http.Request, target any, source Source) error {
 	if err := validateTarget(target); err != nil {
 		return err
 	}
@@ -122,13 +91,20 @@ func postBindValidate(r *http.Request, target any, source sourceKind) error {
 	return validateFields(target, source)
 }
 
+func validateSource(source Source) error {
+	if _, ok := sourceTagPriorities[source]; ok {
+		return nil
+	}
+	return errorsf("unsupported validation source %q", source)
+}
+
 func normalizeTarget(target any) {
 	if normalizer, ok := target.(Normalizer); ok {
 		normalizer.Normalize()
 	}
 }
 
-func validateFields(target any, source sourceKind) error {
+func validateFields(target any, source Source) error {
 	violations, err := validateStruct(target, source)
 	if err != nil {
 		return err
@@ -153,7 +129,7 @@ func validateTarget(target any) error {
 	return nil
 }
 
-func validateStruct(target any, source sourceKind) ([]Violation, error) {
+func validateStruct(target any, source Source) ([]Violation, error) {
 	err := validatorFor(source).Struct(target)
 	if err == nil {
 		return nil, nil
@@ -170,14 +146,14 @@ func validateStruct(target any, source sourceKind) ([]Violation, error) {
 	return violationsFromValidation(source, validationErrs), nil
 }
 
-func validatorFor(source sourceKind) *validator.Validate {
+func validatorFor(source Source) *validator.Validate {
 	validatorOnce.Do(func() {
-		validators = map[sourceKind]*validator.Validate{
-			sourceBody:    newValidator(sourceBody),
-			sourceQuery:   newValidator(sourceQuery),
-			sourcePath:    newValidator(sourcePath),
-			sourceHeader:  newValidator(sourceHeader),
-			sourceRequest: newValidator(sourceRequest),
+		validators = map[Source]*validator.Validate{
+			SourceBody:    newValidator(SourceBody),
+			SourceQuery:   newValidator(SourceQuery),
+			SourcePath:    newValidator(SourcePath),
+			SourceHeader:  newValidator(SourceHeader),
+			SourceRequest: newValidator(SourceRequest),
 		}
 	})
 
@@ -188,7 +164,7 @@ func validatorFor(source sourceKind) *validator.Validate {
 	return v
 }
 
-func newValidator(source sourceKind) *validator.Validate {
+func newValidator(source Source) *validator.Validate {
 	v := validator.New(validator.WithRequiredStructEnabled())
 	v.RegisterTagNameFunc(func(field reflect.StructField) string {
 		return fieldAlias(field, source)
@@ -211,7 +187,7 @@ func validateNoSpace(fl validator.FieldLevel) bool {
 	return !strings.ContainsRune(field.String(), ' ')
 }
 
-func violationsFromValidation(source sourceKind, errs validator.ValidationErrors) []Violation {
+func violationsFromValidation(source Source, errs validator.ValidationErrors) []Violation {
 	if len(errs) == 0 {
 		return nil
 	}
@@ -248,7 +224,7 @@ func violationsFromValidation(source sourceKind, errs validator.ValidationErrors
 	return violations
 }
 
-func validationFieldPath(source sourceKind, err validator.FieldError) string {
+func validationFieldPath(source Source, err validator.FieldError) string {
 	namespace := strings.TrimSpace(err.Namespace())
 	if namespace != "" {
 		if dot := strings.Index(namespace, "."); dot >= 0 {
@@ -266,7 +242,7 @@ func validationFieldPath(source sourceKind, err validator.FieldError) string {
 	}
 
 	switch source {
-	case sourceBody:
+	case SourceBody:
 		return "body"
 	default:
 		return "request"
@@ -282,14 +258,14 @@ func validationCode(tag string) string {
 	}
 }
 
-func violationInForSource(source sourceKind) string {
+func violationInForSource(source Source) string {
 	if input, ok := violationInputsBySource[source]; ok {
 		return input
 	}
 	return ViolationInRequest
 }
 
-func fieldAlias(field reflect.StructField, source sourceKind) string {
+func fieldAlias(field reflect.StructField, source Source) string {
 	for _, tagName := range sourceTagPriority(source) {
 		if name := tagValue(field, tagName); name != "" {
 			if tagName == "header" {
@@ -301,7 +277,7 @@ func fieldAlias(field reflect.StructField, source sourceKind) string {
 	return field.Name
 }
 
-func sourceTagPriority(source sourceKind) []string {
+func sourceTagPriority(source Source) []string {
 	if priority, ok := sourceTagPriorities[source]; ok {
 		return priority
 	}
@@ -322,19 +298,19 @@ func tagValue(field reflect.StructField, tagName string) string {
 }
 
 var (
-	sourceTagPriorities = map[sourceKind][]string{
-		sourceBody:    {"json", "query", "param", "header"},
-		sourceQuery:   {"query", "json", "param", "header"},
-		sourcePath:    {"param", "json", "query", "header"},
-		sourceHeader:  {"header", "json", "query", "param"},
-		sourceRequest: {"param", "query", "json", "header"},
+	sourceTagPriorities = map[Source][]string{
+		SourceBody:    {"json", "query", "param", "header"},
+		SourceQuery:   {"query", "json", "param", "header"},
+		SourcePath:    {"param", "json", "query", "header"},
+		SourceHeader:  {"header", "json", "query", "param"},
+		SourceRequest: {"param", "query", "json", "header"},
 	}
-	violationInputsBySource = map[sourceKind]string{
-		sourceBody:    ViolationInBody,
-		sourceQuery:   ViolationInQuery,
-		sourcePath:    ViolationInPath,
-		sourceHeader:  ViolationInHeader,
-		sourceRequest: ViolationInRequest,
+	violationInputsBySource = map[Source]string{
+		SourceBody:    ViolationInBody,
+		SourceQuery:   ViolationInQuery,
+		SourcePath:    ViolationInPath,
+		SourceHeader:  ViolationInHeader,
+		SourceRequest: ViolationInRequest,
 	}
 )
 

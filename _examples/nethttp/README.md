@@ -4,7 +4,7 @@
 
 核心关注点：
 
-- 只使用当前根包公开 API：`BindAndValidate*`、`OK`、`Created`、`NoContent`、`WriteError`
+- 只使用当前根包公开 API：`BindAndValidate`、`OK`、`Created`、`NoContent`、`WriteError`
 - path/query/body 都走 `hah` 的 `net/http` 绑定契约，不依赖 router 私有上下文
 - 领域层直接返回 `errx.NotFound(...)`、`errx.Conflict(...)` 这类稳定公共错误
 - 成功路径直接写 JSON，失败路径统一写 `application/problem+json`
@@ -19,7 +19,7 @@
 
 请求主流程：
 
-1. handler 用 `hah.BindAndValidate(...)` 或 `hah.BindAndValidatePath(...)` 处理 path/query/body 输入。
+1. handler 用 `hah.BindAndValidate(...)` 处理 path/query/body 输入。
 2. handler 调用内存 store；store 直接返回 `errx` 公共错误。
 3. 失败路径统一调用 `hah.WriteError(w, r, err)`。
 4. 成功路径统一走 `hah.OK(...)`、`hah.Created(...)` 或 `hah.NoContent(...)`。

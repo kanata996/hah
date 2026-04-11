@@ -2,8 +2,8 @@ package reqx
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `BindAndValidate*` 包装器会优先执行 bind，并在公开返回值中暴露稳定的成功/失败语义。
-// - [✓] `BindAndValidate*` 在各来源下都会返回请求 tag 字段名、规范化 header 名与稳定的 violation 包络。
+// - [✓] `BindAndValidate` 与 `bind + Validate(Source*)` 组合会优先执行 bind，并暴露稳定的成功/失败语义。
+// - [✓] `Validate(Source*)` 在各来源下都会返回请求 tag 字段名、规范化 header 名与稳定的 violation 包络。
 // - [✓] 内部 `postBindValidate`、`validateStruct`、`validateTarget` 会维持稳定目标契约。
 // - [✓] validator 初始化、字段别名、tag 优先级与 panic 分支都会产出稳定结果。
 // - [✓] 嵌套 struct 校验失败时 violation 字段路径会包含完整的嵌套层级。
@@ -79,55 +79,70 @@ func (f fakeFieldError) Type() reflect.Type             { return f.typ }
 func (f fakeFieldError) Translate(ut.Translator) string { return f.Error() }
 func (f fakeFieldError) Error() string                  { return "fake field error" }
 
-// 各个 BindAndValidate 包装器会优先返回绑定阶段错误。
-func TestBindAndValidateWrappersReturnBindErrors(t *testing.T) {
+func bindAndValidateBody(r *http.Request, target any) error {
+	if err := bind.BindBody(r, target); err != nil {
+		return err
+	}
+	return Validate(r, target, SourceBody)
+}
+
+func bindAndValidateQuery(r *http.Request, target any) error {
+	if err := bind.BindQueryParams(r, target); err != nil {
+		return err
+	}
+	return Validate(r, target, SourceQuery)
+}
+
+func bindAndValidatePath(r *http.Request, target any) error {
+	if err := bind.BindPathValues(r, target); err != nil {
+		return err
+	}
+	return Validate(r, target, SourcePath)
+}
+
+func bindAndValidateHeaders(r *http.Request, target any) error {
+	if err := bind.BindHeaders(r, target); err != nil {
+		return err
+	}
+	return Validate(r, target, SourceHeader)
+}
+
+func TestBindAndValidateRejectsInvalidInputs(t *testing.T) {
 	var dst struct{}
 
 	if err := BindAndValidate(nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
 		t.Fatalf("BindAndValidate() error = %v", err)
 	}
-	if err := BindAndValidateBody(nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
-		t.Fatalf("BindAndValidateBody() error = %v", err)
-	}
-	if err := BindAndValidateQuery(nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
-		t.Fatalf("BindAndValidateQuery() error = %v", err)
-	}
-	if err := BindAndValidatePath(nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
-		t.Fatalf("BindAndValidatePath() error = %v", err)
-	}
-	if err := BindAndValidateHeaders(nil, &dst); err == nil || err.Error() != "reqx: request must not be nil" {
-		t.Fatalf("BindAndValidateHeaders() error = %v", err)
-	}
-}
-
-func TestBindAndValidateWrappersRejectNilDestination(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/", `{}`)
-
 	if err := BindAndValidate(req, nil); err == nil || err.Error() != "reqx: destination must not be nil" {
 		t.Fatalf("BindAndValidate(nil target) error = %v", err)
 	}
-	if err := BindAndValidateBody(req, nil); err == nil || err.Error() != "reqx: destination must not be nil" {
-		t.Fatalf("BindAndValidateBody(nil target) error = %v", err)
+}
+
+func TestValidateRejectsInvalidInputs(t *testing.T) {
+	var dst struct{}
+
+	if err := Validate(nil, &dst, SourceBody); err == nil || err.Error() != "reqx: request must not be nil" {
+		t.Fatalf("Validate(nil request) error = %v", err)
 	}
-	if err := BindAndValidateQuery(req, nil); err == nil || err.Error() != "reqx: destination must not be nil" {
-		t.Fatalf("BindAndValidateQuery(nil target) error = %v", err)
+
+	req := newJSONRequest(http.MethodPost, "/", `{}`)
+	if err := Validate(req, nil, SourceBody); err == nil || err.Error() != "reqx: target must not be nil" {
+		t.Fatalf("Validate(nil target) error = %v", err)
 	}
-	if err := BindAndValidatePath(req, nil); err == nil || err.Error() != "reqx: destination must not be nil" {
-		t.Fatalf("BindAndValidatePath(nil target) error = %v", err)
-	}
-	if err := BindAndValidateHeaders(req, nil); err == nil || err.Error() != "reqx: destination must not be nil" {
-		t.Fatalf("BindAndValidateHeaders(nil target) error = %v", err)
+	if err := Validate(req, &dst, Source("unsupported")); err == nil || err.Error() != `reqx: unsupported validation source "unsupported"` {
+		t.Fatalf("Validate(unsupported source) error = %v", err)
 	}
 }
 
-func TestBindAndValidateWrappersReturnBindingErrorsFromBindPackage(t *testing.T) {
+func TestBindAndValidateCompositionsReturnBindingErrorsFromBindPackage(t *testing.T) {
 	t.Run("body invalid json", func(t *testing.T) {
 		type bodyRequest struct {
 			Name int `json:"name"`
 		}
 
 		req := newJSONRequest(http.MethodPost, "/", `{"name":"oops"}`)
-		gotErr := BindAndValidateBody(req, &bodyRequest{})
+		gotErr := bindAndValidateBody(req, &bodyRequest{})
 
 		wantReq := newJSONRequest(http.MethodPost, "/", `{"name":"oops"}`)
 		wantErr := bind.BindBody(wantReq, &bodyRequest{})
@@ -143,7 +158,7 @@ func TestBindAndValidateWrappersReturnBindingErrorsFromBindPackage(t *testing.T)
 
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
 		req.Header.Set("Content-Type", "text/plain")
-		gotErr := BindAndValidateBody(req, &bodyRequest{})
+		gotErr := bindAndValidateBody(req, &bodyRequest{})
 
 		wantReq := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
 		wantReq.Header.Set("Content-Type", "text/plain")
@@ -160,7 +175,7 @@ func TestBindAndValidateWrappersReturnBindingErrorsFromBindPackage(t *testing.T)
 
 		req := newJSONRequest(http.MethodGet, "/?page=oops", "")
 		req.ContentLength = 0
-		gotErr := BindAndValidateQuery(req, &requestQuery{})
+		gotErr := bindAndValidateQuery(req, &requestQuery{})
 
 		wantReq := newJSONRequest(http.MethodGet, "/?page=oops", "")
 		wantReq.ContentLength = 0
@@ -176,7 +191,7 @@ func TestBindAndValidateWrappersReturnBindingErrorsFromBindPackage(t *testing.T)
 		}
 
 		req := requestWithPathParams(map[string][]string{"id": {"oops"}})
-		gotErr := BindAndValidatePath(req, &requestPath{})
+		gotErr := bindAndValidatePath(req, &requestPath{})
 
 		wantReq := requestWithPathParams(map[string][]string{"id": {"oops"}})
 		wantErr := bind.BindPathValues(wantReq, &requestPath{})
@@ -193,7 +208,7 @@ func TestBindAndValidateWrappersReturnBindingErrorsFromBindPackage(t *testing.T)
 		req := newJSONRequest(http.MethodGet, "/", "")
 		req.ContentLength = 0
 		req.Header.Set("X-Retry", "oops")
-		gotErr := BindAndValidateHeaders(req, &requestHeader{})
+		gotErr := bindAndValidateHeaders(req, &requestHeader{})
 
 		wantReq := newJSONRequest(http.MethodGet, "/", "")
 		wantReq.ContentLength = 0
@@ -220,15 +235,15 @@ func TestBindAndValidateWrappersReturnBindingErrorsFromBindPackage(t *testing.T)
 	})
 }
 
-// 各个 BindAndValidate 包装器在正常输入下都能顺利通过。
-func TestBindAndValidateWrappersSuccessPaths(t *testing.T) {
+// `BindAndValidate` 与 `bind + Validate` 组合在正常输入下都能顺利通过。
+func TestBindAndValidateAndValidateSuccessPaths(t *testing.T) {
 	type bodyRequest struct {
 		Name string `json:"name" validate:"required"`
 	}
 	bodyReq := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
 	var bodyDst bodyRequest
-	if err := BindAndValidateBody(bodyReq, &bodyDst); err != nil {
-		t.Fatalf("BindAndValidateBody() error = %v", err)
+	if err := bindAndValidateBody(bodyReq, &bodyDst); err != nil {
+		t.Fatalf("bindAndValidateBody() error = %v", err)
 	}
 	if bodyDst.Name != "kanata" {
 		t.Fatalf("bodyDst = %#v, want bound body field", bodyDst)
@@ -253,8 +268,8 @@ func TestBindAndValidateWrappersSuccessPaths(t *testing.T) {
 	}
 	queryReq := httptest.NewRequest(http.MethodGet, "/?cursor=abc", nil)
 	var queryDst queryRequest
-	if err := BindAndValidateQuery(queryReq, &queryDst); err != nil {
-		t.Fatalf("BindAndValidateQuery() error = %v", err)
+	if err := bindAndValidateQuery(queryReq, &queryDst); err != nil {
+		t.Fatalf("bindAndValidateQuery() error = %v", err)
 	}
 	if queryDst.Cursor != "abc" {
 		t.Fatalf("queryDst = %#v, want bound query field", queryDst)
@@ -265,8 +280,8 @@ func TestBindAndValidateWrappersSuccessPaths(t *testing.T) {
 	}
 	pathReq := requestWithPathParams(map[string][]string{"uuid": {"u_1"}})
 	var pathDst pathRequest
-	if err := BindAndValidatePath(pathReq, &pathDst); err != nil {
-		t.Fatalf("BindAndValidatePath() error = %v", err)
+	if err := bindAndValidatePath(pathReq, &pathDst); err != nil {
+		t.Fatalf("bindAndValidatePath() error = %v", err)
 	}
 	if pathDst.UUID != "u_1" {
 		t.Fatalf("pathDst = %#v, want bound path field", pathDst)
@@ -278,8 +293,8 @@ func TestBindAndValidateWrappersSuccessPaths(t *testing.T) {
 	headerReq := httptest.NewRequest(http.MethodGet, "/", nil)
 	headerReq.Header.Set("X-Request-Id", "req-1")
 	var headerDst headerRequest
-	if err := BindAndValidateHeaders(headerReq, &headerDst); err != nil {
-		t.Fatalf("BindAndValidateHeaders() error = %v", err)
+	if err := bindAndValidateHeaders(headerReq, &headerDst); err != nil {
+		t.Fatalf("bindAndValidateHeaders() error = %v", err)
 	}
 	if headerDst.RequestID != "req-1" {
 		t.Fatalf("headerDst = %#v, want bound header field", headerDst)
@@ -309,8 +324,8 @@ func TestBindAndValidate_EmptyMixedSourceBodyDefersToValidation(t *testing.T) {
 	}
 }
 
-// 各个 BindAndValidate 包装器会把各来源的字段别名和 violation 包络直接暴露给调用方。
-func TestBindAndValidateWrappersReturnPublicValidationViolations(t *testing.T) {
+// `Validate(Source*)` 会把各来源的字段别名和 violation 包络直接暴露给调用方。
+func TestValidateReturnPublicValidationViolations(t *testing.T) {
 	t.Run("request uses request aliases", func(t *testing.T) {
 		type request struct {
 			OrgID       string `param:"org_id" validate:"required"`
@@ -347,7 +362,7 @@ func TestBindAndValidateWrappersReturnPublicValidationViolations(t *testing.T) {
 		}
 
 		var dst request
-		violation := assertSingleViolation(t, BindAndValidateBody(newJSONRequest(http.MethodPost, "/", `{"display_name":"bad value"}`), &dst))
+		violation := assertSingleViolation(t, bindAndValidateBody(newJSONRequest(http.MethodPost, "/", `{"display_name":"bad value"}`), &dst))
 		want := Violation{
 			Field:  "display_name",
 			In:     ViolationInBody,
@@ -369,7 +384,7 @@ func TestBindAndValidateWrappersReturnPublicValidationViolations(t *testing.T) {
 
 		req := httptest.NewRequest(http.MethodGet, "/?cursor_token=bad%20value", nil)
 		var dst request
-		violation := assertSingleViolation(t, BindAndValidateQuery(req, &dst))
+		violation := assertSingleViolation(t, bindAndValidateQuery(req, &dst))
 		want := Violation{
 			Field:  "cursor_token",
 			In:     ViolationInQuery,
@@ -393,7 +408,7 @@ func TestBindAndValidateWrappersReturnPublicValidationViolations(t *testing.T) {
 			"account_uuid": {"bad value"},
 		})
 		var dst request
-		violation := assertSingleViolation(t, BindAndValidatePath(req, &dst))
+		violation := assertSingleViolation(t, bindAndValidatePath(req, &dst))
 		want := Violation{
 			Field:  "account_uuid",
 			In:     ViolationInPath,
@@ -417,7 +432,7 @@ func TestBindAndValidateWrappersReturnPublicValidationViolations(t *testing.T) {
 		req.Header.Set("X-Trace-Id", "bad value")
 
 		var dst request
-		violation := assertSingleViolation(t, BindAndValidateHeaders(req, &dst))
+		violation := assertSingleViolation(t, bindAndValidateHeaders(req, &dst))
 		want := Violation{
 			Field:  "X-Trace-Id",
 			In:     ViolationInHeader,
@@ -474,7 +489,7 @@ func TestBindAndValidate_UsesRequestFieldAliases(t *testing.T) {
 }
 
 func TestPostBindValidateRejectsInvalidTarget(t *testing.T) {
-	if err := postBindValidate(newJSONRequest(http.MethodPost, "/", `{}`), 1, sourceBody); err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+	if err := postBindValidate(newJSONRequest(http.MethodPost, "/", `{}`), 1, SourceBody); err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
 		t.Fatalf("postBindValidate(non-struct) error = %v", err)
 	}
 }
@@ -485,7 +500,7 @@ func TestValidateStructValidationErrors(t *testing.T) {
 		Name string `json:"name" validate:"required"`
 	}{}
 
-	violations, err := validateStruct(target, sourceBody)
+	violations, err := validateStruct(target, SourceBody)
 	if err != nil {
 		t.Fatalf("validateStruct() error = %v", err)
 	}
@@ -510,7 +525,7 @@ func TestValidateTargetRejectsNilTarget(t *testing.T) {
 
 // 非法的校验目标会透传 validator 的 InvalidValidationError。
 func TestValidateStructReturnsInvalidValidationError(t *testing.T) {
-	_, err := validateStruct(1, sourceBody)
+	_, err := validateStruct(1, SourceBody)
 	if err == nil {
 		t.Fatal("validateStruct() error = nil")
 	}
@@ -523,7 +538,7 @@ func TestValidateStructReturnsInvalidValidationError(t *testing.T) {
 
 // validateFields 透传 validateStruct 的 InvalidValidationError。
 func TestValidateFieldsReturnsInvalidValidationError(t *testing.T) {
-	err := validateFields(1, sourceBody)
+	err := validateFields(1, SourceBody)
 	if err == nil {
 		t.Fatal("validateFields() error = nil")
 	}
@@ -562,7 +577,7 @@ func TestValidatorHelpers_PanicOnUnsupportedSource(t *testing.T) {
 			}
 		}()
 
-		_ = validatorFor(sourceKind("unsupported"))
+		_ = validatorFor(Source("unsupported"))
 	})
 
 	t.Run("sourceTagPriority", func(t *testing.T) {
@@ -572,21 +587,21 @@ func TestValidatorHelpers_PanicOnUnsupportedSource(t *testing.T) {
 			}
 		}()
 
-		_ = sourceTagPriority(sourceKind("unsupported"))
+		_ = sourceTagPriority(Source("unsupported"))
 	})
 }
 
 // body 来源的标签优先级顺序固定，用于字段别名解析。
 func TestSourceTagPriority_UsesBodyPriority(t *testing.T) {
-	got := sourceTagPriority(sourceBody)
+	got := sourceTagPriority(SourceBody)
 	want := []string{"json", "query", "param", "header"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("sourceTagPriority(sourceBody) = %#v, want %#v", got, want)
+		t.Fatalf("sourceTagPriority(SourceBody) = %#v, want %#v", got, want)
 	}
 }
 
 func TestViolationsFromValidationAndFieldPathBranches(t *testing.T) {
-	if got := violationsFromValidation(sourceBody, nil); got != nil {
+	if got := violationsFromValidation(SourceBody, nil); got != nil {
 		t.Fatalf("violationsFromValidation(nil) = %#v, want nil", got)
 	}
 
@@ -595,7 +610,7 @@ func TestViolationsFromValidationAndFieldPathBranches(t *testing.T) {
 		fakeFieldError{tag: "min", namespace: "Req.a", field: "a", typ: reflect.TypeOf("")},
 		fakeFieldError{tag: "required", namespace: "Req.a", field: "a", typ: reflect.TypeOf("")},
 	}
-	violations := violationsFromValidation(sourceRequest, errs)
+	violations := violationsFromValidation(SourceRequest, errs)
 	if len(violations) != 2 {
 		t.Fatalf("violations len = %d, want 2", len(violations))
 	}
@@ -606,29 +621,29 @@ func TestViolationsFromValidationAndFieldPathBranches(t *testing.T) {
 		t.Fatalf("violations[1] = %#v", violations[1])
 	}
 
-	if got := validationFieldPath(sourceBody, fakeFieldError{namespace: " Req.body.name ", typ: reflect.TypeOf("")}); got != "body.name" {
+	if got := validationFieldPath(SourceBody, fakeFieldError{namespace: " Req.body.name ", typ: reflect.TypeOf("")}); got != "body.name" {
 		t.Fatalf("validationFieldPath(namespace) = %q, want body.name", got)
 	}
-	if got := validationFieldPath(sourceBody, fakeFieldError{field: "display_name", typ: reflect.TypeOf("")}); got != "display_name" {
+	if got := validationFieldPath(SourceBody, fakeFieldError{field: "display_name", typ: reflect.TypeOf("")}); got != "display_name" {
 		t.Fatalf("validationFieldPath(field) = %q, want display_name", got)
 	}
-	if got := validationFieldPath(sourceBody, fakeFieldError{}); got != "body" {
+	if got := validationFieldPath(SourceBody, fakeFieldError{}); got != "body" {
 		t.Fatalf("validationFieldPath(body fallback) = %q, want body", got)
 	}
-	if got := validationFieldPath(sourceRequest, fakeFieldError{}); got != "request" {
+	if got := validationFieldPath(SourceRequest, fakeFieldError{}); got != "request" {
 		t.Fatalf("validationFieldPath(request fallback) = %q, want request", got)
 	}
 }
 
 func TestViolationInputHelpers(t *testing.T) {
 
-	testSources := map[sourceKind]string{
-		sourceBody:      ViolationInBody,
-		sourceQuery:     ViolationInQuery,
-		sourcePath:      ViolationInPath,
-		sourceHeader:    ViolationInHeader,
-		sourceRequest:   ViolationInRequest,
-		sourceKind("x"): ViolationInRequest,
+	testSources := map[Source]string{
+		SourceBody:    ViolationInBody,
+		SourceQuery:   ViolationInQuery,
+		SourcePath:    ViolationInPath,
+		SourceHeader:  ViolationInHeader,
+		SourceRequest: ViolationInRequest,
+		Source("x"):   ViolationInRequest,
 	}
 	for source, want := range testSources {
 		if got := violationInForSource(source); got != want {
@@ -659,8 +674,8 @@ func TestTagValueAdditionalBranches(t *testing.T) {
 	}
 }
 
-// 嵌套 struct 校验失败时，violation 字段路径应包含完整嵌套层级。
-func TestBindAndValidateBody_NestedStructViolationFieldPath(t *testing.T) {
+// body 来源的嵌套 struct 校验失败时，violation 字段路径应包含完整嵌套层级。
+func TestValidateBody_NestedStructViolationFieldPath(t *testing.T) {
 	type address struct {
 		City string `json:"city" validate:"required"`
 	}
@@ -672,7 +687,7 @@ func TestBindAndValidateBody_NestedStructViolationFieldPath(t *testing.T) {
 
 	req := newJSONRequest(http.MethodPost, "/", `{"item":{"addr":{}}}`)
 	var dst request
-	violation := assertSingleViolation(t, BindAndValidateBody(req, &dst))
+	violation := assertSingleViolation(t, bindAndValidateBody(req, &dst))
 	want := Violation{
 		Field:  "item.addr.city",
 		In:     ViolationInBody,
@@ -685,14 +700,14 @@ func TestBindAndValidateBody_NestedStructViolationFieldPath(t *testing.T) {
 }
 
 // 仅实现 Normalizer 不实现 RequestValidator 的 DTO 只触发 normalize，不触发请求级规则。
-func TestBindAndValidateBody_NormalizerOnlyWithoutRequestValidator(t *testing.T) {
+func TestValidateBody_NormalizerOnlyWithoutRequestValidator(t *testing.T) {
 	var events []string
 	dst := normalizerOnlyRequest{events: &events, Name: ""}
 	req := newJSONRequest(http.MethodPost, "/", `{"name":"  kanata  "}`)
 
-	err := BindAndValidateBody(req, &dst)
+	err := bindAndValidateBody(req, &dst)
 	if err != nil {
-		t.Fatalf("BindAndValidateBody() error = %v", err)
+		t.Fatalf("bindAndValidateBody() error = %v", err)
 	}
 	if dst.Name != "kanata" {
 		t.Fatalf("name = %q, want kanata", dst.Name)
