@@ -13,13 +13,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
-## [v0.3.3] - 2026-04-11
+## [v0.4.0] - 2026-04-11
+
+### Breaking
+
+- Simplified the root `hah` facade to the main happy-path APIs: `Bind`, `BindBody`, `PathParam`, `QueryParam`, `BindAndValidate`, `RequireBody`, and response helpers. Source-specific bind/validate entry points now live in `bind` and `reqx`.
+- Removed `bind.Binder` and `bind.DefaultBinder`; use the package-level `bind.Bind(...)` entry point directly.
+- Removed `reqx.Request`, `reqx.From`, and the source-specific `reqx.BindAndValidateBody/Query/Path/Headers` wrappers.
 
 ### Added
 
-- Added Echo-style request helpers to `reqx` while keeping the library `net/http`-first: raw `From(r).PathParam(...)` / `QueryParam(...)` readers plus typed `reqx.PathParam[T](...)` and `reqx.QueryParam[T](...)`.
-- Exposed the same request-helper entry points from the root `hah` facade: `Request`, `From`, `PathParam[T]`, and `QueryParam[T]`.
-- Kept the `bind` package focused on DTO binding only; the new request-parameter helpers live in `reqx` instead of the binding layer.
+- Added `reqx.Validate(r, target, reqx.Source*)` for source-aware validation after explicit `bind.Bind*` calls.
 
 ## [v0.3.2] - 2026-04-10
 

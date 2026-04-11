@@ -123,20 +123,11 @@ func main() {
 
 ## 根包常用 API
 
-- `Request`
-- `From`
 - `PathParam`
 - `QueryParam`
 - `Bind`
 - `BindBody`
-- `BindQueryParams`
-- `BindPathValues`
-- `BindHeaders`
 - `BindAndValidate`
-- `BindAndValidateBody`
-- `BindAndValidateQuery`
-- `BindAndValidatePath`
-- `BindAndValidateHeaders`
 - `RequireBody`
 - `WriteError`
 - `ErrorResponder`
@@ -146,6 +137,15 @@ func main() {
 - `OK`
 - `Created`
 - `NoContent`
+
+## 来源绑定与校验
+
+- `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders`
+- `reqx.Validate(..., reqx.SourceQuery)` / `reqx.SourcePath` / `reqx.SourceHeader` / `reqx.SourceBody`
+
+## 请求输入文档
+
+- [`REQUESTS.md`](./REQUESTS.md)：`bind` / `reqx` 的 request helper、binding、validation、请求级规则和常见组合模式
 
 ## 错误响应
 
