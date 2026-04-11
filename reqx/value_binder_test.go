@@ -15,6 +15,12 @@ import (
 // - [✓] 代表性 shorthand Int / MustString 与底层 Bind / MustBind 保持一致的 invalid、required 与 fail-fast 公开语义。
 // - [✓] ValueBinder 默认 fail-fast，可按需聚合多个 violation。
 // - [✓] ValueBinder 会把 nil request / 非法目标视为 usage error，而不是 HTTP violation。
+// - [✓] MustBind 在值存在但无效时返回 invalid violation，而非 required。
+// - [✓] 各类型 shorthand（int64/uint/bool/float64/uuid/slice/自定义 unmarshaler）的 invalid-value 反面路径。
+// - [✓] 空字符串参数（?page=）与完全缺失参数的语义区分。
+// - [✓] BindError 返回首个 violation，BindErrors 返回完整 violation 列表。
+// - [✓] FailFast(true) 显式切换能从聚合模式恢复 fail-fast。
+// - [✓] UnixTime/UnixMilliTime 的边界值（epoch 零、负数时间戳）。
 
 func TestPathValuesBinder_BindsSupportedTargets(t *testing.T) {
 	want := uuid.New()
@@ -81,7 +87,6 @@ func TestValueBinder_MissingRequiredReturnsViolation(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			violation := assertSingleViolation(t, tc.bind())
 			if violation != tc.want {
@@ -130,7 +135,6 @@ func TestValueBinder_InvalidValueReturnsViolation(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			violation := assertSingleViolation(t, tc.bind())
 			if violation != tc.want {
@@ -140,10 +144,276 @@ func TestValueBinder_InvalidValueReturnsViolation(t *testing.T) {
 	}
 }
 
+func TestValueBinder_MustBindInvalidValueReturnsInvalidNotRequired(t *testing.T) {
+	tests := []struct {
+		name string
+		bind func() error
+		want Violation
+	}{
+		{
+			name: "path MustBind with invalid int",
+			bind: func() error {
+				req := requestWithPathParams(map[string][]string{
+					"id": {"oops"},
+				})
+				var id int
+				return PathValuesBinder(req).MustBind("id", &id).BindErrors()
+			},
+			want: Violation{
+				Field:  "id",
+				In:     ViolationInPath,
+				Code:   ViolationCodeInvalid,
+				Detail: "is invalid",
+			},
+		},
+		{
+			name: "query MustBind with invalid int",
+			bind: func() error {
+				req := httptest.NewRequest(http.MethodGet, "/items?page=oops", nil)
+				var page int
+				return QueryParamsBinder(req).MustBind("page", &page).BindErrors()
+			},
+			want: Violation{
+				Field:  "page",
+				In:     ViolationInQuery,
+				Code:   ViolationCodeInvalid,
+				Detail: "is invalid",
+			},
+		},
+		{
+			name: "path MustInt with invalid value",
+			bind: func() error {
+				req := requestWithPathParams(map[string][]string{
+					"id": {"abc"},
+				})
+				var id int
+				return PathValuesBinder(req).MustInt("id", &id).BindErrors()
+			},
+			want: Violation{
+				Field:  "id",
+				In:     ViolationInPath,
+				Code:   ViolationCodeInvalid,
+				Detail: "is invalid",
+			},
+		},
+		{
+			name: "query MustUUID with invalid value",
+			bind: func() error {
+				req := httptest.NewRequest(http.MethodGet, "/items?id=not-a-uuid", nil)
+				var id uuid.UUID
+				return QueryParamsBinder(req).MustUUID("id", &id).BindErrors()
+			},
+			want: Violation{
+				Field:  "id",
+				In:     ViolationInQuery,
+				Code:   ViolationCodeInvalid,
+				Detail: "is invalid",
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			violation := assertSingleViolation(t, tc.bind())
+			if violation != tc.want {
+				t.Fatalf("violation = %#v, want %#v", violation, tc.want)
+			}
+		})
+	}
+}
+
+func TestValueBinder_InvalidValuePerType(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		bind  func(req *http.Request) error
+		field string
+	}{
+		{
+			name:  "int64 invalid",
+			query: "/items?v=abc",
+			bind: func(req *http.Request) error {
+				var v int64
+				return QueryParamsBinder(req).Int64("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+		{
+			name:  "uint negative",
+			query: "/items?v=-1",
+			bind: func(req *http.Request) error {
+				var v uint
+				return QueryParamsBinder(req).Uint("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+		{
+			name:  "bool invalid",
+			query: "/items?v=maybe",
+			bind: func(req *http.Request) error {
+				var v bool
+				return QueryParamsBinder(req).Bool("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+		{
+			name:  "float64 invalid",
+			query: "/items?v=not-a-number",
+			bind: func(req *http.Request) error {
+				var v float64
+				return QueryParamsBinder(req).Float64("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+		{
+			name:  "uuid invalid",
+			query: "/items?v=not-a-uuid",
+			bind: func(req *http.Request) error {
+				var v uuid.UUID
+				return QueryParamsBinder(req).UUID("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+		{
+			name:  "int slice with bad element",
+			query: "/items?v=1&v=oops",
+			bind: func(req *http.Request) error {
+				var v []int
+				return QueryParamsBinder(req).Ints("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+		{
+			name:  "int64 slice with bad element",
+			query: "/items?v=1&v=abc",
+			bind: func(req *http.Request) error {
+				var v []int64
+				return QueryParamsBinder(req).Int64s("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+		{
+			name:  "uint slice with negative element",
+			query: "/items?v=1&v=-2",
+			bind: func(req *http.Request) error {
+				var v []uint
+				return QueryParamsBinder(req).Uints("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+		{
+			name:  "bool slice with bad element",
+			query: "/items?v=true&v=maybe",
+			bind: func(req *http.Request) error {
+				var v []bool
+				return QueryParamsBinder(req).Bools("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+		{
+			name:  "float64 slice with bad element",
+			query: "/items?v=1.5&v=bad",
+			bind: func(req *http.Request) error {
+				var v []float64
+				return QueryParamsBinder(req).Float64s("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+		{
+			name:  "BindUnmarshaler failure",
+			query: "/items?v=anything",
+			bind: func(req *http.Request) error {
+				var v failingParamValue
+				return QueryParamsBinder(req).BindUnmarshaler("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+		{
+			name:  "TextUnmarshaler failure",
+			query: "/items?v=anything",
+			bind: func(req *http.Request) error {
+				var v failingTextValue
+				return QueryParamsBinder(req).TextUnmarshaler("v", &v).BindErrors()
+			},
+			field: "v",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tc.query, nil)
+			violation := assertSingleViolation(t, tc.bind(req))
+			want := Violation{
+				Field:  tc.field,
+				In:     ViolationInQuery,
+				Code:   ViolationCodeInvalid,
+				Detail: "is invalid",
+			}
+			if violation != want {
+				t.Fatalf("violation = %#v, want %#v", violation, want)
+			}
+		})
+	}
+}
+
+func TestValueBinder_EmptyStringVsMissing(t *testing.T) {
+	t.Run("query empty string is present for Bind", func(t *testing.T) {
+		// ?name= → 参数存在，值为空字符串，string 应绑定为 ""
+		req := httptest.NewRequest(http.MethodGet, "/items?name=", nil)
+
+		name := "original"
+		if err := QueryParamsBinder(req).String("name", &name).BindErrors(); err != nil {
+			t.Fatalf("BindErrors() error = %v", err)
+		}
+		if name != "" {
+			t.Fatalf("name = %q, want empty string", name)
+		}
+	})
+
+	t.Run("query missing is no-op for Bind", func(t *testing.T) {
+		// 完全不提供 name 参数 → 保持原值
+		req := httptest.NewRequest(http.MethodGet, "/items", nil)
+
+		name := "original"
+		if err := QueryParamsBinder(req).String("name", &name).BindErrors(); err != nil {
+			t.Fatalf("BindErrors() error = %v", err)
+		}
+		if name != "original" {
+			t.Fatalf("name = %q, want preserved original", name)
+		}
+	})
+
+	t.Run("query empty string is present for MustBind", func(t *testing.T) {
+		// ?name= → 参数存在，MustBind 不应报 required
+		req := httptest.NewRequest(http.MethodGet, "/items?name=", nil)
+
+		var name string
+		if err := QueryParamsBinder(req).MustString("name", &name).BindErrors(); err != nil {
+			t.Fatalf("BindErrors() error = %v, want no error for present-but-empty", err)
+		}
+		if name != "" {
+			t.Fatalf("name = %q, want empty string", name)
+		}
+	})
+
+	t.Run("query empty int is present and binds to zero", func(t *testing.T) {
+		// ?page= → 参数存在但值为空字符串，int 应绑定为 0（setIntField 将 "" 视为 "0"）
+		req := httptest.NewRequest(http.MethodGet, "/items?page=", nil)
+
+		page := 99
+		if err := QueryParamsBinder(req).Int("page", &page).BindErrors(); err != nil {
+			t.Fatalf("BindErrors() error = %v", err)
+		}
+		if page != 0 {
+			t.Fatalf("page = %d, want 0", page)
+		}
+	})
+}
+
 func TestValueBinder_TypedShorthands(t *testing.T) {
 	t.Run("optional methods", func(t *testing.T) {
 		wantUUID := uuid.New()
-		req := httptest.NewRequest(
+		req := httptest.NewRequest( // nolint:lll
 			http.MethodGet,
 			"/items?name=kanata&tags=a&tags=b&id=42&ids=1&ids=2&i64=7&i64s=8&i64s=9&u=5&us=6&us=7&enabled=true&flags=true&flags=false&price=10.5&prices=1.25&prices=2.5&custom=u_1&status=ready&uuid="+wantUUID.String()+"&at=2026-04-12T08:30:00Z&sec=1712910600&ms=1712910600123",
 			nil,
@@ -562,12 +832,120 @@ func TestValueBinder_FailFastFalseCollectsMultipleViolations(t *testing.T) {
 	}
 }
 
+func TestValueBinder_BindErrorVsBindErrors(t *testing.T) {
+	t.Run("BindError returns only first violation", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?page=oops", nil)
+
+		var (
+			page   int
+			cursor string
+		)
+		err := QueryParamsBinder(req).
+			FailFast(false).
+			Bind("page", &page).
+			MustBind("cursor", &cursor).
+			BindError()
+
+		violation := assertSingleViolation(t, err)
+		// BindError 应只返回第一个 violation（page invalid），不包含第二个（cursor required）
+		if violation.Field != "page" {
+			t.Fatalf("first violation field = %q, want page", violation.Field)
+		}
+		if violation.Code != ViolationCodeInvalid {
+			t.Fatalf("first violation code = %q, want %q", violation.Code, ViolationCodeInvalid)
+		}
+	})
+
+	t.Run("BindErrors returns all violations", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?page=oops", nil)
+
+		var (
+			page   int
+			cursor string
+		)
+		violations := assertViolations(t, QueryParamsBinder(req).
+			FailFast(false).
+			Bind("page", &page).
+			MustBind("cursor", &cursor).
+			BindErrors())
+
+		if len(violations) != 2 {
+			t.Fatalf("violations len = %d, want 2", len(violations))
+		}
+	})
+
+	t.Run("BindError on success returns nil", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?page=1", nil)
+
+		var page int
+		if err := QueryParamsBinder(req).Int("page", &page).BindError(); err != nil {
+			t.Fatalf("BindError() = %v, want nil", err)
+		}
+	})
+
+	t.Run("BindErrors on success returns nil", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?page=1", nil)
+
+		var page int
+		if err := QueryParamsBinder(req).Int("page", &page).BindErrors(); err != nil {
+			t.Fatalf("BindErrors() = %v, want nil", err)
+		}
+	})
+}
+
+func TestValueBinder_FailFastTrueReenablesStopOnFirst(t *testing.T) {
+	// FailFast(false) 聚合 → FailFast(true) 恢复 fail-fast
+	req := httptest.NewRequest(http.MethodGet, "/items?page=oops", nil)
+
+	var (
+		page   int
+		cursor string
+		limit  int
+	)
+	err := QueryParamsBinder(req).
+		FailFast(false).
+		FailFast(true). // 显式切回 fail-fast
+		Bind("page", &page).
+		MustBind("cursor", &cursor).
+		MustBind("limit", &limit).
+		BindErrors()
+
+	// fail-fast 应在 page invalid 后立即停止
+	violation := assertSingleViolation(t, err)
+	want := Violation{
+		Field:  "page",
+		In:     ViolationInQuery,
+		Code:   ViolationCodeInvalid,
+		Detail: "is invalid",
+	}
+	if violation != want {
+		t.Fatalf("violation = %#v, want %#v", violation, want)
+	}
+}
+
 func TestValueBinder_TimeHelpers_InvalidInputReturnsViolation(t *testing.T) {
-	t.Run("unix seconds invalid", func(t *testing.T) {
+	t.Run("unix seconds wrong digit count", func(t *testing.T) {
+		// 13 位时间戳传给 10 位 UnixTime → invalid
 		req := httptest.NewRequest(http.MethodGet, "/items?sec=1712910600123", nil)
 
 		var sec time.Time
 		violation := assertSingleViolation(t, QueryParamsBinder(req).MustUnixTime("sec", &sec).BindErrors())
+		want := Violation{
+			Field:  "sec",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "is invalid",
+		}
+		if violation != want {
+			t.Fatalf("violation = %#v, want %#v", violation, want)
+		}
+	})
+
+	t.Run("unix seconds non-numeric", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?sec=abcdefghij", nil)
+
+		var sec time.Time
+		violation := assertSingleViolation(t, QueryParamsBinder(req).UnixTime("sec", &sec).BindErrors())
 		want := Violation{
 			Field:  "sec",
 			In:     ViolationInQuery,
@@ -597,6 +975,23 @@ func TestValueBinder_TimeHelpers_InvalidInputReturnsViolation(t *testing.T) {
 
 	t.Run("unix millis invalid", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?ms=bad", nil)
+
+		var ms time.Time
+		violation := assertSingleViolation(t, QueryParamsBinder(req).UnixMilliTime("ms", &ms).BindErrors())
+		want := Violation{
+			Field:  "ms",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "is invalid",
+		}
+		if violation != want {
+			t.Fatalf("violation = %#v, want %#v", violation, want)
+		}
+	})
+
+	t.Run("unix millis wrong digit count", func(t *testing.T) {
+		// 10 位时间戳传给 13 位 UnixMilliTime → invalid
+		req := httptest.NewRequest(http.MethodGet, "/items?ms=1712910600", nil)
 
 		var ms time.Time
 		violation := assertSingleViolation(t, QueryParamsBinder(req).UnixMilliTime("ms", &ms).BindErrors())
@@ -646,18 +1041,20 @@ func TestValueBinder_TimeHelpers_InvalidInputReturnsViolation(t *testing.T) {
 		if err == nil || err.Error() != "reqx: request must not be nil" {
 			t.Fatalf("nil request error = %v", err)
 		}
+		assertNotHTTPError(t, err)
 
 		req := httptest.NewRequest(http.MethodGet, "/items?at=2026-04-12T08:30:00Z", nil)
 		err = QueryParamsBinder(req).Time("at", nil).BindError()
 		if err == nil || err.Error() != "reqx: destination must be a non-nil pointer" {
 			t.Fatalf("nil destination error = %v", err)
 		}
+		assertNotHTTPError(t, err)
 	})
 
 	t.Run("nil binder and fail-fast skip", func(t *testing.T) {
 		var (
 			binder *ValueBinder
-			at     time.Time
+			at     = time.Unix(1, 0).UTC()
 		)
 		if got := binder.Time("at", &at); got != nil {
 			t.Fatalf("Time(nil) = %#v, want nil", got)
@@ -672,6 +1069,84 @@ func TestValueBinder_TimeHelpers_InvalidInputReturnsViolation(t *testing.T) {
 		if violation.Field != "page" || violation.In != ViolationInQuery || violation.Code != ViolationCodeInvalid {
 			t.Fatalf("violation = %#v", violation)
 		}
+		if got := at.Format(time.RFC3339); got != "1970-01-01T00:00:01Z" {
+			t.Fatalf("at = %q, want preserved value when fail-fast skips MustTime", got)
+		}
+	})
+}
+
+func TestValueBinder_UnixTimeBoundaryValues(t *testing.T) {
+	t.Run("epoch zero is valid unix seconds", func(t *testing.T) {
+		// 0000000000 = 10 位全零 = Unix epoch
+		req := httptest.NewRequest(http.MethodGet, "/items?sec=0000000000", nil)
+
+		var sec time.Time
+		if err := QueryParamsBinder(req).UnixTime("sec", &sec).BindErrors(); err != nil {
+			t.Fatalf("BindErrors() error = %v", err)
+		}
+		if got := sec.UTC().Format(time.RFC3339); got != "1970-01-01T00:00:00Z" {
+			t.Fatalf("sec = %q, want 1970-01-01T00:00:00Z", got)
+		}
+	})
+
+	t.Run("negative unix seconds is valid", func(t *testing.T) {
+		// 负数时间戳：-000000001 = 1 个负号 + 9 位数字，总长度正好 10。
+		// parseFixedWidthTimestamp 只校验字符串总长度，因此该值会被当作合法秒级时间戳解析。
+		req := httptest.NewRequest(http.MethodGet, "/items?sec=-000000001", nil)
+
+		var sec time.Time
+		if err := QueryParamsBinder(req).UnixTime("sec", &sec).BindErrors(); err != nil {
+			t.Fatalf("BindErrors() error = %v", err)
+		}
+		if got := sec.UTC().Format(time.RFC3339); got != "1969-12-31T23:59:59Z" {
+			t.Fatalf("sec = %q, want 1969-12-31T23:59:59Z", got)
+		}
+	})
+
+	t.Run("epoch zero is valid unix millis", func(t *testing.T) {
+		// 0000000000000 = 13 位全零 = Unix epoch
+		req := httptest.NewRequest(http.MethodGet, "/items?ms=0000000000000", nil)
+
+		var ms time.Time
+		if err := QueryParamsBinder(req).UnixMilliTime("ms", &ms).BindErrors(); err != nil {
+			t.Fatalf("BindErrors() error = %v", err)
+		}
+		if got := ms.UTC().Format(time.RFC3339); got != "1970-01-01T00:00:00Z" {
+			t.Fatalf("ms = %q, want 1970-01-01T00:00:00Z", got)
+		}
+	})
+
+	t.Run("negative unix millis is valid", func(t *testing.T) {
+		// 负数毫秒时间戳：-000000000001 = 1 个负号 + 12 位数字，总长度正好 13。
+		req := httptest.NewRequest(http.MethodGet, "/items?ms=-000000000001", nil)
+
+		var ms time.Time
+		if err := QueryParamsBinder(req).UnixMilliTime("ms", &ms).BindErrors(); err != nil {
+			t.Fatalf("BindErrors() error = %v", err)
+		}
+		if got := ms.UTC().Format(time.RFC3339Nano); got != "1969-12-31T23:59:59.999Z" {
+			t.Fatalf("ms = %q, want 1969-12-31T23:59:59.999Z", got)
+		}
+	})
+
+	t.Run("9 digit unix seconds is invalid", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?sec=171291060", nil)
+
+		var sec time.Time
+		violation := assertSingleViolation(t, QueryParamsBinder(req).UnixTime("sec", &sec).BindErrors())
+		if violation.Code != ViolationCodeInvalid {
+			t.Fatalf("violation = %#v, want invalid code", violation)
+		}
+	})
+
+	t.Run("11 digit unix seconds is invalid", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?sec=17129106001", nil)
+
+		var sec time.Time
+		violation := assertSingleViolation(t, QueryParamsBinder(req).UnixTime("sec", &sec).BindErrors())
+		if violation.Code != ViolationCodeInvalid {
+			t.Fatalf("violation = %#v, want invalid code", violation)
+		}
 	})
 }
 
@@ -682,6 +1157,7 @@ func TestValueBinder_UsageErrors(t *testing.T) {
 		if err == nil {
 			t.Fatal("BindError() = nil, want usage error")
 		}
+		assertNotHTTPError(t, err)
 		if got := err.Error(); got != "reqx: request must not be nil" {
 			t.Fatalf("error = %q, want reqx-prefixed nil request error", got)
 		}
@@ -697,6 +1173,7 @@ func TestValueBinder_UsageErrors(t *testing.T) {
 		if err == nil {
 			t.Fatal("BindError() = nil, want usage error")
 		}
+		assertNotHTTPError(t, err)
 		if got := err.Error(); got != "reqx: destination must be a non-nil pointer" {
 			t.Fatalf("error = %q, want destination pointer error", got)
 		}
@@ -711,6 +1188,7 @@ func TestValueBinder_UsageErrors(t *testing.T) {
 		if err == nil {
 			t.Fatal("BindError() = nil, want usage error")
 		}
+		assertNotHTTPError(t, err)
 		if got := err.Error(); got != "reqx: destination must not be nil" {
 			t.Fatalf("error = %q, want destination nil error", got)
 		}
@@ -729,6 +1207,7 @@ func TestValueBinder_UsageErrors(t *testing.T) {
 		if err == nil {
 			t.Fatal("BindError() = nil, want usage error")
 		}
+		assertNotHTTPError(t, err)
 		if got := err.Error(); got != "reqx: binder must be created with PathValuesBinder or QueryParamsBinder" {
 			t.Fatalf("error = %q, want zero-value binder error", got)
 		}
@@ -744,6 +1223,7 @@ func TestValueBinder_UsageErrors(t *testing.T) {
 		if err == nil {
 			t.Fatal("BindError() = nil, want usage error")
 		}
+		assertNotHTTPError(t, err)
 		if got := err.Error(); got != "reqx: binder must be created with PathValuesBinder or QueryParamsBinder" {
 			t.Fatalf("error = %q, want zero-value binder error", got)
 		}
@@ -757,6 +1237,7 @@ func TestValueBinder_UsageErrors(t *testing.T) {
 		if err == nil {
 			t.Fatal("BindError() = nil, want usage error")
 		}
+		assertNotHTTPError(t, err)
 		if got := err.Error(); got != "reqx: destination type struct {} is not supported" {
 			t.Fatalf("error = %q, want unsupported destination error", got)
 		}
