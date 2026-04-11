@@ -16,7 +16,7 @@ import (
 // 测试清单：
 // [✓] 根包 facade 会把 bind / reqx / resp 的核心能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
-// [✓] 根包绑定 facade 维持新的公开导出面，不额外暴露旧 path helper / bind option
+// [✓] 根包 facade 同时透传 reqx 的 request helper、bind 的绑定入口与 resp 的响应入口
 // [✓] README 中承诺的 create account handler 主路径有根包级端到端测试支撑
 
 type rootPayloadMap map[string]any
@@ -126,6 +126,46 @@ func TestBindHeaders_DelegatesToBind(t *testing.T) {
 	}
 	if dst.RequestID != "req-123" {
 		t.Fatalf("request_id = %q, want req-123", dst.RequestID)
+	}
+}
+
+// From 会通过根包 facade 暴露 reqx 的原始 request helper。
+func TestFrom_DelegatesToReqx(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts?page=2", nil)
+	req = withRouteParam(req, "id", "u_1")
+
+	reader := From(req)
+	if got := reader.PathParam("id"); got != "u_1" {
+		t.Fatalf("PathParam(id) = %q, want u_1", got)
+	}
+	if got := reader.QueryParam("page"); got != "2" {
+		t.Fatalf("QueryParam(page) = %q, want 2", got)
+	}
+}
+
+// PathParam 会通过根包 facade 暴露 reqx 的 typed path getter。
+func TestPathParam_DelegatesToReqx(t *testing.T) {
+	req := newRouteRequest(http.MethodGet, "/accounts/42", "id", "42")
+
+	got, err := PathParam[int](req, "id")
+	if err != nil {
+		t.Fatalf("PathParam() error = %v", err)
+	}
+	if got != 42 {
+		t.Fatalf("PathParam() = %d, want 42", got)
+	}
+}
+
+// QueryParam 会通过根包 facade 暴露 reqx 的 typed query getter。
+func TestQueryParam_DelegatesToReqx(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts?page=42", nil)
+
+	got, err := QueryParam[int](req, "page")
+	if err != nil {
+		t.Fatalf("QueryParam() error = %v", err)
+	}
+	if got != 42 {
+		t.Fatalf("QueryParam() = %d, want 42", got)
 	}
 }
 

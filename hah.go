@@ -15,6 +15,8 @@ type (
 	DefaultBinder = bind.DefaultBinder
 	// BindUnmarshaler 允许字段从单个字符串输入值自定义解码。
 	BindUnmarshaler = bind.BindUnmarshaler
+	// Request 提供面向 *http.Request 的轻量读取视图，不包装 handler 语义。
+	Request = reqx.Request
 	// RequestValidator 允许 DTO 在 binding 之后声明请求级规则。
 	RequestValidator = reqx.RequestValidator
 	// Normalizer 允许 DTO 在校验前做标准化处理。
@@ -22,6 +24,11 @@ type (
 	// ErrorResponder 协调错误收敛、错误响应写回与 5xx 独立错误日志。
 	ErrorResponder = resp.ErrorResponder
 )
+
+// From 返回一个可直接读取 path/query 参数的请求视图。
+func From(r *http.Request) Request {
+	return reqx.From(r)
+}
 
 // Bind 按默认顺序绑定请求数据：path -> query(GET/DELETE/HEAD) -> body。
 func Bind(r *http.Request, target any) error {
@@ -46,6 +53,16 @@ func BindPathValues(r *http.Request, target any) error {
 // BindHeaders 只从 header 绑定数据。
 func BindHeaders(r *http.Request, target any) error {
 	return bind.BindHeaders(r, target)
+}
+
+// PathParam 按当前请求参数转换规则读取并解析单个 path 参数。
+func PathParam[T any](r *http.Request, name string) (T, error) {
+	return reqx.PathParam[T](r, name)
+}
+
+// QueryParam 按当前请求参数转换规则读取并解析单个 query 参数。
+func QueryParam[T any](r *http.Request, name string) (T, error) {
+	return reqx.QueryParam[T](r, name)
 }
 
 // BindAndValidate 绑定后执行 Normalize、请求级规则和字段校验。

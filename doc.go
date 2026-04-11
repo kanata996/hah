@@ -7,6 +7,7 @@
 //   - 可定制错误响应器 ErrorResponder
 //
 // 公开 API：
+//   - request helper：Request、From、PathParam、QueryParam
 //   - 绑定入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
 //   - 绑定相关类型：Binder、DefaultBinder、BindUnmarshaler
 //   - 绑定并校验入口：BindAndValidate、BindAndValidateBody、

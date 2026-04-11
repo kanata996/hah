@@ -11,6 +11,7 @@
 ## 特性
 
 - 面向 `net/http` 设计，保留标准 handler 和 router 控制权
+- 支持通过根包 facade 直接读取 path/query 参数
 - 支持把 path、query、header、body `Bind` 到 DTO
 - 提供默认组合入口：`Bind` -> Normalize -> `RequestValidator` -> `validator/v10`
 - 把常见请求违规收敛为稳定的公开 HTTP 错误
@@ -54,7 +55,7 @@ import (
 
 - `hah`：根包 facade，聚合常用的绑定、校验和响应写回入口
 - `bind`：请求绑定层，负责 path/query/header/body 到目标值的映射
-- `reqx`：请求规则与校验层，负责 `Normalize`、`RequestValidator` 和 `validator/v10`
+- `reqx`：请求 helper、请求规则与校验层，负责 `PathParam` / `QueryParam`、`Normalize`、`RequestValidator` 和 `validator/v10`
 - `errx`：共享公共 HTTP 错误模型
 - `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
 
@@ -122,6 +123,10 @@ func main() {
 
 ## 根包常用 API
 
+- `Request`
+- `From`
+- `PathParam`
+- `QueryParam`
 - `Bind`
 - `BindBody`
 - `BindQueryParams`

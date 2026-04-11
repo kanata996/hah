@@ -13,6 +13,12 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+### Added
+
+- Added Echo-style request helpers to `reqx` while keeping the library `net/http`-first: raw `From(r).PathParam(...)` / `QueryParam(...)` readers plus typed `reqx.PathParam[T](...)` and `reqx.QueryParam[T](...)`.
+- Exposed the same request-helper entry points from the root `hah` facade: `Request`, `From`, `PathParam[T]`, and `QueryParam[T]`.
+- Kept the `bind` package focused on DTO binding only; the new request-parameter helpers live in `reqx` instead of the binding layer.
+
 ## [v0.3.2] - 2026-04-10
 
 ### Highlights
