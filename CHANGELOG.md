@@ -13,6 +13,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.3.3] - 2026-04-11
+
 ### Added
 
 - Added Echo-style request helpers to `reqx` while keeping the library `net/http`-first: raw `From(r).PathParam(...)` / `QueryParam(...)` readers plus typed `reqx.PathParam[T](...)` and `reqx.QueryParam[T](...)`.
