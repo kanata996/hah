@@ -140,7 +140,7 @@ func main() {
 
 ## 来源绑定与校验
 
-- `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders`
+- `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders` / `bind.BindBody`
 - `reqx.Validate(..., reqx.SourceQuery)` / `reqx.SourcePath` / `reqx.SourceHeader` / `reqx.SourceBody`
 
 ## 请求输入文档
