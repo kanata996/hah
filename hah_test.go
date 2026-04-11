@@ -3,7 +3,6 @@ package hah
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,35 +15,10 @@ import (
 // 测试清单：
 // [✓] 根包 facade 会把 bind / reqx / resp 的核心能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
-// [✓] 根包绑定 facade 维持新的公开导出面，不额外暴露旧 path helper / bind option
+// [✓] 根包 facade 只暴露当前主路径 API：Bind、BindBody、PathParam、QueryParam、BindAndValidate、RequireBody 与响应入口
 // [✓] README 中承诺的 create account handler 主路径有根包级端到端测试支撑
 
 type rootPayloadMap map[string]any
-
-type rootRequestValidatorBodyRequiredRequest struct {
-	Name *string `json:"name"`
-}
-
-func (*rootRequestValidatorBodyRequiredRequest) ValidateRequest(r *http.Request) error {
-	return RequireBody(r)
-}
-
-// BindAndValidateBody 会通过根包 facade 把 body 绑定和校验委托给 reqx。
-func TestBindAndValidateBody_DelegatesToReqx(t *testing.T) {
-	req := newJSONRequest(http.MethodPost, "/accounts", `{"name":"kanata"}`)
-
-	var dst struct {
-		Name string `json:"name" validate:"required"`
-	}
-
-	err := BindAndValidateBody(req, &dst)
-	if err != nil {
-		t.Fatalf("BindAndValidateBody() error = %v", err)
-	}
-	if dst.Name != "kanata" {
-		t.Fatalf("name = %q, want kanata", dst.Name)
-	}
-}
 
 // Bind 会通过根包 facade 复用 bind 包的默认绑定顺序。
 func TestBind_DelegatesToBind(t *testing.T) {
@@ -80,52 +54,29 @@ func TestBindBody_DelegatesToBind(t *testing.T) {
 	}
 }
 
-// BindQueryParams 只从 query 参数绑定数据。
-func TestBindQueryParams_DelegatesToBind(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts?name=kanata", nil)
+// PathParam 会通过根包 facade 暴露 reqx 的 typed path getter。
+func TestPathParam_DelegatesToReqx(t *testing.T) {
+	req := newRouteRequest(http.MethodGet, "/accounts/42", "id", "42")
 
-	var dst struct {
-		Name string `query:"name"`
+	got, err := PathParam[int](req, "id")
+	if err != nil {
+		t.Fatalf("PathParam() error = %v", err)
 	}
-
-	if err := BindQueryParams(req, &dst); err != nil {
-		t.Fatalf("BindQueryParams() error = %v", err)
-	}
-	if dst.Name != "kanata" {
-		t.Fatalf("name = %q, want kanata", dst.Name)
+	if got != 42 {
+		t.Fatalf("PathParam() = %d, want 42", got)
 	}
 }
 
-// BindPathValues 只从 path 参数绑定数据。
-func TestBindPathValues_DelegatesToBind(t *testing.T) {
-	req := newRouteRequest(http.MethodGet, "/accounts/u_1", "id", "u_1")
+// QueryParam 会通过根包 facade 暴露 reqx 的 typed query getter。
+func TestQueryParam_DelegatesToReqx(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts?page=42", nil)
 
-	var dst struct {
-		ID string `param:"id"`
+	got, err := QueryParam[int](req, "page")
+	if err != nil {
+		t.Fatalf("QueryParam() error = %v", err)
 	}
-
-	if err := BindPathValues(req, &dst); err != nil {
-		t.Fatalf("BindPathValues() error = %v", err)
-	}
-	if dst.ID != "u_1" {
-		t.Fatalf("id = %q, want u_1", dst.ID)
-	}
-}
-
-// BindHeaders 会通过根包 facade 把 header 绑定委托给 bind。
-func TestBindHeaders_DelegatesToBind(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
-	req.Header.Set("X-Request-Id", "req-123")
-
-	var dst struct {
-		RequestID string `header:"x-request-id"`
-	}
-
-	if err := BindHeaders(req, &dst); err != nil {
-		t.Fatalf("BindHeaders() error = %v", err)
-	}
-	if dst.RequestID != "req-123" {
-		t.Fatalf("request_id = %q, want req-123", dst.RequestID)
+	if got != 42 {
+		t.Fatalf("QueryParam() = %d, want 42", got)
 	}
 }
 
@@ -150,79 +101,14 @@ func TestBindAndValidate_DelegatesToReqx(t *testing.T) {
 	}
 }
 
-// BindAndValidateBody 会通过根包 facade 执行请求级规则。
-func TestBindAndValidateBody_DelegatesRequestValidator(t *testing.T) {
+// RequireBody 会通过根包 facade 暴露 reqx 的 body-required 规则 helper。
+func TestRequireBody_DelegatesToReqx(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/accounts", "")
 	req.ContentLength = -1
 
-	var dst rootRequestValidatorBodyRequiredRequest
-	err := BindAndValidateBody(req, &dst)
-
-	var httpErr *errx.HTTPError
-	if !errors.As(err, &httpErr) || httpErr == nil {
-		t.Fatalf("error type = %T, want *errx.HTTPError", err)
-	}
-	if httpErr.Status() != http.StatusUnprocessableEntity || httpErr.Code() != "invalid_request" || httpErr.Detail() != "request contains invalid fields" {
-		t.Fatalf("http error = (%d, %q, %q)", httpErr.Status(), httpErr.Code(), httpErr.Detail())
-	}
-	if len(httpErr.Errors()) != 1 {
-		t.Fatalf("errors len = %d, want 1", len(httpErr.Errors()))
-	}
-	violation, ok := httpErr.Errors()[0].(reqx.Violation)
-	if !ok {
-		t.Fatalf("detail type = %T, want reqx.Violation", httpErr.Errors()[0])
-	}
+	violation := assertSingleRootViolation(t, RequireBody(req))
 	if violation.Field != "body" || violation.In != reqx.ViolationInBody || violation.Code != reqx.ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
-	}
-}
-
-// BindAndValidateQuery 会从 query 参数绑定后再执行校验。
-func TestBindAndValidateQuery_DelegatesToReqx(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts?name=kanata", nil)
-
-	var dst struct {
-		Name string `query:"name" validate:"required"`
-	}
-
-	if err := BindAndValidateQuery(req, &dst); err != nil {
-		t.Fatalf("BindAndValidateQuery() error = %v", err)
-	}
-	if dst.Name != "kanata" {
-		t.Fatalf("name = %q, want kanata", dst.Name)
-	}
-}
-
-// BindAndValidatePath 会从 path 参数绑定后再执行校验。
-func TestBindAndValidatePath_DelegatesToReqx(t *testing.T) {
-	req := newRouteRequest(http.MethodGet, "/accounts/u_1", "id", "u_1")
-
-	var dst struct {
-		ID string `param:"id" validate:"required"`
-	}
-
-	if err := BindAndValidatePath(req, &dst); err != nil {
-		t.Fatalf("BindAndValidatePath() error = %v", err)
-	}
-	if dst.ID != "u_1" {
-		t.Fatalf("id = %q, want u_1", dst.ID)
-	}
-}
-
-// BindAndValidateHeaders 会从 header 绑定后再执行校验。
-func TestBindAndValidateHeaders_DelegatesToReqx(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
-	req.Header.Set("X-Request-Id", "req-123")
-
-	var dst struct {
-		RequestID string `header:"x-request-id" validate:"required"`
-	}
-
-	if err := BindAndValidateHeaders(req, &dst); err != nil {
-		t.Fatalf("BindAndValidateHeaders() error = %v", err)
-	}
-	if dst.RequestID != "req-123" {
-		t.Fatalf("request_id = %q, want req-123", dst.RequestID)
 	}
 }
 
@@ -382,4 +268,44 @@ func decodeRootPayload(t *testing.T, body []byte) rootPayloadMap {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 	return payload
+}
+
+func assertSingleRootViolation(t *testing.T, err error) reqx.Violation {
+	t.Helper()
+
+	payload := decodeRootPayload(t, mustWriteRootError(t, err))
+	errorsValue, ok := payload["errors"].([]any)
+	if !ok || len(errorsValue) != 1 {
+		t.Fatalf("errors = %#v, want single violation", payload["errors"])
+	}
+
+	violationMap, ok := errorsValue[0].(map[string]any)
+	if !ok {
+		t.Fatalf("violation type = %T, want map[string]any", errorsValue[0])
+	}
+
+	return reqx.Violation{
+		Field:  stringValue(violationMap["field"]),
+		In:     stringValue(violationMap["in"]),
+		Code:   stringValue(violationMap["code"]),
+		Detail: stringValue(violationMap["detail"]),
+	}
+}
+
+func mustWriteRootError(t *testing.T, err error) []byte {
+	t.Helper()
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	if writeErr := WriteError(rr, req, err); writeErr != nil {
+		t.Fatalf("WriteError() error = %v", writeErr)
+	}
+	return rr.Body.Bytes()
+}
+
+func stringValue(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }

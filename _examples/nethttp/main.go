@@ -198,7 +198,7 @@ func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
 	var req accountPathRequest
-	if err := hah.BindAndValidatePath(r, &req); err != nil {
+	if err := hah.BindAndValidate(r, &req); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}
@@ -216,7 +216,7 @@ func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	var req accountPathRequest
-	if err := hah.BindAndValidatePath(r, &req); err != nil {
+	if err := hah.BindAndValidate(r, &req); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}

@@ -7,16 +7,16 @@
 //   - 可定制错误响应器 ErrorResponder
 //
 // 公开 API：
-//   - 绑定入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
-//   - 绑定相关类型：Binder、DefaultBinder、BindUnmarshaler
-//   - 绑定并校验入口：BindAndValidate、BindAndValidateBody、
-//     BindAndValidateQuery、BindAndValidatePath、BindAndValidateHeaders
+//   - request helper：PathParam、QueryParam
+//   - 绑定入口：Bind、BindBody
+//   - 绑定相关类型：BindUnmarshaler
+//   - 绑定并校验入口：BindAndValidate
 //   - DTO 扩展点：RequestValidator、Normalizer
 //   - 请求级规则 helper：RequireBody
 //   - 错误响应入口：WriteError
 //   - 自定义错误响应器：ErrorResponder、NewErrorResponder
 //   - 成功响应入口：JSON、JSONBlob、OK、Created、NoContent
 //
-// 根包只暴露最常用的 facade；如果你需要更细粒度的包级 API，
+// 根包只暴露最常用的 facade；如果你需要显式来源绑定或来源感知校验，
 // 请直接导入 bind、reqx、errx 或 resp。
 package hah

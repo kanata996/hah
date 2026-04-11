@@ -13,6 +13,18 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-04-11
+
+### Breaking
+
+- Simplified the root `hah` facade to the main happy-path APIs: `Bind`, `BindBody`, `PathParam`, `QueryParam`, `BindAndValidate`, `RequireBody`, and response helpers. Source-specific bind/validate entry points now live in `bind` and `reqx`.
+- Removed `bind.Binder` and `bind.DefaultBinder`; use the package-level `bind.Bind(...)` entry point directly.
+- Removed `reqx.Request`, `reqx.From`, and the source-specific `reqx.BindAndValidateBody/Query/Path/Headers` wrappers.
+
+### Added
+
+- Added `reqx.Validate(r, target, reqx.Source*)` for source-aware validation after explicit `bind.Bind*` calls.
+
 ## [v0.3.2] - 2026-04-10
 
 ### Highlights

@@ -9,7 +9,7 @@
 - 用 `traceid.Middleware` 生成/透传 `TraceId`，并把它带到 `httplog` 和 `slog` 上下文
 - 用 `httplog/v3` 输出结构化 access log，并补 `request.id`
 - 在 handler 入口把 `chi.RouteContext` 显式桥接到 `net/http` `PathValue` / `Pattern` 契约
-- `DELETE` 路由额外演示 `hah.BindAndValidateHeaders(...)` 的 header 绑定
+- `DELETE` 路由额外演示 `bind.BindHeaders(...) + reqx.Validate(..., reqx.SourceHeader)` 的 header 绑定与校验
 
 主要路由：
 
@@ -24,7 +24,7 @@
 1. `middleware.RequestID` 生成 request ID，`traceid.Middleware` 生成或透传 `TraceId`。
 2. `httplog/v3` 输出结构化 request log，并记录 `request.id` / `trace.id`。
 3. handler 入口先把 `chi.RouteContext` 回填到 `net/http` 的 `PathValue` / `Pattern` 契约。
-4. handler 用 `hah.BindAndValidate(...)`、`hah.BindAndValidatePath(...)`、`hah.BindAndValidateHeaders(...)` 处理输入。
+4. handler 默认用 `hah.BindAndValidate(...)` 处理输入；需要显式 header 校验时，组合 `bind.BindHeaders(...)` 与 `reqx.Validate(..., reqx.SourceHeader)`。
 5. 领域层直接返回 `errx` 公共错误；失败路径统一走 `hah.WriteError(...)`。
 6. 成功路径统一走 `hah.OK(...)`、`hah.Created(...)` 和 `hah.NoContent(...)`。
 

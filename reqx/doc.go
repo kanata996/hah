@@ -1,18 +1,20 @@
 // Package reqx 为基于 net/http 的 JSON API 提供请求级规则与校验组合层。
 //
 // 它聚焦在 binding 之后的输入治理：
+//   - 直接读取 path/query 参数，并提供 typed request helper
 //   - 在字段校验前执行 Normalize
 //   - 允许 DTO 通过 RequestValidator 声明请求级规则
 //   - 使用 validator/v10 校验绑定后的输入
 //   - 将常见请求违规统一收敛为稳定的 HTTP 错误
 //
 // 典型用法：
-//   - 只做请求绑定时，使用 bind.Bind* 或 hah.Bind*
-//   - 需要 binding + request-rules + validate 时，使用 BindAndValidate*
+//   - 只做请求绑定时，使用 bind.Bind* 或 hah.Bind / hah.BindBody
+//   - 需要默认 mixed-source 绑定 + 校验时，使用 BindAndValidate
+//   - 需要显式来源绑定 + 校验时，组合 bind.Bind* 与 Validate(..., Source*)
 //
 // 公开 API：
-//   - 绑定并校验入口：BindAndValidate、BindAndValidateBody、
-//     BindAndValidateQuery、BindAndValidatePath、BindAndValidateHeaders
+//   - request helper：PathParam、QueryParam
+//   - 校验入口：BindAndValidate、Validate、Source
 //   - DTO 扩展点：RequestValidator、Normalizer
 //   - 请求级规则 helper：RequireBody、InvalidRequest
 //   - 公开错误码常量：CodeInvalidRequest
@@ -22,7 +24,7 @@
 //   - 公开 violation in 常量：ViolationInBody、ViolationInQuery、
 //     ViolationInPath、ViolationInHeader、ViolationInRequest
 //
-// BindAndValidate* 的目标约束：
+// BindAndValidate / Validate 的目标约束：
 //   - 组合入口最终会执行结构校验，因此目标必须是非 nil 的 *struct
 //   - 这与 bind.BindBody(...) 可绑定到 slice、map 等 JSON 目标的能力不同
 //

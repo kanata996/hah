@@ -3,14 +3,13 @@ package bind
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
 // - [✓] 公开 Bind* 入口在 nil request 或 nil destination 下返回稳定错误。
-// - [✓] DefaultBinder、默认配置和 Bind 编排辅助维持稳定内部契约。
+// - [✓] 默认配置和 Bind 编排辅助维持稳定内部契约。
 // - [✓] Bind 的默认顺序、方法规则和 header 排除语义。
 // - [✓] Bind 在 empty body no-op 和阶段失败时保留前序已写入值。
 
 import (
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"testing"
 )
 
@@ -91,74 +90,6 @@ func TestDefaultBindConfig(t *testing.T) {
 	if !cfg.body.allowUnknownFields {
 		t.Fatal("body.allowUnknownFields = false, want true")
 	}
-}
-
-func TestDefaultBinder_MatchesBindPublicContract(t *testing.T) {
-	t.Run("success path matches Bind", func(t *testing.T) {
-		type request struct {
-			ID   string `param:"id" query:"id" json:"id"`
-			Page int    `query:"page"`
-			Name string `json:"name"`
-		}
-
-		newRequest := func() *http.Request {
-			req := requestWithPathParams(map[string][]string{
-				"id": {"route-id"},
-			})
-			req.Method = http.MethodGet
-			req.URL.RawQuery = "id=query-id&page=7"
-			setRequestBody(req, mimeApplicationJSON, `{"id":"body-id","name":"kanata"}`)
-			return req
-		}
-
-		var binder DefaultBinder
-
-		var got request
-		gotErr := binder.Bind(newRequest(), &got)
-
-		var want request
-		wantErr := Bind(newRequest(), &want)
-
-		if !sameHTTPError(gotErr, wantErr) {
-			t.Fatalf("DefaultBinder.Bind() error = %v, want %v", gotErr, wantErr)
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("DefaultBinder.Bind() result = %#v, want %#v", got, want)
-		}
-	})
-
-	t.Run("stage failure matches Bind", func(t *testing.T) {
-		type request struct {
-			ID   string `param:"id"`
-			Page int    `query:"page"`
-			Age  int    `json:"age"`
-		}
-
-		newRequest := func() *http.Request {
-			req := requestWithPathParams(map[string][]string{
-				"id": {"route-id"},
-			})
-			req.Method = http.MethodGet
-			req.URL.RawQuery = "page=7"
-			setRequestBody(req, mimeApplicationJSON, `{"age":"oops"}`)
-			return req
-		}
-
-		var binder DefaultBinder
-
-		got := request{ID: "existing-id", Page: 3, Age: 1}
-		gotErr := binder.Bind(newRequest(), &got)
-
-		want := request{ID: "existing-id", Page: 3, Age: 1}
-		wantErr := Bind(newRequest(), &want)
-
-		if !sameHTTPError(gotErr, wantErr) {
-			t.Fatalf("DefaultBinder.Bind() error = %v, want %v", gotErr, wantErr)
-		}
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("DefaultBinder.Bind() result = %#v, want %#v", got, want)
-		}
-	})
 }
 
 func TestBind_InternalBranches(t *testing.T) {

@@ -1,8 +1,9 @@
 // Package bind 为基于 net/http 的 JSON API 提供请求绑定能力。
 //
 // 它只负责把 HTTP 输入映射到目标值，不处理 Normalize、请求级规则或字段校验。
-// 如果需要“绑定 + 请求级规则 + 结构校验”的组合入口，请使用 reqx 或根包 hah 的
-// BindAndValidate* 系列。
+// 如果需要“绑定 + 请求级规则 + 结构校验”的组合方式，请先调用 bind.Bind*
+// 完成来源绑定，再调用 reqx.Validate(...)；默认 mixed-source 场景可直接使用
+// 根包 hah 的 BindAndValidate(...)。
 //
 // 当前支持的数据源：
 //   - query：query 参数
@@ -19,7 +20,7 @@
 //
 // 公开 API：
 //   - 绑定入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
-//   - binder 相关类型：Binder、DefaultBinder、BindUnmarshaler
+//   - 自定义解码接口：BindUnmarshaler
 //   - 公开错误码常量：CodeInvalidJSON、CodeUnsupportedMediaType、CodeRequestTooLarge
 //
 // 默认 Bind 顺序固定为：path -> query(GET/DELETE/HEAD) -> body。
@@ -33,6 +34,6 @@
 // 为避免把不该由请求写入的字段暴露给外部输入，建议为 binding 单独定义 DTO，
 // 再显式映射到业务对象，而不是直接把业务 struct 作为绑定目标。
 //
-// 根包 hah 对这组 API 提供了薄封装：hah.Bind、hah.BindBody、
-// hah.BindQueryParams、hah.BindPathValues、hah.BindHeaders。
+// 根包 hah 只对最常用的绑定入口提供 facade：hah.Bind、hah.BindBody。
+// 如需显式处理 query/path/header 等单一来源，请直接导入 bind 包。
 package bind

@@ -17,7 +17,9 @@ import (
 	httplog "github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/hah"
+	"github.com/kanata996/hah/bind"
 	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/reqx"
 )
 
 type account struct {
@@ -292,7 +294,7 @@ func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
 	bridgeChiPathValues(r)
 
 	var req accountPathRequest
-	if err := hah.BindAndValidatePath(r, &req); err != nil {
+	if err := hah.BindAndValidate(r, &req); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}
@@ -312,13 +314,17 @@ func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	bridgeChiPathValues(r)
 
 	var pathReq accountPathRequest
-	if err := hah.BindAndValidatePath(r, &pathReq); err != nil {
+	if err := hah.BindAndValidate(r, &pathReq); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}
 
 	var headers deleteAccountHeaders
-	if err := hah.BindAndValidateHeaders(r, &headers); err != nil {
+	if err := bind.BindHeaders(r, &headers); err != nil {
+		_ = hah.WriteError(w, r, err)
+		return
+	}
+	if err := reqx.Validate(r, &headers, reqx.SourceHeader); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}

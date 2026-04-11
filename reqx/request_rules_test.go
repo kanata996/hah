@@ -14,7 +14,7 @@ import (
 // - [✓] `RequireBody` 会沿用默认 binder 的 empty-body 判定并返回统一 invalid_request。
 // - [✓] `InvalidRequest` 会维持公开 invalid_request 包络与常见 violation code 的稳定契约。
 // - [✓] `applyRequestValidation` 会维持请求级规则 helper 的稳定契约。
-// - [✓] `BindAndValidate*` 会在字段校验之前执行请求级规则，并允许规则读取 Normalize 后的 DTO。
+// - [✓] `BindAndValidate` 与 `bind + Validate(Source*)` 会在字段校验之前执行请求级规则，并允许规则读取 Normalize 后的 DTO。
 // - [✓] mixed-source DTO 可通过 `ValidateRequest` 为可选字段 body 显式声明 body-required 契约。
 
 type requestRuleNormalizedRequest struct {
@@ -160,8 +160,8 @@ func TestBindAndValidate_RequestValidatorReadsNormalizedDTO(t *testing.T) {
 	dst := requestRuleNormalizedRequest{events: &events}
 	req := newJSONRequest(http.MethodPost, "/", `{"name":"  kanata  "}`)
 
-	if err := BindAndValidateBody(req, &dst); err != nil {
-		t.Fatalf("BindAndValidateBody() error = %v", err)
+	if err := bindAndValidateBody(req, &dst); err != nil {
+		t.Fatalf("bindAndValidateBody() error = %v", err)
 	}
 	if dst.Name != "kanata" {
 		t.Fatalf("name = %q, want kanata", dst.Name)
@@ -175,7 +175,7 @@ func TestBindAndValidate_RequestValidatorRunsBeforeFieldValidation(t *testing.T)
 	req := newJSONRequest(http.MethodPost, "/", `{}`)
 	var dst requestRuleFailureRequest
 
-	err := BindAndValidateBody(req, &dst)
+	err := bindAndValidateBody(req, &dst)
 	if !errors.Is(err, errRequestRuleFailed) {
 		t.Fatalf("error = %v, want %v", err, errRequestRuleFailed)
 	}
