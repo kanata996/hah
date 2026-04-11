@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/kanata996/hah/errx"
 )
 
 type customParamValue struct {
@@ -167,6 +169,36 @@ func TestPathParam_BindsSupportedTypes(t *testing.T) {
 	})
 }
 
+func TestPathParam_PresentButEmptyValuesRemainPresent(t *testing.T) {
+	t.Run("empty int keeps pointer allocated", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"id": {""},
+		})
+
+		got, err := PathParam[*int](req, "id")
+		if err != nil {
+			t.Fatalf("PathParam[*int](empty) error = %v", err)
+		}
+		if got == nil || *got != 0 {
+			t.Fatalf("PathParam[*int](empty) = %#v, want pointer to 0", got)
+		}
+	})
+
+	t.Run("empty bool keeps pointer allocated", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{
+			"active": {""},
+		})
+
+		got, err := PathParam[*bool](req, "active")
+		if err != nil {
+			t.Fatalf("PathParam[*bool](empty) error = %v", err)
+		}
+		if got == nil || *got {
+			t.Fatalf("PathParam[*bool](empty) = %#v, want pointer to false", got)
+		}
+	})
+}
+
 func TestQueryParam_BindsSupportedTypes(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts?tag=a&tag=b&state=open", nil)
 
@@ -197,6 +229,30 @@ func TestQueryParam_BindsSupportedTypes(t *testing.T) {
 		}
 		if got != "a" {
 			t.Fatalf("QueryParam[string]() = %q, want a", got)
+		}
+	})
+
+	t.Run("bind unmarshaler uses first value", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/accounts?id=u_1&id=u_2", nil)
+
+		got, err := QueryParam[customParamValue](req, "id")
+		if err != nil {
+			t.Fatalf("QueryParam[customParamValue]() error = %v", err)
+		}
+		if got.value != "u_1" {
+			t.Fatalf("QueryParam[customParamValue]() = %#v, want value u_1", got)
+		}
+	})
+
+	t.Run("text unmarshaler uses first value", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/accounts?status=ready&status=later", nil)
+
+		got, err := QueryParam[customTextValue](req, "status")
+		if err != nil {
+			t.Fatalf("QueryParam[customTextValue]() error = %v", err)
+		}
+		if got != "ready" {
+			t.Fatalf("QueryParam[customTextValue]() = %q, want ready", got)
 		}
 	})
 }
@@ -237,6 +293,92 @@ func TestRequestParamHelpers_PointerTargets(t *testing.T) {
 		}
 		if got != nil {
 			t.Fatalf("QueryParam[*int](missing) = %#v, want nil", got)
+		}
+	})
+
+	t.Run("query bind unmarshaler pointer", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/accounts?id=u_1&id=u_2", nil)
+
+		got, err := QueryParam[*customParamValue](req, "id")
+		if err != nil {
+			t.Fatalf("QueryParam[*customParamValue]() error = %v", err)
+		}
+		if got == nil || got.value != "u_1" {
+			t.Fatalf("QueryParam[*customParamValue]() = %#v, want pointer with value u_1", got)
+		}
+	})
+
+	t.Run("query text unmarshaler pointer", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/accounts?status=ready&status=later", nil)
+
+		got, err := QueryParam[*customTextValue](req, "status")
+		if err != nil {
+			t.Fatalf("QueryParam[*customTextValue]() error = %v", err)
+		}
+		if got == nil || *got != "ready" {
+			t.Fatalf("QueryParam[*customTextValue]() = %#v, want pointer to ready", got)
+		}
+	})
+
+	t.Run("query multiple unmarshaler pointer", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/accounts?tag=a&tag=b", nil)
+
+		got, err := QueryParam[*customParamsValue](req, "tag")
+		if err != nil {
+			t.Fatalf("QueryParam[*customParamsValue]() error = %v", err)
+		}
+		if got == nil || len(got.values) != 2 || got.values[0] != "a" || got.values[1] != "b" {
+			t.Fatalf("QueryParam[*customParamsValue]() = %#v, want pointer with values [a b]", got)
+		}
+	})
+}
+
+func TestQueryParam_PresentButEmptyValuesRemainPresent(t *testing.T) {
+	t.Run("empty int keeps pointer allocated", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/accounts?page=", nil)
+
+		got, err := QueryParam[*int](req, "page")
+		if err != nil {
+			t.Fatalf("QueryParam[*int](empty) error = %v", err)
+		}
+		if got == nil || *got != 0 {
+			t.Fatalf("QueryParam[*int](empty) = %#v, want pointer to 0", got)
+		}
+	})
+
+	t.Run("empty bool keeps pointer allocated", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/accounts?active=", nil)
+
+		got, err := QueryParam[*bool](req, "active")
+		if err != nil {
+			t.Fatalf("QueryParam[*bool](empty) error = %v", err)
+		}
+		if got == nil || *got {
+			t.Fatalf("QueryParam[*bool](empty) = %#v, want pointer to false", got)
+		}
+	})
+
+	t.Run("empty float keeps pointer allocated", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/accounts?price=", nil)
+
+		got, err := QueryParam[*float64](req, "price")
+		if err != nil {
+			t.Fatalf("QueryParam[*float64](empty) error = %v", err)
+		}
+		if got == nil || *got != 0 {
+			t.Fatalf("QueryParam[*float64](empty) = %#v, want pointer to 0", got)
+		}
+	})
+
+	t.Run("empty slice preserves empty element", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/accounts?tag=", nil)
+
+		got, err := QueryParam[[]string](req, "tag")
+		if err != nil {
+			t.Fatalf("QueryParam[[]string](empty) error = %v", err)
+		}
+		if len(got) != 1 || got[0] != "" {
+			t.Fatalf("QueryParam[[]string](empty) = %#v, want [\"\"]", got)
 		}
 	})
 }
@@ -353,12 +495,27 @@ func TestRequestParamHelpers_InvalidPointerTargetsAreBadRequest(t *testing.T) {
 }
 
 func TestRequestParamHelpers_NilRequest(t *testing.T) {
-	if _, err := PathParam[string](nil, "id"); err == nil || err.Error() != "reqx: request must not be nil" {
-		t.Fatalf("PathParam(nil) error = %v", err)
+	assertNilRequestErr := func(t *testing.T, name string, err error) {
+		t.Helper()
+
+		if err == nil {
+			t.Fatalf("%s error = nil, want non-nil", name)
+		}
+
+		var httpErr *errx.HTTPError
+		if errors.As(err, &httpErr) {
+			t.Fatalf("%s error = %T, want non-HTTP usage error", name, err)
+		}
+		if !strings.HasPrefix(err.Error(), "reqx: ") {
+			t.Fatalf("%s error = %q, want reqx-prefixed message", name, err.Error())
+		}
 	}
-	if _, err := QueryParam[string](nil, "id"); err == nil || err.Error() != "reqx: request must not be nil" {
-		t.Fatalf("QueryParam(nil) error = %v", err)
-	}
+
+	_, pathErr := PathParam[string](nil, "id")
+	assertNilRequestErr(t, "PathParam(nil)", pathErr)
+
+	_, queryErr := QueryParam[string](nil, "id")
+	assertNilRequestErr(t, "QueryParam(nil)", queryErr)
 }
 
 func TestQueryParam_BindsScalarTypes(t *testing.T) {
