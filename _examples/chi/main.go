@@ -17,7 +17,6 @@ import (
 	httplog "github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/hah"
-	"github.com/kanata996/hah/bind"
 	"github.com/kanata996/hah/errx"
 	"github.com/kanata996/hah/reqx"
 )
@@ -320,7 +319,7 @@ func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var headers deleteAccountHeaders
-	if err := bind.BindHeaders(r, &headers); err != nil {
+	if err := hah.BindHeaders(r, &headers); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}

@@ -129,6 +129,9 @@ func main() {
 - `QueryParam`
 - `Bind`
 - `BindBody`
+- `BindQueryParams`
+- `BindPathValues`
+- `BindHeaders`
 - `BindAndValidate`
 - `RequireBody`
 - `WriteError`
@@ -142,6 +145,7 @@ func main() {
 
 ## 来源绑定与校验
 
+- `hah.BindQueryParams` / `hah.BindPathValues` / `hah.BindHeaders` / `hah.BindBody`
 - `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders` / `bind.BindBody`
 - `reqx.Validate(..., reqx.SourceQuery)` / `reqx.SourcePath` / `reqx.SourceHeader` / `reqx.SourceBody`
 

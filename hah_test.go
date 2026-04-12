@@ -17,7 +17,7 @@ import (
 // 测试清单：
 // [✓] 根包 facade 会把 bind / reqx / resp 的核心能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
-// [✓] 根包 facade 只暴露当前主路径 API：Bind、BindBody、Path、Query、PathParam、QueryParam、BindAndValidate、RequireBody 与响应入口
+// [✓] 根包 facade 公开常用绑定入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
 // [✓] README 中承诺的 create account handler 主路径有根包级端到端测试支撑
 
 type rootPayloadMap map[string]any
@@ -53,6 +53,55 @@ func TestBindBody_DelegatesToBind(t *testing.T) {
 	}
 	if dst.Name != "kanata" {
 		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
+}
+
+// BindQueryParams 只从 query 参数绑定数据。
+func TestBindQueryParams_DelegatesToBind(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts?cursor=next", nil)
+
+	var dst struct {
+		Cursor string `query:"cursor"`
+	}
+
+	if err := BindQueryParams(req, &dst); err != nil {
+		t.Fatalf("BindQueryParams() error = %v", err)
+	}
+	if dst.Cursor != "next" {
+		t.Fatalf("cursor = %q, want next", dst.Cursor)
+	}
+}
+
+// BindPathValues 只从 path 参数绑定数据。
+func TestBindPathValues_DelegatesToBind(t *testing.T) {
+	req := newRouteRequest(http.MethodGet, "/accounts/acct_123", "account_id", "acct_123")
+
+	var dst struct {
+		AccountID string `param:"account_id"`
+	}
+
+	if err := BindPathValues(req, &dst); err != nil {
+		t.Fatalf("BindPathValues() error = %v", err)
+	}
+	if dst.AccountID != "acct_123" {
+		t.Fatalf("account_id = %q, want acct_123", dst.AccountID)
+	}
+}
+
+// BindHeaders 只从 header 绑定数据。
+func TestBindHeaders_DelegatesToBind(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
+	req.Header.Set("X-Actor", "kanata")
+
+	var dst struct {
+		Actor string `header:"X-Actor"`
+	}
+
+	if err := BindHeaders(req, &dst); err != nil {
+		t.Fatalf("BindHeaders() error = %v", err)
+	}
+	if dst.Actor != "kanata" {
+		t.Fatalf("actor = %q, want kanata", dst.Actor)
 	}
 }
 

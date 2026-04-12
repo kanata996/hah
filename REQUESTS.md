@@ -15,7 +15,7 @@
 | 高级单字段读取 | `hah.PathParam` / `hah.QueryParam` | 适合只做 typed getter，或需要 pointer / slice / 自定义类型等低层语义 |
 | 标准 handler 的默认 happy path | `hah.BindAndValidate` | 默认执行 `path -> query(GET/DELETE/HEAD) -> body`，再做 Normalize / RequestValidator / validator |
 | 只做 body 绑定，不做校验 | `hah.BindBody` | 适合只需要 JSON 解码的场景 |
-| 显式只绑定 query / path / header / body | `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders` / `bind.BindBody` | source-specific binding |
+| 显式只绑定 query / path / header / body | `hah.BindQueryParams` / `hah.BindPathValues` / `hah.BindHeaders` / `hah.BindBody` | 常用 source-specific binding；底层实现仍在 `bind` 包 |
 | 显式只校验某一类来源 | `reqx.Validate(..., reqx.SourceQuery)` / `reqx.SourcePath` / `reqx.SourceHeader` / `reqx.SourceBody` | 通常和 `bind.Bind*` 配合使用 |
 | body 是否必须存在 | `reqx.RequireBody` | 适合在 `RequestValidator` 里声明 body-required 契约 |
 
@@ -140,26 +140,26 @@ if err := hah.Bind(r, &req); err != nil {
 
 ### 显式单一来源 binding
 
-当你只想绑定某一类来源时，直接用 `bind` 包：
+当你只想绑定某一类来源时，优先用根包 facade；需要 `bind` 的错误码常量或更底层类型时，再直接导入 `bind` 包：
 
 ```go
 var query ListAccountsQuery
-if err := bind.BindQueryParams(r, &query); err != nil {
+if err := hah.BindQueryParams(r, &query); err != nil {
 	return err
 }
 
 var path AccountPath
-if err := bind.BindPathValues(r, &path); err != nil {
+if err := hah.BindPathValues(r, &path); err != nil {
 	return err
 }
 
 var headers DeleteHeaders
-if err := bind.BindHeaders(r, &headers); err != nil {
+if err := hah.BindHeaders(r, &headers); err != nil {
 	return err
 }
 
 var body CreateAccountBody
-if err := bind.BindBody(r, &body); err != nil {
+if err := hah.BindBody(r, &body); err != nil {
 	return err
 }
 ```
@@ -225,11 +225,11 @@ if err := hah.BindAndValidate(r, &req); err != nil {
 
 ### 显式来源校验
 
-如果你显式用了 `bind.Bind*`，校验阶段应明确告诉 `reqx` 当前来源：
+如果你显式用了单一来源 binding，校验阶段应明确告诉 `reqx` 当前来源：
 
 ```go
 var headers DeleteHeaders
-if err := bind.BindHeaders(r, &headers); err != nil {
+if err := hah.BindHeaders(r, &headers); err != nil {
 	return err
 }
 if err := reqx.Validate(r, &headers, reqx.SourceHeader); err != nil {
@@ -370,7 +370,7 @@ type DeleteHeaders struct {
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	var headers DeleteHeaders
-	if err := bind.BindHeaders(r, &headers); err != nil {
+	if err := hah.BindHeaders(r, &headers); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}

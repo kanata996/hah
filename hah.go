@@ -31,6 +31,21 @@ func BindBody(r *http.Request, target any) error {
 	return bind.BindBody(r, target)
 }
 
+// BindQueryParams 只从 query 参数绑定数据。
+func BindQueryParams(r *http.Request, target any) error {
+	return bind.BindQueryParams(r, target)
+}
+
+// BindPathValues 只从 path 参数绑定数据。
+func BindPathValues(r *http.Request, target any) error {
+	return bind.BindPathValues(r, target)
+}
+
+// BindHeaders 只从 header 绑定数据。
+func BindHeaders(r *http.Request, target any) error {
+	return bind.BindHeaders(r, target)
+}
+
 // PathParam 按当前请求参数转换规则读取并解析单个 path 参数。
 func PathParam[T any](r *http.Request, name string) (T, error) {
 	return reqx.PathParam[T](r, name)

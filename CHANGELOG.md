@@ -13,6 +13,10 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+### Added
+
+- Re-exported `BindQueryParams(...)`, `BindPathValues(...)`, and `BindHeaders(...)` from the root `hah` facade so common source-specific binding flows no longer need a separate `bind` import.
+
 ## [v0.4.1] - 2026-04-13
 
 ### Added
