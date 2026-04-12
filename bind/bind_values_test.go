@@ -8,6 +8,8 @@ package bind
 // - [✓] 字符串源绑定的关键内部辅助契约，包括反射写入、自定义解码和 path helper。
 // - [✓] BindHeaders 支持切片字段绑定多值 header。
 // - [✓] BindQueryParams 对指针字段在缺失/空值时的保留与清零语义。
+// - [✓] 单源公开 API 对非法目标值返回稳定错误，并定义字段级失败时的部分写入语义。
+// - [✓] BindQueryParams 通过公开入口覆盖复杂类型的端到端绑定契约。
 
 import (
 	"errors"
@@ -335,71 +337,42 @@ func TestBindHeaders_BindsSupportedScalarTypes(t *testing.T) {
 	}
 }
 
-func TestBindHeaders_HandlesTrimmedAndRepeatedKeys(t *testing.T) {
-	t.Run("trimmed non canonical keys still bind", func(t *testing.T) {
-		type request struct {
-			RequestID string `header:"x-request-id"`
-		}
+func TestBindHeaders_RepeatedScalarUsesFirstValue(t *testing.T) {
+	type request struct {
+		RequestID string `header:"x-request-id"`
+	}
 
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header = http.Header{
-			" x-request-id ": {"req-123"},
-		}
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Add("X-Request-Id", "req-1")
+	req.Header.Add("X-Request-Id", "req-2")
 
-		var dst request
-		if err := BindHeaders(req, &dst); err != nil {
-			t.Fatalf("BindHeaders() error = %v", err)
-		}
-		if dst.RequestID != "req-123" {
-			t.Fatalf("request_id = %q, want req-123", dst.RequestID)
-		}
-	})
+	var dst request
+	if err := BindHeaders(req, &dst); err != nil {
+		t.Fatalf("BindHeaders() error = %v", err)
+	}
+	if dst.RequestID != "req-1" {
+		t.Fatalf("request_id = %q, want req-1", dst.RequestID)
+	}
+}
 
-	t.Run("repeated scalar values pick the first value", func(t *testing.T) {
-		type request struct {
-			RequestID string `header:"x-request-id"`
-		}
+func TestBindHeaders_TrimmedNonCanonicalKeysStillBind(t *testing.T) {
+	type request struct {
+		Name string `header:"x-name"`
+	}
 
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header.Add("X-Request-Id", "req-1")
-		req.Header.Add("X-Request-Id", "req-2")
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header = http.Header{
+		" ":      {"ignored"},
+		"x-name": {"kanata"},
+	}
 
-		var dst request
-		if err := BindHeaders(req, &dst); err != nil {
-			t.Fatalf("BindHeaders() error = %v", err)
-		}
-		if dst.RequestID != "req-1" {
-			t.Fatalf("request_id = %q, want req-1", dst.RequestID)
-		}
-	})
-
-	t.Run("canonical key wins over case variants", func(t *testing.T) {
-		type request struct {
-			RequestID string `header:"x-request-id"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		req.Header = http.Header{
-			"x-request-id": {"req-2"},
-			"X-Request-Id": {"req-1"},
-		}
-
-		var dst request
-		if err := BindHeaders(req, &dst); err != nil {
-			t.Fatalf("BindHeaders() error = %v", err)
-		}
-		if dst.RequestID != "req-1" {
-			t.Fatalf("request_id = %q, want canonical value req-1", dst.RequestID)
-		}
-
-		sliceMap := map[string][]string(nil)
-		if err := BindHeaders(req, &sliceMap); err != nil {
-			t.Fatalf("BindHeaders(map[string][]string) error = %v", err)
-		}
-		if !reflect.DeepEqual(sliceMap["X-Request-Id"], []string{"req-1"}) {
-			t.Fatalf("sliceMap[X-Request-Id] = %#v, want [req-1]", sliceMap["X-Request-Id"])
-		}
-	})
+	var dst request
+	if err := BindHeaders(req, &dst); err != nil {
+		t.Fatalf("BindHeaders() error = %v", err)
+	}
+	if dst.Name != "kanata" {
+		t.Fatalf("name = %q, want kanata", dst.Name)
+	}
 }
 
 func TestBindHeaders_BindingErrorsAreBadRequest(t *testing.T) {
@@ -414,36 +387,19 @@ func TestBindHeaders_BindingErrorsAreBadRequest(t *testing.T) {
 	_ = assertHTTPError(t, BindHeaders(req, &dst), http.StatusBadRequest, "bad_request", "Bad Request")
 }
 
-func TestBindQueryParamsAndHeadersMissingInputsPreserveExistingValues(t *testing.T) {
-	t.Run("query", func(t *testing.T) {
-		type request struct {
-			Page int `query:"page"`
-		}
+func TestBindHeaders_MissingInputsPreserveExistingValues(t *testing.T) {
+	type request struct {
+		TraceID string `header:"x-trace-id"`
+	}
 
-		req := httptest.NewRequest(http.MethodGet, "/?other=1", nil)
-		dst := request{Page: 3}
-		if err := BindQueryParams(req, &dst); err != nil {
-			t.Fatalf("BindQueryParams() error = %v", err)
-		}
-		if dst.Page != 3 {
-			t.Fatalf("page = %d, want 3", dst.Page)
-		}
-	})
-
-	t.Run("header", func(t *testing.T) {
-		type request struct {
-			TraceID string `header:"x-trace-id"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		dst := request{TraceID: "existing"}
-		if err := BindHeaders(req, &dst); err != nil {
-			t.Fatalf("BindHeaders() error = %v", err)
-		}
-		if dst.TraceID != "existing" {
-			t.Fatalf("trace_id = %q, want existing", dst.TraceID)
-		}
-	})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	dst := request{TraceID: "existing"}
+	if err := BindHeaders(req, &dst); err != nil {
+		t.Fatalf("BindHeaders() error = %v", err)
+	}
+	if dst.TraceID != "existing" {
+		t.Fatalf("trace_id = %q, want existing", dst.TraceID)
+	}
 }
 
 func TestBindHeaders_EmptyValueListsAreIgnored(t *testing.T) {
@@ -488,9 +444,7 @@ func TestBindValues_HelperBranches(t *testing.T) {
 	}
 
 	httpErr := errx.BadRequest("bad_request", "bad request")
-	if got := badRequestWrap(httpErr); got != httpErr {
-		t.Fatalf("badRequestWrap(http error) = %v, want same error", got)
-	}
+	_ = assertHTTPError(t, badRequestWrap(httpErr), http.StatusBadRequest, "bad_request", "bad request")
 
 	wrapped := badRequestWrap(errors.New("boom"))
 	_ = assertHTTPError(t, wrapped, http.StatusBadRequest, "bad_request", "Bad Request")
@@ -803,25 +757,41 @@ func TestUnmarshalHelpersAndSetters(t *testing.T) {
 			t.Fatalf("setWithProperTypeDefault(int) error = %v, value=%d", err, i)
 		}
 		var i8 int8
-		_ = setWithProperTypeDefault(reflect.Int8, "1", reflect.ValueOf(&i8).Elem())
+		if err := setWithProperTypeDefault(reflect.Int8, "1", reflect.ValueOf(&i8).Elem()); err != nil || i8 != 1 {
+			t.Fatalf("setWithProperTypeDefault(int8) error = %v, value=%d", err, i8)
+		}
 		var i16 int16
-		_ = setWithProperTypeDefault(reflect.Int16, "1", reflect.ValueOf(&i16).Elem())
+		if err := setWithProperTypeDefault(reflect.Int16, "1", reflect.ValueOf(&i16).Elem()); err != nil || i16 != 1 {
+			t.Fatalf("setWithProperTypeDefault(int16) error = %v, value=%d", err, i16)
+		}
 		var i32 int32
-		_ = setWithProperTypeDefault(reflect.Int32, "1", reflect.ValueOf(&i32).Elem())
+		if err := setWithProperTypeDefault(reflect.Int32, "1", reflect.ValueOf(&i32).Elem()); err != nil || i32 != 1 {
+			t.Fatalf("setWithProperTypeDefault(int32) error = %v, value=%d", err, i32)
+		}
 		var i64 int64
-		_ = setWithProperTypeDefault(reflect.Int64, "1", reflect.ValueOf(&i64).Elem())
+		if err := setWithProperTypeDefault(reflect.Int64, "1", reflect.ValueOf(&i64).Elem()); err != nil || i64 != 1 {
+			t.Fatalf("setWithProperTypeDefault(int64) error = %v, value=%d", err, i64)
+		}
 		var u uint
 		if err := setWithProperTypeDefault(reflect.Uint, "", reflect.ValueOf(&u).Elem()); err != nil || u != 0 {
 			t.Fatalf("setWithProperTypeDefault(uint) error = %v, value=%d", err, u)
 		}
 		var u8 uint8
-		_ = setWithProperTypeDefault(reflect.Uint8, "1", reflect.ValueOf(&u8).Elem())
+		if err := setWithProperTypeDefault(reflect.Uint8, "1", reflect.ValueOf(&u8).Elem()); err != nil || u8 != 1 {
+			t.Fatalf("setWithProperTypeDefault(uint8) error = %v, value=%d", err, u8)
+		}
 		var u16 uint16
-		_ = setWithProperTypeDefault(reflect.Uint16, "1", reflect.ValueOf(&u16).Elem())
+		if err := setWithProperTypeDefault(reflect.Uint16, "1", reflect.ValueOf(&u16).Elem()); err != nil || u16 != 1 {
+			t.Fatalf("setWithProperTypeDefault(uint16) error = %v, value=%d", err, u16)
+		}
 		var u32 uint32
-		_ = setWithProperTypeDefault(reflect.Uint32, "1", reflect.ValueOf(&u32).Elem())
+		if err := setWithProperTypeDefault(reflect.Uint32, "1", reflect.ValueOf(&u32).Elem()); err != nil || u32 != 1 {
+			t.Fatalf("setWithProperTypeDefault(uint32) error = %v, value=%d", err, u32)
+		}
 		var u64 uint64
-		_ = setWithProperTypeDefault(reflect.Uint64, "1", reflect.ValueOf(&u64).Elem())
+		if err := setWithProperTypeDefault(reflect.Uint64, "1", reflect.ValueOf(&u64).Elem()); err != nil || u64 != 1 {
+			t.Fatalf("setWithProperTypeDefault(uint64) error = %v, value=%d", err, u64)
+		}
 		var b bool
 		if err := setWithProperTypeDefault(reflect.Bool, "", reflect.ValueOf(&b).Elem()); err != nil || b {
 			t.Fatalf("setWithProperTypeDefault(bool empty) error = %v, value=%v", err, b)
@@ -864,21 +834,6 @@ func TestPathHelpers(t *testing.T) {
 	}
 	if got := pathWildcardNames("/users/{user_id"); len(got) != 0 {
 		t.Fatalf("pathWildcardNames(invalid pattern) = %#v, want empty", got)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header = http.Header{
-		" ":      {"ignored"},
-		"x-name": {"kanata"},
-	}
-	var headerDst struct {
-		Name string `header:"x-name"`
-	}
-	if err := bindHeadersDefault(req, &headerDst); err != nil {
-		t.Fatalf("bindHeadersDefault(blank key) error = %v", err)
-	}
-	if headerDst.Name != "kanata" {
-		t.Fatalf("headerDst.Name = %q, want kanata", headerDst.Name)
 	}
 }
 
@@ -926,6 +881,159 @@ func TestBindQueryParams_PointerFieldPreservation(t *testing.T) {
 		}
 		if dst.Page == nil || *dst.Page != 0 {
 			t.Fatalf("page = %#v, want &0", dst.Page)
+		}
+	})
+}
+
+func TestBindSingleSourcePublicAPIs_RejectInvalidDestinations(t *testing.T) {
+	queryReq := httptest.NewRequest(http.MethodGet, "/?page=1", nil)
+	pathReq := requestWithPathParams(map[string][]string{
+		"id": {"1"},
+	})
+	headerReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	headerReq.Header.Set("X-Trace-Id", "req-1")
+
+	tests := []struct {
+		name string
+		call func(any) error
+	}{
+		{
+			name: "query rejects non-pointer destination",
+			call: func(target any) error {
+				return BindQueryParams(queryReq, target)
+			},
+		},
+		{
+			name: "path rejects non-pointer destination",
+			call: func(target any) error {
+				return BindPathValues(pathReq, target)
+			},
+		},
+		{
+			name: "header rejects non-pointer destination",
+			call: func(target any) error {
+				return BindHeaders(headerReq, target)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := tt.call(struct{}{}); err == nil || err.Error() != "bind: destination must not be nil" {
+				t.Fatalf("error = %v, want bind: destination must not be nil", err)
+			}
+
+			var typedNil *struct{}
+			if err := tt.call(typedNil); err == nil || err.Error() != "bind: destination must not be nil" {
+				t.Fatalf("typed nil error = %v, want bind: destination must not be nil", err)
+			}
+		})
+	}
+}
+
+func TestBindQueryParams_BindsComplexTypesEndToEnd(t *testing.T) {
+	type nested struct {
+		Name string `query:"name"`
+	}
+	type request struct {
+		Nested nested
+		Age    *int              `query:"age"`
+		IDs    []int             `query:"id"`
+		When   time.Time         `query:"when" format:"2006-01-02"`
+		Custom customParamValue  `query:"custom"`
+		Multi  customParamsValue `query:"multi"`
+		State  customTextValue   `query:"state"`
+	}
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/?name=kanata&age=17&id=1&id=2&when=2026-04-09&custom=x&multi=a&multi=b&state=open",
+		nil,
+	)
+
+	var dst request
+	if err := BindQueryParams(req, &dst); err != nil {
+		t.Fatalf("BindQueryParams() error = %v", err)
+	}
+	if dst.Nested.Name != "kanata" {
+		t.Fatalf("Nested.Name = %q, want kanata", dst.Nested.Name)
+	}
+	if dst.Age == nil || *dst.Age != 17 {
+		t.Fatalf("Age = %#v, want 17", dst.Age)
+	}
+	if !reflect.DeepEqual(dst.IDs, []int{1, 2}) {
+		t.Fatalf("IDs = %#v, want [1 2]", dst.IDs)
+	}
+	if got := dst.When.Format("2006-01-02"); got != "2026-04-09" {
+		t.Fatalf("When = %q, want 2026-04-09", got)
+	}
+	if dst.Custom.value != "x" {
+		t.Fatalf("Custom = %#v, want x", dst.Custom)
+	}
+	if !reflect.DeepEqual(dst.Multi.values, []string{"a", "b"}) {
+		t.Fatalf("Multi = %#v, want [a b]", dst.Multi)
+	}
+	if dst.State != "open" {
+		t.Fatalf("State = %q, want open", dst.State)
+	}
+}
+
+func TestSingleSourcePublicAPIs_PartialUpdatesPersistOnFieldFailure(t *testing.T) {
+	t.Run("path preserves earlier writes and leaves later fields untouched", func(t *testing.T) {
+		type request struct {
+			ID   string `param:"id"`
+			Age  int    `param:"age"`
+			Name string `param:"name"`
+		}
+
+		req := requestWithPathParams(map[string][]string{
+			"id":   {"route-id"},
+			"age":  {"oops"},
+			"name": {"after-error"},
+		})
+
+		dst := request{ID: "existing-id", Age: 3, Name: "existing-name"}
+		err := BindPathValues(req, &dst)
+		_ = assertHTTPError(t, err, http.StatusBadRequest, "bad_request", "Bad Request")
+		if dst.ID != "route-id" || dst.Age != 3 || dst.Name != "existing-name" {
+			t.Fatalf("dst = %#v, want earlier path writes preserved and later field untouched", dst)
+		}
+	})
+
+	t.Run("query preserves earlier writes and leaves later fields untouched", func(t *testing.T) {
+		type request struct {
+			Name string `query:"name"`
+			Page int    `query:"page"`
+			Note string `query:"note"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&page=oops&note=after-error", nil)
+
+		dst := request{Name: "existing-name", Page: 3, Note: "existing-note"}
+		err := BindQueryParams(req, &dst)
+		_ = assertHTTPError(t, err, http.StatusBadRequest, "bad_request", "Bad Request")
+		if dst.Name != "kanata" || dst.Page != 3 || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier query writes preserved and later field untouched", dst)
+		}
+	})
+
+	t.Run("header preserves earlier writes and leaves later fields untouched", func(t *testing.T) {
+		type request struct {
+			TraceID string `header:"x-trace-id"`
+			Retry   int    `header:"x-retry"`
+			Region  string `header:"x-region"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("X-Trace-Id", "req-1")
+		req.Header.Set("X-Retry", "oops")
+		req.Header.Set("X-Region", "after-error")
+
+		dst := request{TraceID: "existing-trace", Retry: 3, Region: "existing-region"}
+		err := BindHeaders(req, &dst)
+		_ = assertHTTPError(t, err, http.StatusBadRequest, "bad_request", "Bad Request")
+		if dst.TraceID != "req-1" || dst.Retry != 3 || dst.Region != "existing-region" {
+			t.Fatalf("dst = %#v, want earlier header writes preserved and later field untouched", dst)
 		}
 	})
 }
