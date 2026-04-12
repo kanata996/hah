@@ -123,10 +123,10 @@ func main() {
 
 ## 根包常用 API
 
+- `Path`
+- `Query`
 - `PathParam`
 - `QueryParam`
-- `PathValuesBinder`
-- `QueryParamsBinder`
 - `Bind`
 - `BindBody`
 - `BindAndValidate`

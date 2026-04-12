@@ -13,21 +13,16 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
-## [v0.4.1] - 2026-04-12
+## [v0.4.1] - 2026-04-13
 
 ### Added
 
-- Added `reqx.ValueBinder` plus the `reqx.PathValuesBinder(...)` and `reqx.QueryParamsBinder(...)` entry points for source-specific single-field path/query binding with source-aware `required` / `invalid` violations.
-- Re-exported `ValueBinder`, `PathValuesBinder(...)`, and `QueryParamsBinder(...)` from the root `hah` facade so the new single-field binding flow is available without leaving the main package.
-- Added typed `ValueBinder` shorthands for common scalar, slice, `uuid.UUID`, custom unmarshaler, and explicit time parsing flows (`RFC3339`, Unix seconds, Unix milliseconds).
-
-### Fixed
-
-- Hardened `ValueBinder` usage errors so zero-value binders fail with a clear `reqx:` error instead of panicking, and unsupported destination types are surfaced as binder misuse instead of being reported back as client-side `invalid_request` violations.
+- Added `reqx.Path(...)` and `reqx.Query(...)` as single-parameter path/query readers with common validation shortcuts such as `Required`, `Default`, `Min`, `Max`, `OneOf`, `Match`, `Before`, `After`, and `Check`.
+- Re-exported `Path(...)` and `Query(...)` from the root `hah` facade.
 
 ### Documentation
 
-- Documented the new source-specific value-binder workflow in `README.md`, `REQUESTS.md`, and `reqx` package docs, and added end-to-end and contract-style regression coverage around the new API surface.
+- Reframed the request-input docs around two main paths: single-parameter `reqx.Path/Query` builders and DTO-oriented `bind` / `BindAndValidate`.
 
 ## [v0.4.0] - 2026-04-11
 

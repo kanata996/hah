@@ -7,7 +7,7 @@
 //   - 可定制错误响应器 ErrorResponder
 //
 // 公开 API：
-//   - request helper：PathParam、QueryParam
+//   - request helper：Path、Query、PathParam、QueryParam
 //   - 绑定入口：Bind、BindBody
 //   - 绑定相关类型：BindUnmarshaler
 //   - 绑定并校验入口：BindAndValidate

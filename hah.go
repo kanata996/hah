@@ -15,8 +15,8 @@ type (
 	RequestValidator = reqx.RequestValidator
 	// Normalizer 允许 DTO 在校验前做标准化处理。
 	Normalizer = reqx.Normalizer
-	// ValueBinder 提供 path/query 单字段链式绑定与 source-aware violation 收集。
-	ValueBinder = reqx.ValueBinder
+	// Param 表示一个待解析的 path/query 单参数。
+	Param = reqx.Param
 	// ErrorResponder 协调错误收敛、错误响应写回与 5xx 独立错误日志。
 	ErrorResponder = resp.ErrorResponder
 )
@@ -41,14 +41,14 @@ func QueryParam[T any](r *http.Request, name string) (T, error) {
 	return reqx.QueryParam[T](r, name)
 }
 
-// PathValuesBinder 创建 path 参数值绑定器。
-func PathValuesBinder(r *http.Request) *ValueBinder {
-	return reqx.PathValuesBinder(r)
+// Path 创建 path 单参数读取与校验 builder。
+func Path(r *http.Request, name string) *Param {
+	return reqx.Path(r, name)
 }
 
-// QueryParamsBinder 创建 query 参数值绑定器。
-func QueryParamsBinder(r *http.Request) *ValueBinder {
-	return reqx.QueryParamsBinder(r)
+// Query 创建 query 单参数读取与校验 builder。
+func Query(r *http.Request, name string) *Param {
+	return reqx.Query(r, name)
 }
 
 // BindAndValidate 绑定后执行 Normalize、请求级规则和字段校验。

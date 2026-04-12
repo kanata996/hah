@@ -11,8 +11,8 @@
 
 | 目标 | 推荐 API | 说明 |
 | --- | --- | --- |
-| 只取 1 到 2 个 path / query 参数 | `hah.PathParam` / `hah.QueryParam` | 适合轻量读取，不必定义 DTO |
-| 单字段 path / query 需要 `required` / `invalid` violation | `hah.PathValuesBinder` / `hah.QueryParamsBinder` | 适合不定义 DTO，但希望保留 source-aware 结构化错误 |
+| 单字段 path / query 读取并顺手做常见验证 | `hah.Path` / `hah.Query` | 适合不定义 DTO，但希望直接返回 source-aware `required` / `invalid` 错误 |
+| 高级单字段读取 | `hah.PathParam` / `hah.QueryParam` | 适合只做 typed getter，或需要 pointer / slice / 自定义类型等低层语义 |
 | 标准 handler 的默认 happy path | `hah.BindAndValidate` | 默认执行 `path -> query(GET/DELETE/HEAD) -> body`，再做 Normalize / RequestValidator / validator |
 | 只做 body 绑定，不做校验 | `hah.BindBody` | 适合只需要 JSON 解码的场景 |
 | 显式只绑定 query / path / header / body | `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders` / `bind.BindBody` | source-specific binding |
@@ -32,9 +32,9 @@ cursor := r.URL.Query().Get("cursor")
 
 这类读取保持 `net/http` 原生形态，不额外包装 request reader 类型。
 
-### typed path / query helper
+### 单参数读取与常见验证
 
-如果你需要的是“直接拿到目标类型”，优先用 `reqx` 或根包 facade：
+如果你不想定义 DTO，但希望 path/query 单字段读取时直接得到 `required` / `invalid` 风格错误，优先用 `reqx` 或根包 facade：
 
 ```go
 import (
@@ -43,13 +43,21 @@ import (
 )
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	accountID, err := hah.PathParam[uuid.UUID](r, "account_id")
+	accountID, err := hah.Path(r, "account_id").
+		UUID().
+		Required().
+		Get()
 	if err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}
 
-	limit, err := hah.QueryParam[int](r, "limit")
+	limit, err := hah.Query(r, "limit").
+		Int().
+		Default(20).
+		Min(1).
+		Max(100).
+		Get()
 	if err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
@@ -61,57 +69,30 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 几个公开语义需要注意：
 
-- 缺失值返回零值；例如 `QueryParam[int]` 缺失时返回 `0`
-- 如果要区分“缺失”和“有值”，用指针类型，例如 `QueryParam[*uuid.UUID]`
-- query 多值支持 slice：`?tag=a&tag=b` 可以用 `QueryParam[[]string](r, "tag")`
-- 对标量目标，重复 query 只取第一个值
-- 支持 `bind.BindUnmarshaler` 和 `encoding.TextUnmarshaler`
+- `Path(r, name)` / `Query(r, name)` 先指定来源，再选择类型，例如 `String()`、`Int()`、`UUID()`、`Time()`
+- `Required()`：参数缺失时返回 `required` violation
+- `Default(v)`：参数缺失时使用默认值；与 `Required()` 互斥
+- 常见快捷校验直接链式表达，例如 `Min`、`Max`、`MinLen`、`MaxLen`、`OneOf`、`Match`、`Before`、`After`
+- `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` violation
+- `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
+- `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
 
-例如：
+### typed path / query helper
+
+如果你需要的是“只做 typed getter，不附带快捷校验 DSL”，保留低层 helper：
 
 ```go
 tags, err := hah.QueryParam[[]string](r, "tag")
 cursor, err := hah.QueryParam[*uuid.UUID](r, "cursor")
 ```
 
-### source-specific value binder
-
-如果你不想定义 DTO，但希望 path/query 单字段错误返回 `Violation` 风格，可以用 `ValueBinder`：
-
-```go
-var (
-	accountID uuid.UUID
-	limit     int
-)
-
-if err := hah.PathValuesBinder(r).
-	MustBind("account_id", &accountID).
-	BindErrors(); err != nil {
-	_ = hah.WriteError(w, r, err)
-	return
-}
-
-if err := hah.QueryParamsBinder(r).
-	Bind("limit", &limit).
-	BindErrors(); err != nil {
-	_ = hah.WriteError(w, r, err)
-	return
-}
-```
-
 几个公开语义需要注意：
 
-- `Bind(name, &dst)`：参数缺失时 no-op
-- `MustBind(name, &dst)`：参数缺失时返回 `required` violation
-- 常用目标可直接用 typed shorthand，例如 `MustString`、`MustInt`、`MustStrings`、`MustUUID`
-- 时间支持显式格式方法：
-  - `Time` / `MustTime`：RFC3339
-  - `UnixTime` / `MustUnixTime`：10 位秒级 Unix 时间戳
-  - `UnixMilliTime` / `MustUnixMilliTime`：13 位毫秒级 Unix 时间戳
-- 参数存在但解析失败时，返回 `invalid` violation
-- `PathValuesBinder` 的 `in` 固定为 `path`；`QueryParamsBinder` 的 `in` 固定为 `query`
-- 默认 `FailFast(true)`；如果需要一次收集多个字段错误，显式调用 `FailFast(false)`
-- `BindError()` 返回首个错误；`BindErrors()` 返回聚合后的 `invalid_request`
+- 缺失值返回零值；例如 `QueryParam[int]` 缺失时返回 `0`
+- 如果要区分“缺失”和“有值”，用指针类型，例如 `QueryParam[*uuid.UUID]`
+- query 多值支持 slice：`?tag=a&tag=b` 可以用 `QueryParam[[]string](r, "tag")`
+- 对标量目标，重复 query 只取第一个值
+- 支持 `bind.BindUnmarshaler` 和 `encoding.TextUnmarshaler`
 
 ## 用 `bind` 绑定 DTO
 
