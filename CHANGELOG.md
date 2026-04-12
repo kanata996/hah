@@ -13,16 +13,13 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
-### Added
-
-- Re-exported `BindQueryParams(...)`, `BindPathValues(...)`, and `BindHeaders(...)` from the root `hah` facade so common source-specific binding flows no longer need a separate `bind` import.
-
 ## [v0.4.1] - 2026-04-13
 
 ### Added
 
 - Added `reqx.Path(...)` and `reqx.Query(...)` as single-parameter path/query readers with common validation shortcuts such as `Required`, `Default`, `Min`, `Max`, `OneOf`, `Match`, `Before`, `After`, and `Check`.
 - Re-exported `Path(...)` and `Query(...)` from the root `hah` facade.
+- Re-exported `BindQueryParams(...)`, `BindPathValues(...)`, and `BindHeaders(...)` from the root `hah` facade so common source-specific binding flows no longer need a separate `bind` import.
 
 ### Documentation
 
