@@ -11,10 +11,11 @@
 
 | 目标 | 推荐 API | 说明 |
 | --- | --- | --- |
-| 只取 1 到 2 个 path / query 参数 | `hah.PathParam` / `hah.QueryParam` | 适合轻量读取，不必定义 DTO |
+| 单字段 path / query 读取并顺手做常见验证 | `hah.Path` / `hah.Query` | 适合不定义 DTO，但希望直接返回 source-aware `required` / `invalid` 错误 |
+| 高级单字段读取 | `hah.PathParam` / `hah.QueryParam` | 适合只做 typed getter，或需要 pointer / slice / 自定义类型等低层语义 |
 | 标准 handler 的默认 happy path | `hah.BindAndValidate` | 默认执行 `path -> query(GET/DELETE/HEAD) -> body`，再做 Normalize / RequestValidator / validator |
 | 只做 body 绑定，不做校验 | `hah.BindBody` | 适合只需要 JSON 解码的场景 |
-| 显式只绑定 query / path / header / body | `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders` / `bind.BindBody` | source-specific binding |
+| 显式只绑定 query / path / header / body | `hah.BindQueryParams` / `hah.BindPathValues` / `hah.BindHeaders` / `hah.BindBody` | 常用 source-specific binding；底层实现仍在 `bind` 包 |
 | 显式只校验某一类来源 | `reqx.Validate(..., reqx.SourceQuery)` / `reqx.SourcePath` / `reqx.SourceHeader` / `reqx.SourceBody` | 通常和 `bind.Bind*` 配合使用 |
 | body 是否必须存在 | `reqx.RequireBody` | 适合在 `RequestValidator` 里声明 body-required 契约 |
 
@@ -31,9 +32,9 @@ cursor := r.URL.Query().Get("cursor")
 
 这类读取保持 `net/http` 原生形态，不额外包装 request reader 类型。
 
-### typed path / query helper
+### 单参数读取与常见验证
 
-如果你需要的是“直接拿到目标类型”，优先用 `reqx` 或根包 facade：
+如果你不想定义 DTO，但希望 path/query 单字段读取时直接得到 `required` / `invalid` 风格错误，优先用 `reqx` 或根包 facade：
 
 ```go
 import (
@@ -42,13 +43,21 @@ import (
 )
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	accountID, err := hah.PathParam[uuid.UUID](r, "account_id")
+	accountID, err := hah.Path(r, "account_id").
+		UUID().
+		Required().
+		Get()
 	if err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}
 
-	limit, err := hah.QueryParam[int](r, "limit")
+	limit, err := hah.Query(r, "limit").
+		Int().
+		Default(20).
+		Min(1).
+		Max(100).
+		Get()
 	if err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
@@ -60,18 +69,31 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 几个公开语义需要注意：
 
-- 缺失值返回零值；例如 `QueryParam[int]` 缺失时返回 `0`
-- 如果要区分“缺失”和“有值”，用指针类型，例如 `QueryParam[*uuid.UUID]`
-- query 多值支持 slice：`?tag=a&tag=b` 可以用 `QueryParam[[]string](r, "tag")`
-- 对标量目标，重复 query 只取第一个值
-- 支持 `bind.BindUnmarshaler` 和 `encoding.TextUnmarshaler`
+- `Path(r, name)` / `Query(r, name)` 先指定来源，再选择类型，例如 `String()`、`Int()`、`UUID()`、`Time()`
+- 这些链式 builder 的返回类型（例如 `reqx.StringParam`、`reqx.IntParam`、`reqx.TimeParam`）也是公开 API，但大多数调用方不需要直接声明它们
+- `Required()`：参数缺失时返回 `required` violation
+- `Default(v)`：参数缺失时使用默认值；与 `Required()` 互斥
+- 常见快捷校验直接链式表达，例如 `Min`、`Max`、`MinLen`、`MaxLen`、`OneOf`、`Match`、`Before`、`After`
+- `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` violation
+- `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
+- `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
 
-例如：
+### typed path / query helper
+
+如果你需要的是“只做 typed getter，不附带快捷校验 DSL”，保留低层 helper：
 
 ```go
 tags, err := hah.QueryParam[[]string](r, "tag")
 cursor, err := hah.QueryParam[*uuid.UUID](r, "cursor")
 ```
+
+几个公开语义需要注意：
+
+- 缺失值返回零值；例如 `QueryParam[int]` 缺失时返回 `0`
+- 如果要区分“缺失”和“有值”，用指针类型，例如 `QueryParam[*uuid.UUID]`
+- query 多值支持 slice：`?tag=a&tag=b` 可以用 `QueryParam[[]string](r, "tag")`
+- 对标量目标，重复 query 只取第一个值
+- 支持 `bind.BindUnmarshaler` 和 `encoding.TextUnmarshaler`
 
 ## 用 `bind` 绑定 DTO
 
@@ -119,26 +141,26 @@ if err := hah.Bind(r, &req); err != nil {
 
 ### 显式单一来源 binding
 
-当你只想绑定某一类来源时，直接用 `bind` 包：
+当你只想绑定某一类来源时，优先用根包 facade；需要 `bind` 的错误码常量或更底层类型时，再直接导入 `bind` 包：
 
 ```go
 var query ListAccountsQuery
-if err := bind.BindQueryParams(r, &query); err != nil {
+if err := hah.BindQueryParams(r, &query); err != nil {
 	return err
 }
 
 var path AccountPath
-if err := bind.BindPathValues(r, &path); err != nil {
+if err := hah.BindPathValues(r, &path); err != nil {
 	return err
 }
 
 var headers DeleteHeaders
-if err := bind.BindHeaders(r, &headers); err != nil {
+if err := hah.BindHeaders(r, &headers); err != nil {
 	return err
 }
 
 var body CreateAccountBody
-if err := bind.BindBody(r, &body); err != nil {
+if err := hah.BindBody(r, &body); err != nil {
 	return err
 }
 ```
@@ -204,11 +226,11 @@ if err := hah.BindAndValidate(r, &req); err != nil {
 
 ### 显式来源校验
 
-如果你显式用了 `bind.Bind*`，校验阶段应明确告诉 `reqx` 当前来源：
+如果你显式用了单一来源 binding，校验阶段应明确告诉 `reqx` 当前来源：
 
 ```go
 var headers DeleteHeaders
-if err := bind.BindHeaders(r, &headers); err != nil {
+if err := hah.BindHeaders(r, &headers); err != nil {
 	return err
 }
 if err := reqx.Validate(r, &headers, reqx.SourceHeader); err != nil {
@@ -349,7 +371,7 @@ type DeleteHeaders struct {
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	var headers DeleteHeaders
-	if err := bind.BindHeaders(r, &headers); err != nil {
+	if err := hah.BindHeaders(r, &headers); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}

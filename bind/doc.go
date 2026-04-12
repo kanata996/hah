@@ -34,6 +34,7 @@
 // 为避免把不该由请求写入的字段暴露给外部输入，建议为 binding 单独定义 DTO，
 // 再显式映射到业务对象，而不是直接把业务 struct 作为绑定目标。
 //
-// 根包 hah 只对最常用的绑定入口提供 facade：hah.Bind、hah.BindBody。
-// 如需显式处理 query/path/header 等单一来源，请直接导入 bind 包。
+// 根包 hah 也提供常用 facade：hah.Bind、hah.BindBody、hah.BindQueryParams、
+// hah.BindPathValues、hah.BindHeaders。需要 bind 包的错误码常量、底层类型或更
+// 明确的来源分层时，再直接导入 bind 包。
 package bind

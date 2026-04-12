@@ -15,6 +15,8 @@ type (
 	RequestValidator = reqx.RequestValidator
 	// Normalizer 允许 DTO 在校验前做标准化处理。
 	Normalizer = reqx.Normalizer
+	// Param 表示一个待解析的 path/query 单参数。
+	Param = reqx.Param
 	// ErrorResponder 协调错误收敛、错误响应写回与 5xx 独立错误日志。
 	ErrorResponder = resp.ErrorResponder
 )
@@ -29,6 +31,21 @@ func BindBody(r *http.Request, target any) error {
 	return bind.BindBody(r, target)
 }
 
+// BindQueryParams 只从 query 参数绑定数据。
+func BindQueryParams(r *http.Request, target any) error {
+	return bind.BindQueryParams(r, target)
+}
+
+// BindPathValues 只从 path 参数绑定数据。
+func BindPathValues(r *http.Request, target any) error {
+	return bind.BindPathValues(r, target)
+}
+
+// BindHeaders 只从 header 绑定数据。
+func BindHeaders(r *http.Request, target any) error {
+	return bind.BindHeaders(r, target)
+}
+
 // PathParam 按当前请求参数转换规则读取并解析单个 path 参数。
 func PathParam[T any](r *http.Request, name string) (T, error) {
 	return reqx.PathParam[T](r, name)
@@ -37,6 +54,16 @@ func PathParam[T any](r *http.Request, name string) (T, error) {
 // QueryParam 按当前请求参数转换规则读取并解析单个 query 参数。
 func QueryParam[T any](r *http.Request, name string) (T, error) {
 	return reqx.QueryParam[T](r, name)
+}
+
+// Path 创建 path 单参数读取与校验 builder。
+func Path(r *http.Request, name string) *Param {
+	return reqx.Path(r, name)
+}
+
+// Query 创建 query 单参数读取与校验 builder。
+func Query(r *http.Request, name string) *Param {
+	return reqx.Query(r, name)
 }
 
 // BindAndValidate 绑定后执行 Normalize、请求级规则和字段校验。

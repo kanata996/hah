@@ -7,7 +7,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/kanata996/hah/errx"
 	"github.com/kanata996/hah/reqx"
 )
@@ -15,7 +17,7 @@ import (
 // 测试清单：
 // [✓] 根包 facade 会把 bind / reqx / resp 的核心能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
-// [✓] 根包 facade 只暴露当前主路径 API：Bind、BindBody、PathParam、QueryParam、BindAndValidate、RequireBody 与响应入口
+// [✓] 根包 facade 公开常用绑定入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
 // [✓] README 中承诺的 create account handler 主路径有根包级端到端测试支撑
 
 type rootPayloadMap map[string]any
@@ -54,6 +56,55 @@ func TestBindBody_DelegatesToBind(t *testing.T) {
 	}
 }
 
+// BindQueryParams 只从 query 参数绑定数据。
+func TestBindQueryParams_DelegatesToBind(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts?cursor=next", nil)
+
+	var dst struct {
+		Cursor string `query:"cursor"`
+	}
+
+	if err := BindQueryParams(req, &dst); err != nil {
+		t.Fatalf("BindQueryParams() error = %v", err)
+	}
+	if dst.Cursor != "next" {
+		t.Fatalf("cursor = %q, want next", dst.Cursor)
+	}
+}
+
+// BindPathValues 只从 path 参数绑定数据。
+func TestBindPathValues_DelegatesToBind(t *testing.T) {
+	req := newRouteRequest(http.MethodGet, "/accounts/acct_123", "account_id", "acct_123")
+
+	var dst struct {
+		AccountID string `param:"account_id"`
+	}
+
+	if err := BindPathValues(req, &dst); err != nil {
+		t.Fatalf("BindPathValues() error = %v", err)
+	}
+	if dst.AccountID != "acct_123" {
+		t.Fatalf("account_id = %q, want acct_123", dst.AccountID)
+	}
+}
+
+// BindHeaders 只从 header 绑定数据。
+func TestBindHeaders_DelegatesToBind(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
+	req.Header.Set("X-Actor", "kanata")
+
+	var dst struct {
+		Actor string `header:"X-Actor"`
+	}
+
+	if err := BindHeaders(req, &dst); err != nil {
+		t.Fatalf("BindHeaders() error = %v", err)
+	}
+	if dst.Actor != "kanata" {
+		t.Fatalf("actor = %q, want kanata", dst.Actor)
+	}
+}
+
 // PathParam 会通过根包 facade 暴露 reqx 的 typed path getter。
 func TestPathParam_DelegatesToReqx(t *testing.T) {
 	req := newRouteRequest(http.MethodGet, "/accounts/42", "id", "42")
@@ -77,6 +128,33 @@ func TestQueryParam_DelegatesToReqx(t *testing.T) {
 	}
 	if got != 42 {
 		t.Fatalf("QueryParam() = %d, want 42", got)
+	}
+}
+
+// Path 会通过根包 facade 暴露 reqx 的 path 单参数校验 builder。
+func TestPath_DelegatesToReqx(t *testing.T) {
+	want := uuid.New()
+	req := newRouteRequest(http.MethodGet, "/accounts/"+want.String(), "id", want.String())
+
+	id, err := Path(req, "id").UUID().Required().Get()
+	if err != nil {
+		t.Fatalf("Path().UUID().Required().Get() error = %v", err)
+	}
+	if id != want {
+		t.Fatalf("id = %v, want %v", id, want)
+	}
+}
+
+// Query 会通过根包 facade 暴露 reqx 的 query 单参数校验 builder。
+func TestQuery_DelegatesToReqx(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts?at=2026-04-12T08:30:00Z", nil)
+
+	at, err := Query(req, "at").Time().Required().Get()
+	if err != nil {
+		t.Fatalf("Query().Time().Required().Get() error = %v", err)
+	}
+	if got := at.UTC().Format(time.RFC3339); got != "2026-04-12T08:30:00Z" {
+		t.Fatalf("at = %q, want 2026-04-12T08:30:00Z", got)
 	}
 }
 

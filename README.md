@@ -55,7 +55,7 @@ import (
 
 - `hah`：根包 facade，聚合常用的绑定、校验和响应写回入口
 - `bind`：请求绑定层，负责 path/query/header/body 到目标值的映射
-- `reqx`：请求 helper、请求规则与校验层，负责 `PathParam` / `QueryParam`、`Normalize`、`RequestValidator` 和 `validator/v10`
+- `reqx`：请求 helper、请求规则与校验层，负责 `Path` / `Query`、`PathParam` / `QueryParam`、`Validate`、`Normalize`、`RequestValidator`、`RequireBody` 和 `validator/v10`
 - `errx`：共享公共 HTTP 错误模型
 - `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
 
@@ -64,7 +64,7 @@ import (
 `hah` 负责：
 
 - 绑定 path/query/header/body 到结构体
-- 在 `Bind` 后执行 Normalize 和 `validator/v10` 校验
+- 在 `BindAndValidate` 或 `reqx.Validate` 路径中执行 `Normalize`、`RequestValidator` 和 `validator/v10` 校验
 - 把常见请求违规收敛成稳定的公开 HTTP 错误
 - 写回标准 JSON 成功响应
 - 写回 `application/problem+json` 错误响应
@@ -123,10 +123,15 @@ func main() {
 
 ## 根包常用 API
 
+- `Path`
+- `Query`
 - `PathParam`
 - `QueryParam`
 - `Bind`
 - `BindBody`
+- `BindQueryParams`
+- `BindPathValues`
+- `BindHeaders`
 - `BindAndValidate`
 - `RequireBody`
 - `WriteError`
@@ -140,6 +145,7 @@ func main() {
 
 ## 来源绑定与校验
 
+- `hah.BindQueryParams` / `hah.BindPathValues` / `hah.BindHeaders` / `hah.BindBody`
 - `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders` / `bind.BindBody`
 - `reqx.Validate(..., reqx.SourceQuery)` / `reqx.SourcePath` / `reqx.SourceHeader` / `reqx.SourceBody`
 

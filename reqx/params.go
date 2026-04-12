@@ -12,6 +12,8 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
+var errUnknownParamType = errors.New("unknown type")
+
 // PathParam 按当前请求参数转换规则读取并解析单个 path 参数。
 func PathParam[T any](r *http.Request, name string) (T, error) {
 	values, exists := pathParamValues(r, name)
@@ -180,7 +182,7 @@ func setWithProperType(field reflect.Value, value string) error {
 		field.SetString(value)
 		return nil
 	default:
-		return errors.New("unknown type")
+		return errUnknownParamType
 	}
 }
 

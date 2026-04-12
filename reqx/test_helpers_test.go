@@ -83,6 +83,15 @@ func assertHTTPErrorLike(t *testing.T, err error) *errx.HTTPError {
 	return httpErr
 }
 
+func assertNotHTTPError(t *testing.T, err error) {
+	t.Helper()
+
+	var httpErr *errx.HTTPError
+	if errors.As(err, &httpErr) && httpErr != nil {
+		t.Fatalf("error type = %T, want non-HTTP usage error", err)
+	}
+}
+
 func assertViolations(t *testing.T, err error) []Violation {
 	t.Helper()
 
