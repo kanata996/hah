@@ -13,8 +13,12 @@
 //   - 需要显式来源绑定 + 校验时，组合 bind.Bind* 与 Validate(..., Source*)
 //
 // 公开 API：
-//   - request helper：Path、Query、PathParam、QueryParam、Param
+//   - request helper 入口：Path、Query、PathParam、QueryParam、Param
+//   - Path/Query builder 返回类型：StringParam、IntParam、Int64Param、
+//     UintParam、BoolParam、Float64Param、UUIDParam、TimeParam
 //   - 校验入口：BindAndValidate、Validate、Source
+//   - 公开 Source 常量：SourceBody、SourceQuery、SourcePath、
+//     SourceHeader、SourceRequest
 //   - DTO 扩展点：RequestValidator、Normalizer
 //   - 请求级规则 helper：RequireBody、InvalidRequest
 //   - 公开错误码常量：CodeInvalidRequest

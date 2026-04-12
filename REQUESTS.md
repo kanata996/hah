@@ -70,6 +70,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 几个公开语义需要注意：
 
 - `Path(r, name)` / `Query(r, name)` 先指定来源，再选择类型，例如 `String()`、`Int()`、`UUID()`、`Time()`
+- 这些链式 builder 的返回类型（例如 `reqx.StringParam`、`reqx.IntParam`、`reqx.TimeParam`）也是公开 API，但大多数调用方不需要直接声明它们
 - `Required()`：参数缺失时返回 `required` violation
 - `Default(v)`：参数缺失时使用默认值；与 `Required()` 互斥
 - 常见快捷校验直接链式表达，例如 `Min`、`Max`、`MinLen`、`MaxLen`、`OneOf`、`Match`、`Before`、`After`
