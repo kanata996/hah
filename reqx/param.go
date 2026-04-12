@@ -46,52 +46,52 @@ func Query(r *http.Request, name string) *Param {
 
 // String 读取 string 参数。
 func (p *Param) String() *StringParam {
-	return &StringParam{value: newParamValue[string](p, parseStringValue)}
+	return &StringParam{value: newParamValue(p, parseStringValue)}
 }
 
 // Int 读取 int 参数。
 func (p *Param) Int() *IntParam {
-	return &IntParam{value: newParamValue[int](p, parseIntValue)}
+	return &IntParam{value: newParamValue(p, parseIntValue)}
 }
 
 // Int64 读取 int64 参数。
 func (p *Param) Int64() *Int64Param {
-	return &Int64Param{value: newParamValue[int64](p, parseInt64Value)}
+	return &Int64Param{value: newParamValue(p, parseInt64Value)}
 }
 
 // Uint 读取 uint 参数。
 func (p *Param) Uint() *UintParam {
-	return &UintParam{value: newParamValue[uint](p, parseUintValue)}
+	return &UintParam{value: newParamValue(p, parseUintValue)}
 }
 
 // Bool 读取 bool 参数。
 func (p *Param) Bool() *BoolParam {
-	return &BoolParam{value: newParamValue[bool](p, parseBoolValue)}
+	return &BoolParam{value: newParamValue(p, parseBoolValue)}
 }
 
 // Float64 读取 float64 参数。
 func (p *Param) Float64() *Float64Param {
-	return &Float64Param{value: newParamValue[float64](p, parseFloat64Value)}
+	return &Float64Param{value: newParamValue(p, parseFloat64Value)}
 }
 
 // UUID 读取 uuid.UUID 参数。
 func (p *Param) UUID() *UUIDParam {
-	return &UUIDParam{value: newParamValue[uuid.UUID](p, parseUUIDValue)}
+	return &UUIDParam{value: newParamValue(p, parseUUIDValue)}
 }
 
 // Time 按 RFC3339 读取 time.Time 参数。
 func (p *Param) Time() *TimeParam {
-	return &TimeParam{value: newParamValue[time.Time](p, parseRFC3339Time)}
+	return &TimeParam{value: newParamValue(p, parseRFC3339Time)}
 }
 
 // UnixTime 按 10 位秒级 Unix 时间戳读取 time.Time 参数。
 func (p *Param) UnixTime() *TimeParam {
-	return &TimeParam{value: newParamValue[time.Time](p, parseUnixTime)}
+	return &TimeParam{value: newParamValue(p, parseUnixTime)}
 }
 
 // UnixMilliTime 按 13 位毫秒级 Unix 时间戳读取 time.Time 参数。
 func (p *Param) UnixMilliTime() *TimeParam {
-	return &TimeParam{value: newParamValue[time.Time](p, parseUnixMilliTime)}
+	return &TimeParam{value: newParamValue(p, parseUnixMilliTime)}
 }
 
 type paramSpec struct {
