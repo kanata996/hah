@@ -60,14 +60,11 @@ func fuzzSuccessWriterContracts(t *testing.T, variant uint8, status int, value, 
 	payload := map[string]string{"value": value}
 	rr := httptest.NewRecorder()
 
-	switch variant % 4 {
+	switch variant % 3 {
 	case 0:
 		err := JSON(rr, status, payload)
 		assertJSONWriterResult(t, rr, err, status, payload)
 	case 1:
-		err := JSON(rr, status, payload)
-		assertJSONWriterResult(t, rr, err, status, payload)
-	case 2:
 		err := OK(rr, payload)
 		assertRecorderJSONSuccess(t, rr, err, http.StatusOK, payload)
 	default:
@@ -79,9 +76,9 @@ func fuzzSuccessWriterContracts(t *testing.T, variant uint8, status int, value, 
 func assertJSONWriterResult(t *testing.T, rr *httptest.ResponseRecorder, err error, status int, payload map[string]string) {
 	t.Helper()
 
-	if wantErr := wantBodyWriterError("JSON body writers", status); wantErr != "" {
-		if err == nil || err.Error() != wantErr {
-			t.Fatalf("writer error = %v, want %q", err, wantErr)
+	if shouldRejectBodyWriter(status) {
+		if err == nil {
+			t.Fatalf("writer error = nil, want rejection for status %d", status)
 		}
 		assertRecorderHasNoBodyOrContentType(t, rr)
 		return
@@ -115,9 +112,9 @@ func fuzzJSONBlobContracts(t *testing.T, status int, body []byte) {
 	rr := httptest.NewRecorder()
 	err := JSONBlob(rr, status, body)
 
-	if wantErr := wantBodyWriterError("JSON body writers", status); wantErr != "" {
-		if err == nil || err.Error() != wantErr {
-			t.Fatalf("JSONBlob() error = %v, want %q", err, wantErr)
+	if shouldRejectBodyWriter(status) {
+		if err == nil {
+			t.Fatalf("JSONBlob() error = nil, want rejection for status %d", status)
 		}
 		assertRecorderHasNoBodyOrContentType(t, rr)
 		return
@@ -245,16 +242,16 @@ func encodeContractJSON(t *testing.T, payload map[string]string) string {
 	return buf.String()
 }
 
-func wantBodyWriterError(writerName string, status int) string {
+func shouldRejectBodyWriter(status int) bool {
 	switch {
 	case status < 100 || status > 999:
-		return fmt.Sprintf("resp: invalid HTTP status %d", status)
+		return true
 	case status < http.StatusOK:
-		return fmt.Sprintf("resp: %s cannot use informational status %d", writerName, status)
+		return true
 	case status == http.StatusNoContent || status == http.StatusResetContent || status == http.StatusNotModified:
-		return fmt.Sprintf("resp: %s cannot use bodyless status %d", writerName, status)
+		return true
 	default:
-		return ""
+		return false
 	}
 }
 

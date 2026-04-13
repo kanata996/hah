@@ -256,6 +256,7 @@ func TestErrorResponderRespondPropagatesAsHTTPErrorPanics(t *testing.T) {
 
 func TestErrorResponderRespondFallsBackWhenRequestLogAttrsPanics(t *testing.T) {
 	responder := &ErrorResponder{
+		AnnotateRequestLog: func(*http.Request, []slog.Attr) {},
 		RequestLogAttrs: func(error, *errx.HTTPError) []slog.Attr {
 			panic("boom")
 		},
@@ -267,6 +268,30 @@ func TestErrorResponderRespondFallsBackWhenRequestLogAttrsPanics(t *testing.T) {
 	assertPanicsWithValue(t, "boom", func() {
 		_ = responder.Respond(rr, req, errors.New("db timeout"))
 	})
+}
+
+func TestErrorResponderRespondDoesNotCallRequestLogAttrsWithoutSink(t *testing.T) {
+	responder := &ErrorResponder{
+		RequestLogAttrs: func(error, *errx.HTTPError) []slog.Attr {
+			panic("boom")
+		},
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/no-request-log-sink", nil)
+	rr := httptest.NewRecorder()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("Respond() panicked without request-log sink: %v", recovered)
+		}
+	}()
+
+	if err := responder.Respond(rr, req, errors.New("db timeout")); err != nil {
+		t.Fatalf("Respond() error = %v", err)
+	}
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
 }
 
 func TestErrorResponderRespondPropagatesAnnotateRequestLogPanics(t *testing.T) {
@@ -483,6 +508,82 @@ func TestErrorResponderDoesNotEnrichRequestLogFor4xx(t *testing.T) {
 	}
 	if defaultBuf.Len() != 0 {
 		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
+	}
+}
+
+func TestErrorResponderAnnotatesRequestLogWhenResponseWriteAlreadyStarted(t *testing.T) {
+	captured := &capturedRequestLog{}
+
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	responder := &ErrorResponder{
+		AnnotateRequestLog: captured.annotate,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/started", nil)
+	rr := httptest.NewRecorder()
+	startedErr := &responseWriteError{
+		cause:           errors.New("socket closed"),
+		responseStarted: true,
+	}
+
+	if err := responder.Respond(rr, req, startedErr); !errors.Is(err, startedErr) {
+		t.Fatalf("Respond() error = %v, want original started error", err)
+	}
+	if captured.req != req {
+		t.Fatalf("annotated request = %p, want %p", captured.req, req)
+	}
+
+	logEntry := attrsToMap(captured.attrs)
+	if got := logEntry["error.code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
+	}
+
+	serverLog := decodePayload(t, defaultBuf.Bytes())
+	if _, exists := serverLog["http.response.status_code"]; exists {
+		t.Fatalf("http.response.status_code unexpectedly present: %#v", serverLog["http.response.status_code"])
+	}
+}
+
+func TestErrorResponderAnnotatesRequestLogWhenWriterAlreadyStarted(t *testing.T) {
+	captured := &capturedRequestLog{}
+
+	var defaultBuf bytes.Buffer
+	previousDefault := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	defer slog.SetDefault(previousDefault)
+
+	responder := &ErrorResponder{
+		AnnotateRequestLog: captured.annotate,
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/partial", nil)
+	rr := httptest.NewRecorder()
+	w := &stateTrackingWriter{inner: rr}
+	w.WriteHeader(http.StatusAccepted)
+	if _, err := w.Write([]byte("partial")); err != nil {
+		t.Fatalf("w.Write() error = %v", err)
+	}
+
+	cause := errors.New("boom")
+	if err := responder.Respond(w, req, cause); !errors.Is(err, cause) {
+		t.Fatalf("Respond() error = %v, want original error %v", err, cause)
+	}
+	if captured.req != req {
+		t.Fatalf("annotated request = %p, want %p", captured.req, req)
+	}
+
+	logEntry := attrsToMap(captured.attrs)
+	if got := logEntry["error.code"]; got != "internal_error" {
+		t.Fatalf("error.code = %#v, want internal_error", got)
+	}
+
+	serverLog := decodePayload(t, defaultBuf.Bytes())
+	if got := serverLog["http.response.status_code"]; got != float64(http.StatusAccepted) {
+		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusAccepted)
 	}
 }
 

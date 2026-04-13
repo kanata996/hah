@@ -2,7 +2,6 @@ package resp
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 
@@ -34,7 +33,7 @@ func NewErrorResponder() *ErrorResponder {
 
 // Respond 把任意 error 收敛为稳定的 HTTP 错误响应并写回客户端。
 //
-// 流程：先标准化 error → 检查响应是否已开始 → 注解请求日志 → 记录 5xx 独立日志 → 写回错误响应。
+// 流程：先标准化 error → 注解请求日志 → 检查响应是否已开始 → 记录 5xx 独立日志 → 写回错误响应。
 // 若传入 nil error 则为 no-op。
 func (r *ErrorResponder) Respond(w http.ResponseWriter, req *http.Request, err error) error {
 	if err == nil {
@@ -42,21 +41,21 @@ func (r *ErrorResponder) Respond(w http.ResponseWriter, req *http.Request, err e
 	}
 
 	httpErr := r.httpError(err)
+	r.annotateRequestLog(req, err, httpErr)
 
 	var responseStartedErr *responseWriteError
-	if errors.As(err, &responseStartedErr) && responseStartedErr != nil && responseStartedErr.responseStarted {
-		r.logServerError(req, httpErr, err)
+	if safeErrorsAs(err, &responseStartedErr) && responseStartedErr != nil && responseStartedErr.responseStarted {
+		r.logStartedServerError(req, w, httpErr, err)
 		return err
 	}
 	if responseAlreadyStarted(w) {
-		r.logServerError(req, httpErr, err)
+		r.logStartedServerError(req, w, httpErr, err)
 		return err
 	}
 
-	r.annotateRequestLog(req, r.requestLogAttrs(err, httpErr))
 	r.logServerError(req, httpErr, err)
 	writeErr := writeHTTPError(w, httpErr)
-	r.logErrorResponseWriteFailure(req, httpErr, writeErr)
+	r.logErrorResponseWriteIssue(req, httpErr, writeErr)
 	return writeErr
 }
 
@@ -83,8 +82,12 @@ func (r *ErrorResponder) contextAttrs(ctx context.Context) []slog.Attr {
 	return nil
 }
 
-func (r *ErrorResponder) annotateRequestLog(req *http.Request, attrs []slog.Attr) {
-	if r == nil || r.AnnotateRequestLog == nil || req == nil || len(attrs) == 0 {
+func (r *ErrorResponder) annotateRequestLog(req *http.Request, err error, httpErr *errx.HTTPError) {
+	if r == nil || r.AnnotateRequestLog == nil || req == nil {
+		return
+	}
+	attrs := r.requestLogAttrs(err, httpErr)
+	if len(attrs) == 0 {
 		return
 	}
 	r.AnnotateRequestLog(req, attrs)

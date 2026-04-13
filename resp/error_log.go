@@ -57,14 +57,7 @@ func requestErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
 
 	attrs := make([]slog.Attr, 0, 6)
 	attrs = append(attrs, slog.String("error.code", httpErr.Code()))
-	if errors.Is(err, context.Canceled) {
-		attrs = append(attrs, slog.Bool("error.canceled", true))
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		attrs = append(attrs, slog.Bool("error.timeout", true))
-	}
-
-	return attrs
+	return appendErrorStateAttrs(attrs, err)
 }
 
 func diagnosticErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
@@ -96,13 +89,16 @@ func diagnosticErrorLogAttrsWithSource(err error, httpErr *errx.HTTPError, prefe
 	if chain.rootType != "" {
 		attrs = append(attrs, slog.String("error.root_type", chain.rootType))
 	}
-	if errors.Is(err, context.Canceled) {
+	return appendErrorStateAttrs(attrs, err)
+}
+
+func appendErrorStateAttrs(attrs []slog.Attr, err error) []slog.Attr {
+	if safeErrorsIs(err, context.Canceled) {
 		attrs = append(attrs, slog.Bool("error.canceled", true))
 	}
-	if errors.Is(err, context.DeadlineExceeded) {
+	if safeErrorsIs(err, context.DeadlineExceeded) {
 		attrs = append(attrs, slog.Bool("error.timeout", true))
 	}
-
 	return attrs
 }
 
@@ -118,9 +114,10 @@ func errorForDiagnostics(err error, httpErr *errx.HTTPError) error {
 	return err
 }
 
-// logErrorResponseWriteFailure 只记录“错误响应自身写出失败”的异常。
-// 这是基础设施级问题，不属于普通业务失败，因此需要单独打一条 error 日志。
-func (r *ErrorResponder) logErrorResponseWriteFailure(req *http.Request, httpErr *errx.HTTPError, err error) {
+// logErrorResponseWriteIssue 记录错误响应写回阶段的问题。
+// 真正的写回失败会输出 error 级别日志；若仅发生可恢复降级且已保留公开响应，
+// 则降为单独的 warn 级别日志，避免把“已成功回退”误报成基础设施写失败。
+func (r *ErrorResponder) logErrorResponseWriteIssue(req *http.Request, httpErr *errx.HTTPError, err error) {
 	if err == nil || httpErr == nil {
 		return
 	}
@@ -139,11 +136,15 @@ func (r *ErrorResponder) logErrorResponseWriteFailure(req *http.Request, httpErr
 	attrs = append(attrs, r.contextAttrs(ctx)...)
 
 	var degraded *ErrorWriteDegraded
-	if errors.As(err, &degraded) && degraded != nil {
+	if safeErrorsAs(err, &degraded) && degraded != nil {
 		attrs = append(attrs,
 			slog.Bool("resp.error_degraded", true),
 			slog.Bool("resp.public_response_preserved", degraded.PreservedPublicResponse),
 		)
+		if degraded.PreservedPublicResponse {
+			r.logger().LogAttrs(ctx, slog.LevelWarn, "resp: error response degraded", attrs...)
+			return
+		}
 	}
 
 	r.logger().LogAttrs(ctx, slog.LevelError, "resp: failed to write error response", attrs...)
@@ -158,7 +159,29 @@ func (r *ErrorResponder) logServerError(req *http.Request, httpErr *errx.HTTPErr
 	r.logServerErrorAttrs(req, httpErr, diagnosticErrorLogAttrs(err, httpErr))
 }
 
+func (r *ErrorResponder) logStartedServerError(req *http.Request, w http.ResponseWriter, httpErr *errx.HTTPError, err error) {
+	if err == nil || httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
+		return
+	}
+
+	responseAttrs := make([]slog.Attr, 0, 1)
+	if status, ok := responseStatusForLogging(w); ok {
+		responseAttrs = append(responseAttrs, slog.Int("http.response.status_code", status))
+	}
+	r.logServerErrorWithAttrs(req, httpErr, diagnosticErrorLogAttrs(err, httpErr), responseAttrs)
+}
+
 func (r *ErrorResponder) logServerErrorAttrs(req *http.Request, httpErr *errx.HTTPError, diagnosticAttrs []slog.Attr) {
+	if httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
+		return
+	}
+
+	r.logServerErrorWithAttrs(req, httpErr, diagnosticAttrs, []slog.Attr{
+		slog.Int("http.response.status_code", httpErr.Status()),
+	})
+}
+
+func (r *ErrorResponder) logServerErrorWithAttrs(req *http.Request, httpErr *errx.HTTPError, diagnosticAttrs []slog.Attr, responseAttrs []slog.Attr) {
 	if httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
 		return
 	}
@@ -168,9 +191,8 @@ func (r *ErrorResponder) logServerErrorAttrs(req *http.Request, httpErr *errx.HT
 		ctx = req.Context()
 	}
 
-	attrs := []slog.Attr{
-		slog.Int("http.response.status_code", httpErr.Status()),
-	}
+	attrs := make([]slog.Attr, 0, len(responseAttrs)+len(diagnosticAttrs)+4)
+	attrs = append(attrs, responseAttrs...)
 	attrs = append(attrs, diagnosticAttrs...)
 	attrs = append(attrs, requestMetadataAttrs(req)...)
 	attrs = append(attrs, r.contextAttrs(ctx)...)

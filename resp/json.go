@@ -49,14 +49,11 @@ func writeJSON(w http.ResponseWriter, status int, data any) error {
 // writeSuccess 是 OK / Created 这类显式成功响应的核心路径。
 // 相比通用 JSON 写回，它额外要求状态码必须是非错误状态，且 payload 不能编码为 JSON null。
 func writeSuccess(w http.ResponseWriter, status int, data any) error {
-	if err := validateHTTPStatus(status); err != nil {
+	if err := validateJSONBodyWriteStatus(status, "success writers with a body"); err != nil {
 		return err
 	}
 	if status > 399 {
 		return fmt.Errorf("resp: invalid success status %d", status)
-	}
-	if err := validateStatusAllowsBody(status, "success writers with a body"); err != nil {
-		return err
 	}
 	if w == nil {
 		return errNilResponseWriter
@@ -79,6 +76,10 @@ func validateJSONBodyWrite(w http.ResponseWriter, status int, writerName string)
 	if w == nil {
 		return errNilResponseWriter
 	}
+	return validateJSONBodyWriteStatus(status, writerName)
+}
+
+func validateJSONBodyWriteStatus(status int, writerName string) error {
 	if err := validateHTTPStatus(status); err != nil {
 		return err
 	}
