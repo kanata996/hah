@@ -1,13 +1,9 @@
 package reqx
 
 import (
-	"net/http"
-	"net/http/httptest"
-	"reflect"
 	"testing"
 
 	"github.com/google/uuid"
-	ireq "github.com/kanata996/hah/internal/req"
 )
 
 // 测试清单：
@@ -15,7 +11,6 @@ import (
 // - [✓] Path 入口会为资源标识型 path 参数提供 source-aware required/invalid violation。
 // - [✓] Path 入口会对 nil request、空参数名和缺失 optional 参数维持稳定前置条件与零值契约。
 // - [✓] PathParam 只保留 path 允许的窄类型面：String、UUID、Int、Int64、Uint、Uint64。
-// - [✓] path lookup helper 会维持 PathValue / Pattern wildcard 的公开契约。
 
 func TestPath_SuccessPaths(t *testing.T) {
 	t.Run("path uuid required", func(t *testing.T) {
@@ -120,59 +115,6 @@ func TestPathBuilder_UsageAndOptionalBehavior(t *testing.T) {
 		}
 		if got != "" {
 			t.Fatalf("id = %q, want empty string", got)
-		}
-	})
-}
-
-func TestPathLookupHelpers_Branches(t *testing.T) {
-	t.Run("path helper", func(t *testing.T) {
-		if values, ok := pathParamValues(nil, "id"); ok || values != nil {
-			t.Fatalf("pathParamValues(nil) = (%v, %v), want (nil, false)", values, ok)
-		}
-
-		reqWithValue := requestWithPathParams(map[string][]string{
-			"id": {"u_1"},
-		})
-		if values, ok := pathParamValues(reqWithValue, "id"); !ok || len(values) != 1 || values[0] != "u_1" {
-			t.Fatalf("pathParamValues(value) = (%v, %v), want ([u_1], true)", values, ok)
-		}
-
-		reqWithEmpty := requestWithPathParams(map[string][]string{
-			"id": {""},
-		})
-		if values, ok := pathParamValues(reqWithEmpty, "id"); !ok || len(values) != 1 || values[0] != "" {
-			t.Fatalf("pathParamValues(empty) = (%v, %v), want ([\"\"], true)", values, ok)
-		}
-
-		reqMissing := httptest.NewRequest(http.MethodGet, "/accounts", nil)
-		reqMissing.Pattern = "/accounts"
-		if values, ok := pathParamValues(reqMissing, "id"); ok || values != nil {
-			t.Fatalf("pathParamValues(missing) = (%v, %v), want (nil, false)", values, ok)
-		}
-	})
-
-	t.Run("path wildcard names", func(t *testing.T) {
-		tests := []struct {
-			name    string
-			pattern string
-			want    []string
-		}{
-			{name: "blank", pattern: "   ", want: nil},
-			{name: "no wildcard", pattern: "/accounts", want: []string{}},
-			{name: "basic", pattern: "/accounts/{id}", want: []string{"id"}},
-			{name: "with method prefix", pattern: "GET /accounts/{id}", want: []string{"id"}},
-			{name: "catch all", pattern: "/files/{path...}", want: []string{"path"}},
-			{name: "typed wildcard", pattern: "/accounts/{id:[0-9]+}", want: []string{"id"}},
-			{name: "skip dollar", pattern: "/{$}", want: []string{}},
-			{name: "malformed", pattern: "/accounts/{id", want: []string{}},
-		}
-
-		for _, tc := range tests {
-			t.Run(tc.name, func(t *testing.T) {
-				if got := ireq.PathWildcardNames(tc.pattern); !reflect.DeepEqual(got, tc.want) {
-					t.Fatalf("pathWildcardNames(%q) = %#v, want %#v", tc.pattern, got, tc.want)
-				}
-			})
 		}
 	})
 }

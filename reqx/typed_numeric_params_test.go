@@ -9,337 +9,416 @@ import (
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] Int / Int64 / Uint / Uint64 / Float64 builder 会在 present-empty query 值下维持公开零值语义，而不是把空值当成缺失。
-// - [✓] Numeric builder 会覆盖代表性的 default 成功、range 失败、parse 失败与 usage error 边界。
-// - [✓] Numeric builder 的代表性 Default(...) / Check(...) 失败路径会在自身 API 上直接校验，保证默认值不会绕过后续约束。
+// - [✓] Numeric builder 会在 shared contract 下覆盖 present-empty、default、range、parse 与 usage error 契约。
 // - [✓] Fuzz 评估：本文件当前只补 numeric builder 规格回归，不新增 fuzz；原因是未引入新的 query/path 解析逻辑或输入状态空间。
 
+type numericBuilderOps[T comparable] struct {
+	requiredMinMaxCheckGet func(min, max T) (T, error)
+	defaultGet             func(def T) (T, error)
+	requiredGet            func() (T, error)
+	defaultMinGet          func(def, min T) error
+	defaultCheckGet        func(def T, detail string) error
+	minGet                 func(min T) error
+	maxGet                 func(max T) error
+	maxThenMinGet          func(max, min T) error
+	minThenMaxGet          func(min, max T) error
+	parseGet               func() error
+}
+
+type numericContract[T comparable] struct {
+	field              string
+	boundaryTarget     string
+	emptyTarget        string
+	minInvalidTarget   string
+	maxInvalidTarget   string
+	parseInvalidTarget string
+	boundaryValue      T
+	defaultValue       T
+	minValue           T
+	maxValue           T
+	conflictLow        T
+	conflictHigh       T
+	defaultDetail      string
+	newBuilder         func(req *http.Request, field string) numericBuilderOps[T]
+}
+
 func TestIntParam_ValidationAndRangeErrors(t *testing.T) {
-	t.Run("boundary success", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=0", nil), "page").Int().
-			Required().
-			Min(0).
-			Max(0).
-			Get()
-		if err != nil {
-			t.Fatalf("Int().Required().Min().Max().Get() error = %v", err)
-		}
-		if got != 0 {
-			t.Fatalf("page = %d, want 0", got)
-		}
-	})
-
-	t.Run("empty string parses zero when required", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=", nil), "page").Int().Required().Get()
-		if err != nil || got != 0 {
-			t.Fatalf("Int().Required().Get() = (%d, %v), want (0, nil)", got, err)
-		}
-	})
-
-	t.Run("default min invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
-			Default(1).
-			Min(2).
-			Get()
-		assertInvalidViolationAt(t, err, "page", ViolationInQuery)
-	})
-
-	t.Run("min invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=1", nil), "page").Int().Min(2).Get()
-		assertInvalidViolationAt(t, err, "page", ViolationInQuery)
-	})
-
-	t.Run("max invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=3", nil), "page").Int().Max(2).Get()
-		assertInvalidViolationAt(t, err, "page", ViolationInQuery)
-	})
-
-	t.Run("max then min conflict", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=3", nil), "page").Int().Max(1).Min(2).Get()
-		assertUsageErrorContains(t, err, "minimum must be less than or equal to maximum")
+	runNumericContract(t, numericContract[int]{
+		field:              "page",
+		boundaryTarget:     "/items?page=0",
+		emptyTarget:        "/items?page=",
+		minInvalidTarget:   "/items?page=1",
+		maxInvalidTarget:   "/items?page=3",
+		parseInvalidTarget: "/items?page=oops",
+		boundaryValue:      0,
+		defaultValue:       9,
+		minValue:           2,
+		maxValue:           2,
+		conflictLow:        1,
+		conflictHigh:       2,
+		defaultDetail:      "default int must be rejected",
+		newBuilder: func(req *http.Request, field string) numericBuilderOps[int] {
+			return numericBuilderOps[int]{
+				requiredMinMaxCheckGet: func(min, max int) (int, error) {
+					return Query(req, field).Int().Required().Min(min).Max(max).Check(func(value int) error { return nil }).Get()
+				},
+				defaultGet: func(def int) (int, error) {
+					return Query(req, field).Int().Default(def).Get()
+				},
+				requiredGet: func() (int, error) {
+					return Query(req, field).Int().Required().Get()
+				},
+				defaultMinGet: func(def, min int) error {
+					_, err := Query(req, field).Int().Default(def).Min(min).Get()
+					return err
+				},
+				defaultCheckGet: func(def int, detail string) error {
+					_, err := Query(req, field).Int().Default(def).Check(func(value int) error {
+						return errors.New(detail)
+					}).Get()
+					return err
+				},
+				minGet: func(min int) error {
+					_, err := Query(req, field).Int().Min(min).Get()
+					return err
+				},
+				maxGet: func(max int) error {
+					_, err := Query(req, field).Int().Max(max).Get()
+					return err
+				},
+				maxThenMinGet: func(max, min int) error {
+					_, err := Query(req, field).Int().Max(max).Min(min).Get()
+					return err
+				},
+				minThenMaxGet: func(min, max int) error {
+					_, err := Query(req, field).Int().Min(min).Max(max).Get()
+					return err
+				},
+				parseGet: func() error {
+					_, err := Query(req, field).Int().Get()
+					return err
+				},
+			}
+		},
 	})
 }
 
 func TestInt64Param_ValidationAndRangeErrors(t *testing.T) {
-	t.Run("int64 boundary success", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=0", nil), "v").Int64().
-			Required().
-			Min(0).
-			Max(0).
-			Check(func(value int64) error { return nil }).
-			Get()
-		if err != nil {
-			t.Fatalf("Int64().Required().Min().Max().Check().Get() error = %v", err)
-		}
-		if got != 0 {
-			t.Fatalf("int64 = %d, want 0", got)
-		}
-	})
-
-	t.Run("int64 default success", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "v").Int64().Default(9).Get()
-		if err != nil || got != 9 {
-			t.Fatalf("Int64().Default().Get() = (%d, %v), want (9, nil)", got, err)
-		}
-	})
-
-	t.Run("int64 empty string parses zero when required", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=", nil), "v").Int64().Required().Get()
-		if err != nil || got != 0 {
-			t.Fatalf("Int64().Required().Get() = (%d, %v), want (0, nil)", got, err)
-		}
-	})
-
-	t.Run("int64 default check invalid uses custom detail", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "v").Int64().
-			Default(9).
-			Check(func(value int64) error {
-				return errors.New("default int64 must be rejected")
-			}).
-			Get()
-		assertViolation(t, err, Violation{
-			Field:  "v",
-			In:     ViolationInQuery,
-			Code:   ViolationCodeInvalid,
-			Detail: "default int64 must be rejected",
-		})
-	})
-
-	t.Run("int64 min invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=1", nil), "v").Int64().Min(2).Get()
-		assertInvalidViolationAt(t, err, "v", ViolationInQuery)
-	})
-
-	t.Run("int64 max invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=3", nil), "v").Int64().Max(2).Get()
-		assertInvalidViolationAt(t, err, "v", ViolationInQuery)
-	})
-
-	t.Run("int64 max then min conflict", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=3", nil), "v").Int64().Max(1).Min(2).Get()
-		assertUsageErrorContains(t, err, "minimum must be less than or equal to maximum")
-	})
-
-	t.Run("int64 min then max conflict", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=3", nil), "v").Int64().Min(2).Max(1).Get()
-		assertUsageErrorContains(t, err, "maximum must be greater than or equal to minimum")
-	})
-
-	t.Run("int64 parse invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=oops", nil), "v").Int64().Get()
-		assertInvalidViolationAt(t, err, "v", ViolationInQuery)
+	runNumericContract(t, numericContract[int64]{
+		field:              "v",
+		boundaryTarget:     "/items?v=0",
+		emptyTarget:        "/items?v=",
+		minInvalidTarget:   "/items?v=1",
+		maxInvalidTarget:   "/items?v=3",
+		parseInvalidTarget: "/items?v=oops",
+		boundaryValue:      0,
+		defaultValue:       9,
+		minValue:           2,
+		maxValue:           2,
+		conflictLow:        1,
+		conflictHigh:       2,
+		defaultDetail:      "default int64 must be rejected",
+		newBuilder: func(req *http.Request, field string) numericBuilderOps[int64] {
+			return numericBuilderOps[int64]{
+				requiredMinMaxCheckGet: func(min, max int64) (int64, error) {
+					return Query(req, field).Int64().Required().Min(min).Max(max).Check(func(value int64) error { return nil }).Get()
+				},
+				defaultGet: func(def int64) (int64, error) {
+					return Query(req, field).Int64().Default(def).Get()
+				},
+				requiredGet: func() (int64, error) {
+					return Query(req, field).Int64().Required().Get()
+				},
+				defaultMinGet: func(def, min int64) error {
+					_, err := Query(req, field).Int64().Default(def).Min(min).Get()
+					return err
+				},
+				defaultCheckGet: func(def int64, detail string) error {
+					_, err := Query(req, field).Int64().Default(def).Check(func(value int64) error {
+						return errors.New(detail)
+					}).Get()
+					return err
+				},
+				minGet: func(min int64) error {
+					_, err := Query(req, field).Int64().Min(min).Get()
+					return err
+				},
+				maxGet: func(max int64) error {
+					_, err := Query(req, field).Int64().Max(max).Get()
+					return err
+				},
+				maxThenMinGet: func(max, min int64) error {
+					_, err := Query(req, field).Int64().Max(max).Min(min).Get()
+					return err
+				},
+				minThenMaxGet: func(min, max int64) error {
+					_, err := Query(req, field).Int64().Min(min).Max(max).Get()
+					return err
+				},
+				parseGet: func() error {
+					_, err := Query(req, field).Int64().Get()
+					return err
+				},
+			}
+		},
 	})
 }
 
 func TestUintParam_ValidationAndRangeErrors(t *testing.T) {
-	t.Run("uint boundary success", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=0", nil), "v").Uint().
-			Required().
-			Min(0).
-			Max(0).
-			Check(func(value uint) error { return nil }).
-			Get()
-		if err != nil {
-			t.Fatalf("Uint().Required().Min().Max().Check().Get() error = %v", err)
-		}
-		if got != 0 {
-			t.Fatalf("uint = %d, want 0", got)
-		}
-	})
-
-	t.Run("uint default success", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "v").Uint().Default(7).Get()
-		if err != nil || got != 7 {
-			t.Fatalf("Uint().Default().Get() = (%d, %v), want (7, nil)", got, err)
-		}
-	})
-
-	t.Run("uint empty string parses zero when required", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=", nil), "v").Uint().Required().Get()
-		if err != nil || got != 0 {
-			t.Fatalf("Uint().Required().Get() = (%d, %v), want (0, nil)", got, err)
-		}
-	})
-
-	t.Run("uint default check invalid uses custom detail", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "v").Uint().
-			Default(7).
-			Check(func(value uint) error {
-				return errors.New("default uint must be rejected")
-			}).
-			Get()
-		assertViolation(t, err, Violation{
-			Field:  "v",
-			In:     ViolationInQuery,
-			Code:   ViolationCodeInvalid,
-			Detail: "default uint must be rejected",
-		})
-	})
-
-	t.Run("uint min invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=1", nil), "v").Uint().Min(2).Get()
-		assertInvalidViolationAt(t, err, "v", ViolationInQuery)
-	})
-
-	t.Run("uint max invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=3", nil), "v").Uint().Max(2).Get()
-		assertInvalidViolationAt(t, err, "v", ViolationInQuery)
-	})
-
-	t.Run("uint max then min conflict", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=3", nil), "v").Uint().Max(1).Min(2).Get()
-		assertUsageErrorContains(t, err, "minimum must be less than or equal to maximum")
-	})
-
-	t.Run("uint min then max conflict", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=3", nil), "v").Uint().Min(2).Max(1).Get()
-		assertUsageErrorContains(t, err, "maximum must be greater than or equal to minimum")
-	})
-
-	t.Run("uint parse invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=-1", nil), "v").Uint().Get()
-		assertInvalidViolationAt(t, err, "v", ViolationInQuery)
+	runNumericContract(t, numericContract[uint]{
+		field:              "v",
+		boundaryTarget:     "/items?v=0",
+		emptyTarget:        "/items?v=",
+		minInvalidTarget:   "/items?v=1",
+		maxInvalidTarget:   "/items?v=3",
+		parseInvalidTarget: "/items?v=-1",
+		boundaryValue:      0,
+		defaultValue:       7,
+		minValue:           2,
+		maxValue:           2,
+		conflictLow:        1,
+		conflictHigh:       2,
+		defaultDetail:      "default uint must be rejected",
+		newBuilder: func(req *http.Request, field string) numericBuilderOps[uint] {
+			return numericBuilderOps[uint]{
+				requiredMinMaxCheckGet: func(min, max uint) (uint, error) {
+					return Query(req, field).Uint().Required().Min(min).Max(max).Check(func(value uint) error { return nil }).Get()
+				},
+				defaultGet: func(def uint) (uint, error) {
+					return Query(req, field).Uint().Default(def).Get()
+				},
+				requiredGet: func() (uint, error) {
+					return Query(req, field).Uint().Required().Get()
+				},
+				defaultMinGet: func(def, min uint) error {
+					_, err := Query(req, field).Uint().Default(def).Min(min).Get()
+					return err
+				},
+				defaultCheckGet: func(def uint, detail string) error {
+					_, err := Query(req, field).Uint().Default(def).Check(func(value uint) error {
+						return errors.New(detail)
+					}).Get()
+					return err
+				},
+				minGet: func(min uint) error {
+					_, err := Query(req, field).Uint().Min(min).Get()
+					return err
+				},
+				maxGet: func(max uint) error {
+					_, err := Query(req, field).Uint().Max(max).Get()
+					return err
+				},
+				maxThenMinGet: func(max, min uint) error {
+					_, err := Query(req, field).Uint().Max(max).Min(min).Get()
+					return err
+				},
+				minThenMaxGet: func(min, max uint) error {
+					_, err := Query(req, field).Uint().Min(min).Max(max).Get()
+					return err
+				},
+				parseGet: func() error {
+					_, err := Query(req, field).Uint().Get()
+					return err
+				},
+			}
+		},
 	})
 }
 
 func TestUint64Param_ValidationAndRangeErrors(t *testing.T) {
-	t.Run("uint64 boundary success", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=0", nil), "v").Uint64().
-			Required().
-			Min(0).
-			Max(0).
-			Check(func(value uint64) error { return nil }).
-			Get()
-		if err != nil {
-			t.Fatalf("Uint64().Required().Min().Max().Check().Get() error = %v", err)
-		}
-		if got != 0 {
-			t.Fatalf("uint64 = %d, want 0", got)
-		}
-	})
-
-	t.Run("uint64 default success", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "v").Uint64().Default(11).Get()
-		if err != nil || got != 11 {
-			t.Fatalf("Uint64().Default().Get() = (%d, %v), want (11, nil)", got, err)
-		}
-	})
-
-	t.Run("uint64 empty string parses zero when required", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=", nil), "v").Uint64().Required().Get()
-		if err != nil || got != 0 {
-			t.Fatalf("Uint64().Required().Get() = (%d, %v), want (0, nil)", got, err)
-		}
-	})
-
-	t.Run("uint64 default check invalid uses custom detail", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "v").Uint64().
-			Default(11).
-			Check(func(value uint64) error {
-				return errors.New("default uint64 must be rejected")
-			}).
-			Get()
-		assertViolation(t, err, Violation{
-			Field:  "v",
-			In:     ViolationInQuery,
-			Code:   ViolationCodeInvalid,
-			Detail: "default uint64 must be rejected",
-		})
-	})
-
-	t.Run("uint64 min invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=1", nil), "v").Uint64().Min(2).Get()
-		assertInvalidViolationAt(t, err, "v", ViolationInQuery)
-	})
-
-	t.Run("uint64 max invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=3", nil), "v").Uint64().Max(2).Get()
-		assertInvalidViolationAt(t, err, "v", ViolationInQuery)
-	})
-
-	t.Run("uint64 max then min conflict", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=3", nil), "v").Uint64().Max(1).Min(2).Get()
-		assertUsageErrorContains(t, err, "minimum must be less than or equal to maximum")
-	})
-
-	t.Run("uint64 min then max conflict", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=3", nil), "v").Uint64().Min(2).Max(1).Get()
-		assertUsageErrorContains(t, err, "maximum must be greater than or equal to minimum")
-	})
-
-	t.Run("uint64 parse invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=-1", nil), "v").Uint64().Get()
-		assertInvalidViolationAt(t, err, "v", ViolationInQuery)
+	runNumericContract(t, numericContract[uint64]{
+		field:              "v",
+		boundaryTarget:     "/items?v=0",
+		emptyTarget:        "/items?v=",
+		minInvalidTarget:   "/items?v=1",
+		maxInvalidTarget:   "/items?v=3",
+		parseInvalidTarget: "/items?v=-1",
+		boundaryValue:      0,
+		defaultValue:       11,
+		minValue:           2,
+		maxValue:           2,
+		conflictLow:        1,
+		conflictHigh:       2,
+		defaultDetail:      "default uint64 must be rejected",
+		newBuilder: func(req *http.Request, field string) numericBuilderOps[uint64] {
+			return numericBuilderOps[uint64]{
+				requiredMinMaxCheckGet: func(min, max uint64) (uint64, error) {
+					return Query(req, field).Uint64().Required().Min(min).Max(max).Check(func(value uint64) error { return nil }).Get()
+				},
+				defaultGet: func(def uint64) (uint64, error) {
+					return Query(req, field).Uint64().Default(def).Get()
+				},
+				requiredGet: func() (uint64, error) {
+					return Query(req, field).Uint64().Required().Get()
+				},
+				defaultMinGet: func(def, min uint64) error {
+					_, err := Query(req, field).Uint64().Default(def).Min(min).Get()
+					return err
+				},
+				defaultCheckGet: func(def uint64, detail string) error {
+					_, err := Query(req, field).Uint64().Default(def).Check(func(value uint64) error {
+						return errors.New(detail)
+					}).Get()
+					return err
+				},
+				minGet: func(min uint64) error {
+					_, err := Query(req, field).Uint64().Min(min).Get()
+					return err
+				},
+				maxGet: func(max uint64) error {
+					_, err := Query(req, field).Uint64().Max(max).Get()
+					return err
+				},
+				maxThenMinGet: func(max, min uint64) error {
+					_, err := Query(req, field).Uint64().Max(max).Min(min).Get()
+					return err
+				},
+				minThenMaxGet: func(min, max uint64) error {
+					_, err := Query(req, field).Uint64().Min(min).Max(max).Get()
+					return err
+				},
+				parseGet: func() error {
+					_, err := Query(req, field).Uint64().Get()
+					return err
+				},
+			}
+		},
 	})
 }
 
 func TestFloat64Param_ValidationAndRangeErrors(t *testing.T) {
-	t.Run("float64 boundary success", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?price=0", nil), "price").Float64().
-			Required().
-			Min(0).
-			Max(0).
-			Check(func(value float64) error { return nil }).
-			Get()
+	runNumericContract(t, numericContract[float64]{
+		field:              "price",
+		boundaryTarget:     "/items?price=0",
+		emptyTarget:        "/items?price=",
+		minInvalidTarget:   "/items?price=1",
+		maxInvalidTarget:   "/items?price=3",
+		parseInvalidTarget: "/items?price=oops",
+		boundaryValue:      0,
+		defaultValue:       1.25,
+		minValue:           2,
+		maxValue:           2,
+		conflictLow:        1,
+		conflictHigh:       2,
+		defaultDetail:      "default float64 must be rejected",
+		newBuilder: func(req *http.Request, field string) numericBuilderOps[float64] {
+			return numericBuilderOps[float64]{
+				requiredMinMaxCheckGet: func(min, max float64) (float64, error) {
+					return Query(req, field).Float64().Required().Min(min).Max(max).Check(func(value float64) error { return nil }).Get()
+				},
+				defaultGet: func(def float64) (float64, error) {
+					return Query(req, field).Float64().Default(def).Get()
+				},
+				requiredGet: func() (float64, error) {
+					return Query(req, field).Float64().Required().Get()
+				},
+				defaultMinGet: func(def, min float64) error {
+					_, err := Query(req, field).Float64().Default(def).Min(min).Get()
+					return err
+				},
+				defaultCheckGet: func(def float64, detail string) error {
+					_, err := Query(req, field).Float64().Default(def).Check(func(value float64) error {
+						return errors.New(detail)
+					}).Get()
+					return err
+				},
+				minGet: func(min float64) error {
+					_, err := Query(req, field).Float64().Min(min).Get()
+					return err
+				},
+				maxGet: func(max float64) error {
+					_, err := Query(req, field).Float64().Max(max).Get()
+					return err
+				},
+				maxThenMinGet: func(max, min float64) error {
+					_, err := Query(req, field).Float64().Max(max).Min(min).Get()
+					return err
+				},
+				minThenMaxGet: func(min, max float64) error {
+					_, err := Query(req, field).Float64().Min(min).Max(max).Get()
+					return err
+				},
+				parseGet: func() error {
+					_, err := Query(req, field).Float64().Get()
+					return err
+				},
+			}
+		},
+	})
+}
+
+func runNumericContract[T comparable](t *testing.T, contract numericContract[T]) {
+	t.Helper()
+
+	t.Run("boundary success", func(t *testing.T) {
+		got, err := contract.newBuilder(newNumericRequest(contract.boundaryTarget), contract.field).
+			requiredMinMaxCheckGet(contract.boundaryValue, contract.boundaryValue)
 		if err != nil {
-			t.Fatalf("Float64().Required().Min().Max().Check().Get() error = %v", err)
+			t.Fatalf("Required().Min().Max().Check().Get() error = %v", err)
 		}
-		if got != 0 {
-			t.Fatalf("float64 = %v, want 0", got)
-		}
-	})
-
-	t.Run("float64 default success", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "price").Float64().Default(1.25).Get()
-		if err != nil || got != 1.25 {
-			t.Fatalf("Float64().Default().Get() = (%v, %v), want (1.25, nil)", got, err)
+		if got != contract.boundaryValue {
+			t.Fatalf("%s = %v, want %v", contract.field, got, contract.boundaryValue)
 		}
 	})
 
-	t.Run("float64 empty string parses zero when required", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?price=", nil), "price").Float64().Required().Get()
-		if err != nil || got != 0 {
-			t.Fatalf("Float64().Required().Get() = (%v, %v), want (0, nil)", got, err)
+	t.Run("default success", func(t *testing.T) {
+		got, err := contract.newBuilder(newNumericRequest("/items"), contract.field).defaultGet(contract.defaultValue)
+		if err != nil || got != contract.defaultValue {
+			t.Fatalf("Default().Get() = (%v, %v), want (%v, nil)", got, err, contract.defaultValue)
 		}
 	})
 
-	t.Run("float64 default check invalid uses custom detail", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "price").Float64().
-			Default(1.25).
-			Check(func(value float64) error {
-				return errors.New("default float64 must be rejected")
-			}).
-			Get()
+	t.Run("empty string parses zero when required", func(t *testing.T) {
+		got, err := contract.newBuilder(newNumericRequest(contract.emptyTarget), contract.field).requiredGet()
+		var zero T
+		if err != nil || got != zero {
+			t.Fatalf("Required().Get() = (%v, %v), want (%v, nil)", got, err, zero)
+		}
+	})
+
+	t.Run("default min invalid", func(t *testing.T) {
+		err := contract.newBuilder(newNumericRequest("/items"), contract.field).defaultMinGet(contract.conflictLow, contract.minValue)
+		assertInvalidViolationAt(t, err, contract.field, ViolationInQuery)
+	})
+
+	t.Run("default check invalid uses custom detail", func(t *testing.T) {
+		err := contract.newBuilder(newNumericRequest("/items"), contract.field).defaultCheckGet(contract.defaultValue, contract.defaultDetail)
 		assertViolation(t, err, Violation{
-			Field:  "price",
+			Field:  contract.field,
 			In:     ViolationInQuery,
 			Code:   ViolationCodeInvalid,
-			Detail: "default float64 must be rejected",
+			Detail: contract.defaultDetail,
 		})
 	})
 
-	t.Run("float64 min invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?price=1", nil), "price").Float64().Min(2).Get()
-		assertInvalidViolationAt(t, err, "price", ViolationInQuery)
+	t.Run("min invalid", func(t *testing.T) {
+		err := contract.newBuilder(newNumericRequest(contract.minInvalidTarget), contract.field).minGet(contract.minValue)
+		assertInvalidViolationAt(t, err, contract.field, ViolationInQuery)
 	})
 
-	t.Run("float64 max invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?price=3", nil), "price").Float64().Max(2).Get()
-		assertInvalidViolationAt(t, err, "price", ViolationInQuery)
+	t.Run("max invalid", func(t *testing.T) {
+		err := contract.newBuilder(newNumericRequest(contract.maxInvalidTarget), contract.field).maxGet(contract.maxValue)
+		assertInvalidViolationAt(t, err, contract.field, ViolationInQuery)
 	})
 
-	t.Run("float64 max then min conflict", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?price=3", nil), "price").Float64().Max(1).Min(2).Get()
+	t.Run("max then min conflict", func(t *testing.T) {
+		err := contract.newBuilder(newNumericRequest(contract.maxInvalidTarget), contract.field).
+			maxThenMinGet(contract.conflictLow, contract.conflictHigh)
 		assertUsageErrorContains(t, err, "minimum must be less than or equal to maximum")
 	})
 
-	t.Run("float64 min then max conflict", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?price=3", nil), "price").Float64().Min(2).Max(1).Get()
+	t.Run("min then max conflict", func(t *testing.T) {
+		err := contract.newBuilder(newNumericRequest(contract.maxInvalidTarget), contract.field).
+			minThenMaxGet(contract.conflictHigh, contract.conflictLow)
 		assertUsageErrorContains(t, err, "maximum must be greater than or equal to minimum")
 	})
 
-	t.Run("float64 parse invalid", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?price=oops", nil), "price").Float64().Get()
-		assertInvalidViolationAt(t, err, "price", ViolationInQuery)
+	t.Run("parse invalid", func(t *testing.T) {
+		err := contract.newBuilder(newNumericRequest(contract.parseInvalidTarget), contract.field).parseGet()
+		assertInvalidViolationAt(t, err, contract.field, ViolationInQuery)
 	})
+}
+
+func newNumericRequest(target string) *http.Request {
+	return httptest.NewRequest(http.MethodGet, target, nil)
 }
