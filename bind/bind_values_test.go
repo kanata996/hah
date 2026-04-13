@@ -545,6 +545,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 			Age    *int              `query:"age"`
 			IDs    []int             `query:"id"`
 			When   time.Time         `query:"when" format:"2006-01-02"`
+			Whens  []time.Time       `query:"whens" format:"15:04:05"`
 			Custom customParamValue  `query:"custom"`
 			Multi  customParamsValue `query:"multi"`
 			State  customTextValue   `query:"state"`
@@ -557,6 +558,7 @@ func TestBindDataDefaultBranches(t *testing.T) {
 			"age":        {"17"},
 			"id":         {"1", "2"},
 			"when":       {"2026-04-09"},
+			"whens":      {"10:11:12", "13:14:15"},
 			"custom":     {"x"},
 			"multi":      {"a", "b"},
 			"state":      {"open"},
@@ -576,6 +578,9 @@ func TestBindDataDefaultBranches(t *testing.T) {
 		}
 		if got := dst.When.Format("2006-01-02"); got != "2026-04-09" {
 			t.Fatalf("When = %q, want 2026-04-09", got)
+		}
+		if len(dst.Whens) != 2 || dst.Whens[0].Format("15:04:05") != "10:11:12" || dst.Whens[1].Format("15:04:05") != "13:14:15" {
+			t.Fatalf("Whens = %v, want 10:11:12 and 13:14:15", dst.Whens)
 		}
 		if dst.Custom.value != "x" {
 			t.Fatalf("Custom = %#v, want x", dst.Custom)
@@ -694,6 +699,15 @@ func TestBindDataDefaultBranches(t *testing.T) {
 			t.Fatal("bindDataDefault(time parse error) = nil")
 		}
 
+		type withTimes struct {
+			Whens []time.Time `query:"whens" format:"15:04:05"`
+		}
+		var timeds withTimes
+		err = bindDataDefault(&timeds, map[string][]string{"whens": {"10:11:12", "bad"}}, "query")
+		if err == nil {
+			t.Fatal("bindDataDefault(times slice parse error) = nil")
+		}
+
 		type withIDs struct {
 			IDs []int `query:"id"`
 		}
@@ -753,74 +767,74 @@ func TestUnmarshalHelpersAndSetters(t *testing.T) {
 
 	t.Run("scalar kinds", func(t *testing.T) {
 		var i int
-		if err := setWithProperTypeDefault(reflect.Int, "1", reflect.ValueOf(&i).Elem()); err != nil || i != 1 {
+		if err := setWithProperTypeDefault(reflect.Int, "1", reflect.ValueOf(&i).Elem(), ""); err != nil || i != 1 {
 			t.Fatalf("setWithProperTypeDefault(int) error = %v, value=%d", err, i)
 		}
 		var i8 int8
-		if err := setWithProperTypeDefault(reflect.Int8, "1", reflect.ValueOf(&i8).Elem()); err != nil || i8 != 1 {
+		if err := setWithProperTypeDefault(reflect.Int8, "1", reflect.ValueOf(&i8).Elem(), ""); err != nil || i8 != 1 {
 			t.Fatalf("setWithProperTypeDefault(int8) error = %v, value=%d", err, i8)
 		}
 		var i16 int16
-		if err := setWithProperTypeDefault(reflect.Int16, "1", reflect.ValueOf(&i16).Elem()); err != nil || i16 != 1 {
+		if err := setWithProperTypeDefault(reflect.Int16, "1", reflect.ValueOf(&i16).Elem(), ""); err != nil || i16 != 1 {
 			t.Fatalf("setWithProperTypeDefault(int16) error = %v, value=%d", err, i16)
 		}
 		var i32 int32
-		if err := setWithProperTypeDefault(reflect.Int32, "1", reflect.ValueOf(&i32).Elem()); err != nil || i32 != 1 {
+		if err := setWithProperTypeDefault(reflect.Int32, "1", reflect.ValueOf(&i32).Elem(), ""); err != nil || i32 != 1 {
 			t.Fatalf("setWithProperTypeDefault(int32) error = %v, value=%d", err, i32)
 		}
 		var i64 int64
-		if err := setWithProperTypeDefault(reflect.Int64, "1", reflect.ValueOf(&i64).Elem()); err != nil || i64 != 1 {
+		if err := setWithProperTypeDefault(reflect.Int64, "1", reflect.ValueOf(&i64).Elem(), ""); err != nil || i64 != 1 {
 			t.Fatalf("setWithProperTypeDefault(int64) error = %v, value=%d", err, i64)
 		}
 		var u uint
-		if err := setWithProperTypeDefault(reflect.Uint, "", reflect.ValueOf(&u).Elem()); err != nil || u != 0 {
+		if err := setWithProperTypeDefault(reflect.Uint, "", reflect.ValueOf(&u).Elem(), ""); err != nil || u != 0 {
 			t.Fatalf("setWithProperTypeDefault(uint) error = %v, value=%d", err, u)
 		}
 		var u8 uint8
-		if err := setWithProperTypeDefault(reflect.Uint8, "1", reflect.ValueOf(&u8).Elem()); err != nil || u8 != 1 {
+		if err := setWithProperTypeDefault(reflect.Uint8, "1", reflect.ValueOf(&u8).Elem(), ""); err != nil || u8 != 1 {
 			t.Fatalf("setWithProperTypeDefault(uint8) error = %v, value=%d", err, u8)
 		}
 		var u16 uint16
-		if err := setWithProperTypeDefault(reflect.Uint16, "1", reflect.ValueOf(&u16).Elem()); err != nil || u16 != 1 {
+		if err := setWithProperTypeDefault(reflect.Uint16, "1", reflect.ValueOf(&u16).Elem(), ""); err != nil || u16 != 1 {
 			t.Fatalf("setWithProperTypeDefault(uint16) error = %v, value=%d", err, u16)
 		}
 		var u32 uint32
-		if err := setWithProperTypeDefault(reflect.Uint32, "1", reflect.ValueOf(&u32).Elem()); err != nil || u32 != 1 {
+		if err := setWithProperTypeDefault(reflect.Uint32, "1", reflect.ValueOf(&u32).Elem(), ""); err != nil || u32 != 1 {
 			t.Fatalf("setWithProperTypeDefault(uint32) error = %v, value=%d", err, u32)
 		}
 		var u64 uint64
-		if err := setWithProperTypeDefault(reflect.Uint64, "1", reflect.ValueOf(&u64).Elem()); err != nil || u64 != 1 {
+		if err := setWithProperTypeDefault(reflect.Uint64, "1", reflect.ValueOf(&u64).Elem(), ""); err != nil || u64 != 1 {
 			t.Fatalf("setWithProperTypeDefault(uint64) error = %v, value=%d", err, u64)
 		}
 		var b bool
-		if err := setWithProperTypeDefault(reflect.Bool, "", reflect.ValueOf(&b).Elem()); err != nil || b {
+		if err := setWithProperTypeDefault(reflect.Bool, "", reflect.ValueOf(&b).Elem(), ""); err != nil || b {
 			t.Fatalf("setWithProperTypeDefault(bool empty) error = %v, value=%v", err, b)
 		}
 		var f32 float32
-		if err := setWithProperTypeDefault(reflect.Float32, "", reflect.ValueOf(&f32).Elem()); err != nil || f32 != 0 {
+		if err := setWithProperTypeDefault(reflect.Float32, "", reflect.ValueOf(&f32).Elem(), ""); err != nil || f32 != 0 {
 			t.Fatalf("setWithProperTypeDefault(float32 empty) error = %v, value=%v", err, f32)
 		}
 		var f64 float64
-		if err := setWithProperTypeDefault(reflect.Float64, "1.5", reflect.ValueOf(&f64).Elem()); err != nil || f64 != 1.5 {
+		if err := setWithProperTypeDefault(reflect.Float64, "1.5", reflect.ValueOf(&f64).Elem(), ""); err != nil || f64 != 1.5 {
 			t.Fatalf("setWithProperTypeDefault(float64) error = %v, value=%v", err, f64)
 		}
 		var s string
-		if err := setWithProperTypeDefault(reflect.String, "x", reflect.ValueOf(&s).Elem()); err != nil || s != "x" {
+		if err := setWithProperTypeDefault(reflect.String, "x", reflect.ValueOf(&s).Elem(), ""); err != nil || s != "x" {
 			t.Fatalf("setWithProperTypeDefault(string) error = %v, value=%q", err, s)
 		}
 		var ptr *int
-		if err := setWithProperTypeDefault(reflect.Pointer, "2", reflect.ValueOf(&ptr).Elem()); err != nil || ptr == nil || *ptr != 2 {
+		if err := setWithProperTypeDefault(reflect.Pointer, "2", reflect.ValueOf(&ptr).Elem(), ""); err != nil || ptr == nil || *ptr != 2 {
 			t.Fatalf("setWithProperTypeDefault(pointer) error = %v, value=%#v", err, ptr)
 		}
 	})
 
 	var unsupported struct{}
-	if err := setWithProperTypeDefault(reflect.Struct, "x", reflect.ValueOf(&unsupported).Elem()); err == nil || err.Error() != "unknown type" {
+	if err := setWithProperTypeDefault(reflect.Struct, "x", reflect.ValueOf(&unsupported).Elem(), ""); err == nil || err.Error() != "unknown type" {
 		t.Fatalf("setWithProperTypeDefault(struct) error = %v", err)
 	}
 
 	var customValue customParamValue
-	if err := setWithProperTypeDefault(reflect.Struct, "value", reflect.ValueOf(&customValue).Elem()); err != nil || customValue.value != "value" {
+	if err := setWithProperTypeDefault(reflect.Struct, "value", reflect.ValueOf(&customValue).Elem(), ""); err != nil || customValue.value != "value" {
 		t.Fatalf("setWithProperTypeDefault(BindUnmarshaler) error = %v, value=%#v", err, customValue)
 	}
 }

@@ -214,7 +214,7 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 			numElems := len(inputValue)
 			slice := reflect.MakeSlice(structField.Type(), numElems, numElems)
 			for j := 0; j < numElems; j++ {
-				if err := setWithProperTypeDefault(sliceOf, inputValue[j], slice.Index(j)); err != nil {
+				if err := setWithProperTypeDefault(sliceOf, inputValue[j], slice.Index(j), formatTag); err != nil {
 					return err
 				}
 			}
@@ -222,7 +222,7 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 			continue
 		}
 
-		if err := setWithProperTypeDefault(structFieldKind, inputValue[0], structField); err != nil {
+		if err := setWithProperTypeDefault(structFieldKind, inputValue[0], structField, formatTag); err != nil {
 			return err
 		}
 	}
@@ -284,8 +284,8 @@ func unmarshalInputToFieldDefault(valueKind reflect.Kind, value string, field re
 }
 
 // setWithProperTypeDefault 按字段 kind 把单个字符串值转换并写入字段。
-func setWithProperTypeDefault(valueKind reflect.Kind, value string, structField reflect.Value) error {
-	if ok, err := unmarshalInputToFieldDefault(valueKind, value, structField, ""); ok {
+func setWithProperTypeDefault(valueKind reflect.Kind, value string, structField reflect.Value, formatTag string) error {
+	if ok, err := unmarshalInputToFieldDefault(valueKind, value, structField, formatTag); ok {
 		return err
 	}
 
