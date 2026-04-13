@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ import (
 // - [✓] Path / Query builder 会为单参数 path/query 读取提供 source-aware required/invalid violation。
 // - [✓] Param builder typed getter 会覆盖默认值、范围/枚举/正则/自定义 Check 与 usage error 边界。
 // - [✓] Time / UnixTime / UnixMilliTime builder 会覆盖公开成功路径、失败路径与区间约束。
-// - 这里只锁定公开 builder 行为；内部 parse helper 不在本文件直接断言。
+// - [✓] 内部参数 helper 会维持 path/query 值提取与 path wildcard 解析的稳定契约。
 
 func TestPathAndQuery_SuccessPaths(t *testing.T) {
 	t.Run("path uuid required", func(t *testing.T) {
@@ -165,6 +166,96 @@ func TestPathAndQuery_UsageErrors(t *testing.T) {
 	t.Run("nil check", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=3", nil), "page").Int().Check(nil).Get()
 		assertUsageErrorContains(t, err, "check must not be nil")
+	})
+}
+
+func TestParamLookupHelpers_Branches(t *testing.T) {
+	t.Run("path helper", func(t *testing.T) {
+		if values, ok := pathParamValues(nil, "id"); ok || values != nil {
+			t.Fatalf("pathParamValues(nil) = (%v, %v), want (nil, false)", values, ok)
+		}
+
+		reqWithValue := requestWithPathParams(map[string][]string{
+			"id": {"u_1"},
+		})
+		if values, ok := pathParamValues(reqWithValue, "id"); !ok || len(values) != 1 || values[0] != "u_1" {
+			t.Fatalf("pathParamValues(value) = (%v, %v), want ([u_1], true)", values, ok)
+		}
+
+		reqWithEmpty := requestWithPathParams(map[string][]string{
+			"id": {""},
+		})
+		if values, ok := pathParamValues(reqWithEmpty, "id"); !ok || len(values) != 1 || values[0] != "" {
+			t.Fatalf("pathParamValues(empty) = (%v, %v), want ([\"\"], true)", values, ok)
+		}
+
+		reqMissing := httptest.NewRequest(http.MethodGet, "/accounts", nil)
+		reqMissing.Pattern = "/accounts"
+		if values, ok := pathParamValues(reqMissing, "id"); ok || values != nil {
+			t.Fatalf("pathParamValues(missing) = (%v, %v), want (nil, false)", values, ok)
+		}
+	})
+
+	t.Run("query helper", func(t *testing.T) {
+		if values, ok := queryParamValues(nil, "page"); ok || values != nil {
+			t.Fatalf("queryParamValues(nil) = (%v, %v), want (nil, false)", values, ok)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/items?page=5&tag=a&tag=b", nil)
+
+		t.Run("single value", func(t *testing.T) {
+			values, ok := queryParamValues(req, "page")
+			if !ok || len(values) != 1 || values[0] != "5" {
+				t.Fatalf("queryParamValues(page) = (%v, %v), want ([5], true)", values, ok)
+			}
+		})
+
+		t.Run("multiple values", func(t *testing.T) {
+			values, ok := queryParamValues(req, "tag")
+			if !ok || len(values) != 2 || values[0] != "a" || values[1] != "b" {
+				t.Fatalf("queryParamValues(tag) = (%v, %v), want ([a b], true)", values, ok)
+			}
+		})
+
+		t.Run("missing key", func(t *testing.T) {
+			values, ok := queryParamValues(req, "missing")
+			if ok || values != nil {
+				t.Fatalf("queryParamValues(missing) = (%v, %v), want (nil, false)", values, ok)
+			}
+		})
+
+		t.Run("empty value", func(t *testing.T) {
+			emptyReq := httptest.NewRequest(http.MethodGet, "/items?page=", nil)
+			values, ok := queryParamValues(emptyReq, "page")
+			if !ok || len(values) != 1 || values[0] != "" {
+				t.Fatalf("queryParamValues(empty) = (%v, %v), want ([\"\"], true)", values, ok)
+			}
+		})
+	})
+
+	t.Run("path wildcard names", func(t *testing.T) {
+		tests := []struct {
+			name    string
+			pattern string
+			want    []string
+		}{
+			{name: "blank", pattern: "   ", want: nil},
+			{name: "no wildcard", pattern: "/accounts", want: []string{}},
+			{name: "basic", pattern: "/accounts/{id}", want: []string{"id"}},
+			{name: "with method prefix", pattern: "GET /accounts/{id}", want: []string{"id"}},
+			{name: "catch all", pattern: "/files/{path...}", want: []string{"path"}},
+			{name: "typed wildcard", pattern: "/accounts/{id:[0-9]+}", want: []string{"id"}},
+			{name: "skip dollar", pattern: "/{$}", want: []string{}},
+			{name: "malformed", pattern: "/accounts/{id", want: []string{}},
+		}
+
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := pathWildcardNames(tc.pattern); !reflect.DeepEqual(got, tc.want) {
+					t.Fatalf("pathWildcardNames(%q) = %#v, want %#v", tc.pattern, got, tc.want)
+				}
+			})
+		}
 	})
 }
 

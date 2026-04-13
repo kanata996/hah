@@ -1,7 +1,7 @@
 // Package reqx 为基于 net/http 的 JSON API 提供请求级规则与校验组合层。
 //
 // 它聚焦在 binding 之后的输入治理：
-//   - 直接读取 path/query 参数，并提供单参数读取/校验 builder 与 typed helper
+//   - 直接读取 path/query 参数，并提供单参数读取/校验 builder
 //   - 在字段校验前执行 Normalize
 //   - 允许 DTO 通过 RequestValidator 声明请求级规则
 //   - 使用 validator/v10 校验绑定后的输入
@@ -13,7 +13,7 @@
 //   - 需要显式来源绑定 + 校验时，组合 bind.Bind* 与 Validate(..., Source*)
 //
 // 公开 API：
-//   - request helper 入口：Path、Query、PathParam、QueryParam、Param
+//   - request helper 入口：Path、Query、Param
 //   - Path/Query builder 返回类型：StringParam、IntParam、Int64Param、
 //     UintParam、BoolParam、Float64Param、UUIDParam、TimeParam
 //   - 校验入口：BindAndValidate、Validate、Source

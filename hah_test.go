@@ -105,32 +105,6 @@ func TestBindHeaders_DelegatesToBind(t *testing.T) {
 	}
 }
 
-// PathParam 会通过根包 facade 暴露 reqx 的 typed path getter。
-func TestPathParam_DelegatesToReqx(t *testing.T) {
-	req := newRouteRequest(http.MethodGet, "/accounts/42", "id", "42")
-
-	got, err := PathParam[int](req, "id")
-	if err != nil {
-		t.Fatalf("PathParam() error = %v", err)
-	}
-	if got != 42 {
-		t.Fatalf("PathParam() = %d, want 42", got)
-	}
-}
-
-// QueryParam 会通过根包 facade 暴露 reqx 的 typed query getter。
-func TestQueryParam_DelegatesToReqx(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts?page=42", nil)
-
-	got, err := QueryParam[int](req, "page")
-	if err != nil {
-		t.Fatalf("QueryParam() error = %v", err)
-	}
-	if got != 42 {
-		t.Fatalf("QueryParam() = %d, want 42", got)
-	}
-}
-
 // Path 会通过根包 facade 暴露 reqx 的 path 单参数校验 builder。
 func TestPath_DelegatesToReqx(t *testing.T) {
 	want := uuid.New()

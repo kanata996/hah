@@ -3,7 +3,7 @@
 这份文档聚焦 `hah` 的输入侧能力，覆盖两个核心包：
 
 - `bind`：负责把 path / query / header / body 绑定到 Go 目标值
-- `reqx`：负责 typed request helper、Normalize、请求级规则和字段校验
+- `reqx`：负责 request helper、Normalize、请求级规则和字段校验
 
 `hah` 是 `net/http`-first 的设计，不提供额外的请求上下文抽象，而是围绕标准库 `*http.Request`、显式 binding 和显式 validation 组合能力来组织 API。
 
@@ -12,7 +12,7 @@
 | 目标 | 推荐 API | 说明 |
 | --- | --- | --- |
 | 单字段 path / query 读取并顺手做常见验证 | `hah.Path` / `hah.Query` | 适合不定义 DTO，但希望直接返回 source-aware `required` / `invalid` 错误 |
-| 高级单字段读取 | `hah.PathParam` / `hah.QueryParam` | 适合只做 typed getter，或需要 pointer / slice / 自定义类型等低层语义 |
+| 自定义类型或结构化输入 | `bind.Bind*` | 复杂类型、多值 query、自定义解码统一走 `bind`，避免再扩单字段 helper |
 | 标准 handler 的默认 happy path | `hah.BindAndValidate` | 默认执行 `path -> query(GET/DELETE/HEAD) -> body`，再做 Normalize / RequestValidator / validator |
 | 只做 body 绑定，不做校验 | `hah.BindBody` | 适合只需要 JSON 解码的场景 |
 | 显式只绑定 query / path / header / body | `hah.BindQueryParams` / `hah.BindPathValues` / `hah.BindHeaders` / `hah.BindBody` | 常用 source-specific binding；底层实现仍在 `bind` 包 |
@@ -78,22 +78,9 @@ func handler(w http.ResponseWriter, r *http.Request) {
 - `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
 - `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
 
-### typed path / query helper
+### 自定义类型输入
 
-如果你需要的是“只做 typed getter，不附带快捷校验 DSL”，保留低层 helper：
-
-```go
-tags, err := hah.QueryParam[[]string](r, "tag")
-cursor, err := hah.QueryParam[*uuid.UUID](r, "cursor")
-```
-
-几个公开语义需要注意：
-
-- 缺失值返回零值；例如 `QueryParam[int]` 缺失时返回 `0`
-- 如果要区分“缺失”和“有值”，用指针类型，例如 `QueryParam[*uuid.UUID]`
-- query 多值支持 slice：`?tag=a&tag=b` 可以用 `QueryParam[[]string](r, "tag")`
-- 对标量目标，重复 query 只取第一个值
-- 支持 `bind.BindUnmarshaler` 和 `encoding.TextUnmarshaler`
+如果单参数不是内建标量，或者你已经需要自定义解码、重复 query、多值语义，直接交给 `bind`。这一层只保留常见标量 builder，不再为复杂类型单独扩 request helper。
 
 ## 用 `bind` 绑定 DTO
 
@@ -200,11 +187,11 @@ func (t *Timestamp) UnmarshalParam(src string) error {
 }
 ```
 
-然后这个类型既可以被 `bind.Bind*` 使用，也可以被 `hah.PathParam` / `hah.QueryParam` 使用。
+这类自定义解码主要服务于 `bind.Bind*`。如果输入已经超出常见标量，优先定义 DTO 并让 `bind` 接管，而不是继续堆单字段 helper。
 
 ## 用 `reqx` 做校验和请求级规则
 
-`reqx` 负责 typed request helper、Normalize、请求级规则、字段校验和 violation 包络，把输入后的校验流程集中在同一层。
+`reqx` 负责 request helper、Normalize、请求级规则、字段校验和 violation 包络，把输入后的校验流程集中在同一层。
 
 ### 默认 mixed-source happy path
 
@@ -385,11 +372,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 ### 4. 只拿一个 path / query 参数
 
 ```go
-orgID, err := hah.PathParam[string](r, "org_id")
-limit, err := hah.QueryParam[int](r, "limit")
+orgID, err := hah.Path(r, "org_id").String().Required().Get()
+limit, err := hah.Query(r, "limit").Int().Default(20).Min(1).Max(100).Get()
 ```
 
-这种场景不必为了一个参数单独创建 DTO。
+这种场景不必为了一两个参数单独创建 DTO。
 
 ## 注意事项
 

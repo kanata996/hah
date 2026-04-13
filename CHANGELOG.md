@@ -13,6 +13,10 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+### Breaking
+
+- Removed the public `reqx.PathParam[T](...)` / `reqx.QueryParam[T](...)` APIs and their root `hah` facade re-exports. Single-field request access now converges on `Path(...)` / `Query(...)`, while complex decoding continues to use `bind`.
+
 ## [v0.4.1] - 2026-04-13
 
 ### Added

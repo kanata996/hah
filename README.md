@@ -55,7 +55,7 @@ import (
 
 - `hah`：根包 facade，聚合常用的绑定、校验和响应写回入口
 - `bind`：请求绑定层，负责 path/query/header/body 到目标值的映射
-- `reqx`：请求 helper、请求规则与校验层，负责 `Path` / `Query`、`PathParam` / `QueryParam`、`Validate`、`Normalize`、`RequestValidator`、`RequireBody` 和 `validator/v10`
+- `reqx`：请求 helper、请求规则与校验层，负责 `Path` / `Query`、`Validate`、`Normalize`、`RequestValidator`、`RequireBody` 和 `validator/v10`
 - `errx`：共享公共 HTTP 错误模型
 - `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
 
@@ -125,8 +125,6 @@ func main() {
 
 - `Path`
 - `Query`
-- `PathParam`
-- `QueryParam`
 - `Bind`
 - `BindBody`
 - `BindQueryParams`

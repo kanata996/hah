@@ -44,6 +44,60 @@ func Query(r *http.Request, name string) *Param {
 	}
 }
 
+func pathParamValues(r *http.Request, name string) ([]string, bool) {
+	if r == nil {
+		return nil, false
+	}
+	if value := r.PathValue(name); value != "" {
+		return []string{value}, true
+	}
+	for _, wildcard := range pathWildcardNames(r.Pattern) {
+		if wildcard == name {
+			return []string{r.PathValue(name)}, true
+		}
+	}
+	return nil, false
+}
+
+func queryParamValues(r *http.Request, name string) ([]string, bool) {
+	if r == nil || r.URL == nil {
+		return nil, false
+	}
+	values, exists := r.URL.Query()[name]
+	return values, exists
+}
+
+func pathWildcardNames(pattern string) []string {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return nil
+	}
+
+	names := make([]string, 0, 2)
+	for i := 0; i < len(pattern); i++ {
+		if pattern[i] != '{' {
+			continue
+		}
+
+		end := strings.IndexByte(pattern[i+1:], '}')
+		if end < 0 {
+			break
+		}
+
+		token := strings.TrimSpace(pattern[i+1 : i+1+end])
+		token = strings.TrimSuffix(token, "...")
+		token, _, _ = strings.Cut(token, ":")
+		token = strings.TrimSpace(token)
+		if token != "" && token != "$" {
+			names = append(names, token)
+		}
+
+		i += end + 1
+	}
+
+	return names
+}
+
 // String 读取 string 参数。
 func (p *Param) String() *StringParam {
 	return &StringParam{value: newParamValue(p, parseStringValue)}

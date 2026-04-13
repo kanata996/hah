@@ -46,16 +46,6 @@ func BindHeaders(r *http.Request, target any) error {
 	return bind.BindHeaders(r, target)
 }
 
-// PathParam 按当前请求参数转换规则读取并解析单个 path 参数。
-func PathParam[T any](r *http.Request, name string) (T, error) {
-	return reqx.PathParam[T](r, name)
-}
-
-// QueryParam 按当前请求参数转换规则读取并解析单个 query 参数。
-func QueryParam[T any](r *http.Request, name string) (T, error) {
-	return reqx.QueryParam[T](r, name)
-}
-
 // Path 创建 path 单参数读取与校验 builder。
 func Path(r *http.Request, name string) *Param {
 	return reqx.Path(r, name)
