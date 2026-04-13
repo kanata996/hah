@@ -1,0 +1,149 @@
+package reqx
+
+import (
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"regexp"
+	"testing"
+)
+
+// 测试清单：
+// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
+// - [✓] QueryParam.String 会覆盖 default 成功路径、长度/枚举/正则约束、custom Check 失败与 usage error 边界。
+// - [✓] PathParam 会通过公开入口直接覆盖代表性的 string/int default、约束检查与 usage error 契约。
+// - [✓] Fuzz 评估：本文件当前只补 string-like builder 规格回归，不新增 fuzz；原因是未引入新的 query/path 解析逻辑或输入状态空间。
+
+func TestPathTypedParams_DirectCoverage(t *testing.T) {
+	t.Run("string default one-of match and check success", func(t *testing.T) {
+		got, err := Path(requestWithPathParams(nil), "slug").String().
+			Default("acct_123").
+			OneOf("acct_123", "acct_456").
+			Match(regexp.MustCompile(`^acct_[0-9]+$`)).
+			Check(func(value string) error {
+				if value != "acct_123" {
+					return errors.New("unexpected slug")
+				}
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("Path().String().Default().OneOf().Match().Check().Get() error = %v", err)
+		}
+		if got != "acct_123" {
+			t.Fatalf("slug = %q, want acct_123", got)
+		}
+	})
+
+	t.Run("int default still honors range", func(t *testing.T) {
+		_, err := Path(requestWithPathParams(nil), "page").Int().
+			Default(1).
+			Min(2).
+			Get()
+		assertInvalidViolationAt(t, err, "page", ViolationInPath)
+	})
+
+	t.Run("required default conflict", func(t *testing.T) {
+		_, err := Path(requestWithPathParams(nil), "page").Int().
+			Required().
+			Default(1).
+			Get()
+		assertUsageErrorContains(t, err, "required and default are mutually exclusive")
+	})
+}
+
+func TestStringParam_ValidationAndUsageErrors(t *testing.T) {
+	t.Run("default and check success", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "name").String().
+			Default("kanata").
+			Check(func(value string) error {
+				if value != "kanata" {
+					return errors.New("unexpected name")
+				}
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("String().Default().Check().Get() error = %v", err)
+		}
+		if got != "kanata" {
+			t.Fatalf("name = %q, want kanata", got)
+		}
+	})
+
+	t.Run("default one-of invalid", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "status").String().
+			Default("pending").
+			OneOf("open", "closed").
+			Get()
+		assertInvalidViolationAt(t, err, "status", ViolationInQuery)
+	})
+
+	t.Run("default match invalid", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "slug").String().
+			Default("GO").
+			Match(regexp.MustCompile(`^[a-z]+$`)).
+			Get()
+		assertInvalidViolationAt(t, err, "slug", ViolationInQuery)
+	})
+
+	t.Run("default check invalid uses custom detail", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "name").String().
+			Default("kanata").
+			Check(func(value string) error {
+				return errors.New("default must be rejected")
+			}).
+			Get()
+		assertViolation(t, err, Violation{
+			Field:  "name",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "default must be rejected",
+		})
+	})
+
+	t.Run("min and max len success", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=go", nil), "name").String().MinLen(2).MaxLen(2).Get()
+		if err != nil {
+			t.Fatalf("String().MinLen().MaxLen().Get() error = %v", err)
+		}
+		if got != "go" {
+			t.Fatalf("name = %q, want go", got)
+		}
+	})
+
+	t.Run("min len invalid", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=g", nil), "name").String().MinLen(2).Get()
+		assertInvalidViolationAt(t, err, "name", ViolationInQuery)
+	})
+
+	t.Run("max len invalid", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=golang", nil), "name").String().MaxLen(3).Get()
+		assertInvalidViolationAt(t, err, "name", ViolationInQuery)
+	})
+
+	t.Run("negative min len", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=go", nil), "name").String().MinLen(-1).Get()
+		assertUsageErrorContains(t, err, "minimum length must be >= 0")
+	})
+
+	t.Run("negative max len", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=go", nil), "name").String().MaxLen(-1).Get()
+		assertUsageErrorContains(t, err, "maximum length must be >= 0")
+	})
+
+	t.Run("one-of invalid", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?status=pending", nil), "status").String().OneOf("open", "closed").Get()
+		assertInvalidViolationAt(t, err, "status", ViolationInQuery)
+	})
+
+	t.Run("nil match pattern", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?slug=go", nil), "slug").String().Match(nil).Get()
+		assertUsageErrorContains(t, err, "match pattern must not be nil")
+	})
+
+	t.Run("match invalid", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?slug=GO", nil), "slug").String().Match(regexp.MustCompile(`^[a-z]+$`)).Get()
+		assertInvalidViolationAt(t, err, "slug", ViolationInQuery)
+	})
+}

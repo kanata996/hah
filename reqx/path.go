@@ -3,6 +3,8 @@ package reqx
 import (
 	"net/http"
 	"strings"
+
+	ireq "github.com/kanata996/hah/internal/req"
 )
 
 // PathParam 表示一个待解析的 path 单参数。
@@ -63,44 +65,12 @@ func pathParamValues(r *http.Request, name string) ([]string, bool) {
 	if r == nil {
 		return nil, false
 	}
-	if value := r.PathValue(name); value != "" {
+	value := r.PathValue(name)
+	if value != "" {
 		return []string{value}, true
 	}
-	for _, wildcard := range pathWildcardNames(r.Pattern) {
-		if wildcard == name {
-			return []string{r.PathValue(name)}, true
-		}
+	if ireq.PathHasWildcard(r.Pattern, name) {
+		return []string{value}, true
 	}
 	return nil, false
-}
-
-func pathWildcardNames(pattern string) []string {
-	pattern = strings.TrimSpace(pattern)
-	if pattern == "" {
-		return nil
-	}
-
-	names := make([]string, 0, 2)
-	for i := 0; i < len(pattern); i++ {
-		if pattern[i] != '{' {
-			continue
-		}
-
-		end := strings.IndexByte(pattern[i+1:], '}')
-		if end < 0 {
-			break
-		}
-
-		token := strings.TrimSpace(pattern[i+1 : i+1+end])
-		token = strings.TrimSuffix(token, "...")
-		token, _, _ = strings.Cut(token, ":")
-		token = strings.TrimSpace(token)
-		if token != "" && token != "$" {
-			names = append(names, token)
-		}
-
-		i += end + 1
-	}
-
-	return names
 }

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/kanata996/hah/errx"
+	ireq "github.com/kanata996/hah/internal/req"
 )
 
 type customParamValue struct {
@@ -840,13 +841,13 @@ func TestUnmarshalHelpersAndSetters(t *testing.T) {
 }
 
 func TestPathHelpers(t *testing.T) {
-	if got := pathWildcardNames("   "); got != nil {
+	if got := ireq.PathWildcardNames("   "); got != nil {
 		t.Fatalf("pathWildcardNames(blank) = %#v, want nil", got)
 	}
-	if got := pathWildcardNames("GET /users/{user_id}/files/{path...}/{$}/{id:rest}/{ }"); !reflect.DeepEqual(got, []string{"user_id", "path", "id"}) {
+	if got := ireq.PathWildcardNames("GET /users/{user_id}/files/{path...}/{$}/{id:rest}/{ }"); !reflect.DeepEqual(got, []string{"user_id", "path", "id"}) {
 		t.Fatalf("pathWildcardNames() = %#v", got)
 	}
-	if got := pathWildcardNames("/users/{user_id"); len(got) != 0 {
+	if got := ireq.PathWildcardNames("/users/{user_id"); len(got) != 0 {
 		t.Fatalf("pathWildcardNames(invalid pattern) = %#v, want empty", got)
 	}
 }

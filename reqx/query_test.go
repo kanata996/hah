@@ -184,6 +184,16 @@ func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("missing optional returns nil slice", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().Get()
+		if err != nil {
+			t.Fatalf("Query().Values().Get() error = %v", err)
+		}
+		if got != nil {
+			t.Fatalf("tag = %#v, want nil", got)
+		}
+	})
+
 	t.Run("default clones slice", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items", nil)
 		def := []string{"a", "b"}

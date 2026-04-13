@@ -62,6 +62,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 
 // responseAlreadyStarted 仅在 writer 显式暴露响应状态时判断是否已经开始写出。
 // 对于通用 http.ResponseWriter，标准接口本身无法可靠探测“是否已发出 header/body”。
+// 这里采用最小判断：若可读到 status/bytes 且任一非零，则视为已开始。
 func responseAlreadyStarted(w http.ResponseWriter) bool {
 	type responseStateWriter interface {
 		Status() int

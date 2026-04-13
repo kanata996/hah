@@ -153,6 +153,29 @@ func (w *unwrapOnlyWriter) Unwrap() http.ResponseWriter {
 	return w.inner
 }
 
+type explicitStatusWriter struct {
+	inner        http.ResponseWriter
+	status       int
+	bytesWritten int
+}
+
+func (w *explicitStatusWriter) Header() http.Header { return w.inner.Header() }
+func (w *explicitStatusWriter) WriteHeader(status int) {
+	w.status = status
+	w.inner.WriteHeader(status)
+}
+func (w *explicitStatusWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	n, err := w.inner.Write(p)
+	w.bytesWritten += n
+	return n, err
+}
+func (w *explicitStatusWriter) Status() int                 { return w.status }
+func (w *explicitStatusWriter) BytesWritten() int           { return w.bytesWritten }
+func (w *explicitStatusWriter) Unwrap() http.ResponseWriter { return w.inner }
+
 // WriteError 会把 HTTPError 写成标准 problem JSON。
 func TestWriteErrorWritesEnvelope(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -771,6 +794,27 @@ func TestResponseAlreadyStartedThroughUnwrapChain(t *testing.T) {
 	}
 }
 
+func TestWriteErrorTreatsExplicit200StatusAsStartedWhenNoWrittenMethodExists(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+
+	// 初始化为 status=0 的标准代理 Writer，但由于业务逻辑调用了 WriteHeader(200) 导致状态变化为 200
+	w := &explicitStatusWriter{inner: rr, status: 0}
+	w.WriteHeader(http.StatusOK)
+
+	cause := errors.New("boom after headers sent")
+	err := WriteError(w, req, cause)
+
+	// 这里应当判断为已开始响应并原样抛出 cause
+	if !errors.Is(err, cause) {
+		t.Fatalf("WriteError() error = %v, want %v", err, cause)
+	}
+	// 不应重写成 500 status 导致 superfluous 写出
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+}
+
 // 4xx 不会为了独立错误日志去预先展开内部诊断错误链。
 func TestWriteErrorDoesNotBuildDiagnosticAttrsFor4xx(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
@@ -884,9 +928,15 @@ func TestLogErrorResponseWriteFailureFallsBackToDefaultLogger(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/failure", nil)
 	var responder *ErrorResponder
+	httpErr := errx.NewHTTPErrorWithCause(
+		http.StatusInternalServerError,
+		"internal_error",
+		"Internal Server Error",
+		errors.New("db timeout"),
+	)
 	responder.logErrorResponseWriteFailure(
 		req,
-		errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"),
+		httpErr,
 		errors.New("socket closed"),
 	)
 
@@ -903,6 +953,9 @@ func TestLogErrorResponseWriteFailureFallsBackToDefaultLogger(t *testing.T) {
 	}
 	if got := logEntry["error.message"]; got != "socket closed" {
 		t.Fatalf("error.message = %#v, want socket closed", got)
+	}
+	if got := logEntry["error.root_message"]; got != "socket closed" {
+		t.Fatalf("error.root_message = %#v, want socket closed", got)
 	}
 	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
 		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kanata996/hah/errx"
+	ireq "github.com/kanata996/hah/internal/req"
 )
 
 // 本文件负责 path/query/header 这类字符串键值源的默认绑定逻辑和共享反射辅助。
@@ -31,7 +32,7 @@ type bindMultipleUnmarshaler interface {
 func bindPathValuesDefault(r *http.Request, target any) error {
 	params := map[string][]string{}
 	if r != nil {
-		for _, name := range pathWildcardNames(r.Pattern) {
+		for _, name := range ireq.PathWildcardNames(r.Pattern) {
 			params[name] = []string{r.PathValue(name)}
 		}
 	}
@@ -380,36 +381,4 @@ func setFloatFieldDefault(value string, bitSize int, field reflect.Value) error 
 		field.SetFloat(floatVal)
 	}
 	return err
-}
-
-// pathWildcardNames 从标准库路由 pattern 中提取 path 参数名。
-func pathWildcardNames(pattern string) []string {
-	pattern = strings.TrimSpace(pattern)
-	if pattern == "" {
-		return nil
-	}
-
-	names := make([]string, 0, 2)
-	for i := 0; i < len(pattern); i++ {
-		if pattern[i] != '{' {
-			continue
-		}
-
-		end := strings.IndexByte(pattern[i+1:], '}')
-		if end < 0 {
-			break
-		}
-
-		token := strings.TrimSpace(pattern[i+1 : i+1+end])
-		token = strings.TrimSuffix(token, "...")
-		token, _, _ = strings.Cut(token, ":")
-		token = strings.TrimSpace(token)
-		if token != "" && token != "$" {
-			names = append(names, token)
-		}
-
-		i += end + 1
-	}
-
-	return names
 }

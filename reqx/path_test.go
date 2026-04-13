@@ -7,11 +7,13 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	ireq "github.com/kanata996/hah/internal/req"
 )
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
 // - [✓] Path 入口会为资源标识型 path 参数提供 source-aware required/invalid violation。
+// - [✓] Path 入口会对 nil request、空参数名和缺失 optional 参数维持稳定前置条件与零值契约。
 // - [✓] PathParam 只保留 path 允许的窄类型面：String、UUID、Int、Int64、Uint、Uint64。
 // - [✓] path lookup helper 会维持 PathValue / Pattern wildcard 的公开契约。
 
@@ -89,6 +91,16 @@ func TestPath_RequiredAndInvalidViolations(t *testing.T) {
 }
 
 func TestPathBuilder_UsageAndOptionalBehavior(t *testing.T) {
+	t.Run("nil request", func(t *testing.T) {
+		_, err := Path(nil, "id").String().Get()
+		assertUsageErrorContains(t, err, "request must not be nil")
+	})
+
+	t.Run("empty name", func(t *testing.T) {
+		_, err := Path(requestWithPathParams(map[string][]string{"id": {"u_1"}}), " ").String().Get()
+		assertUsageErrorContains(t, err, "parameter name must not be empty")
+	})
+
 	t.Run("nil path builder", func(t *testing.T) {
 		var p *PathParam
 
@@ -99,6 +111,16 @@ func TestPathBuilder_UsageAndOptionalBehavior(t *testing.T) {
 	t.Run("zero path builder", func(t *testing.T) {
 		_, err := (&PathParam{}).String().Get()
 		assertUsageErrorContains(t, err, "param builder must be created with Path or Query")
+	})
+
+	t.Run("missing optional returns zero", func(t *testing.T) {
+		got, err := Path(requestWithPathParams(nil), "id").String().Get()
+		if err != nil {
+			t.Fatalf("Path().String().Get() error = %v", err)
+		}
+		if got != "" {
+			t.Fatalf("id = %q, want empty string", got)
+		}
 	})
 }
 
@@ -147,7 +169,7 @@ func TestPathLookupHelpers_Branches(t *testing.T) {
 
 		for _, tc := range tests {
 			t.Run(tc.name, func(t *testing.T) {
-				if got := pathWildcardNames(tc.pattern); !reflect.DeepEqual(got, tc.want) {
+				if got := ireq.PathWildcardNames(tc.pattern); !reflect.DeepEqual(got, tc.want) {
 					t.Fatalf("pathWildcardNames(%q) = %#v, want %#v", tc.pattern, got, tc.want)
 				}
 			})
