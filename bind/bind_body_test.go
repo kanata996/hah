@@ -4,34 +4,17 @@ package bind
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
 // - [✓] BindBody 的 Content-Type、空 body、未知字段与非法 JSON 契约。
 // - [✓] BindBody 支持标准 decoder 目标，包括 struct、slice、map。
-// - [✓] BindBody 公开入口拒绝无效 destination，包括非指针和 typed nil pointer。
 // - [✓] BindBody 在 body 大小达到上限、超出上限和 unknown-length 超限时维持稳定契约。
-// - [✓] body 相关内部辅助有最小补充覆盖，包括 media type、读 body 和错误映射。
 // - [✓] BindBody 在 req.Body 为 nil 时保持 no-op。
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 )
-
-type failingReadCloser struct {
-	err error
-}
-
-func (r failingReadCloser) Read(_ []byte) (int, error) {
-	return 0, r.err
-}
-
-func (r failingReadCloser) Close() error {
-	return nil
-}
 
 type byteThenReadErrorCloser struct {
 	done bool
@@ -245,27 +228,6 @@ func TestBindBody_UnknownLengthNonEmptyBodyStillBinds(t *testing.T) {
 	}
 }
 
-func TestBindBody_PublicEntryPointRejectsInvalidDestinations(t *testing.T) {
-	type request struct {
-		Name string `json:"name"`
-	}
-
-	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
-
-	t.Run("rejects non pointer destination", func(t *testing.T) {
-		if err := BindBody(req, request{}); err == nil || err.Error() != "bind: destination must not be nil" {
-			t.Fatalf("BindBody(non-pointer) error = %v", err)
-		}
-	})
-
-	t.Run("rejects typed nil pointer destination", func(t *testing.T) {
-		var dst *request
-		if err := BindBody(req, dst); err == nil || err.Error() != "bind: destination must not be nil" {
-			t.Fatalf("BindBody(typed nil pointer) error = %v", err)
-		}
-	})
-}
-
 func TestBindBody_JSONContract(t *testing.T) {
 	t.Run("array binds to slice target", func(t *testing.T) {
 		type item struct {
@@ -406,66 +368,6 @@ func TestBindBody_RequestSizeLimitContract(t *testing.T) {
 			t.Fatalf("dst = %#v, want existing values preserved on oversized unknown-length body", dst)
 		}
 	})
-}
-
-func TestBindBody_HelperBranches(t *testing.T) {
-	if got, err := bodyMediaType(nil); err != nil || got != "" {
-		t.Fatalf("bodyMediaType(nil) = (%q, %v), want (empty, nil)", got, err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
-	req.Header.Set("Content-Type", " application/json ; charset=utf-8 ")
-	if got, err := bodyMediaType(req); err != nil || got != mimeApplicationJSON {
-		t.Fatalf("bodyMediaType() = (%q, %v), want (%q, nil)", got, err, mimeApplicationJSON)
-	}
-
-	badReq := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
-	badReq.Header.Set("Content-Type", `application/json; charset="utf-8`)
-	if _, err := bodyMediaType(badReq); err == nil {
-		t.Fatal("bodyMediaType(malformed) error = nil, want parse error")
-	}
-
-	type payload struct {
-		Name string `json:"name"`
-	}
-
-	if err := decodeJSONBody([]byte(`{"name":"kanata"}`), &payload{}, false); err != nil {
-		t.Fatalf("decodeJSONBody() error = %v", err)
-	}
-
-	invalidUnmarshalErr := &json.InvalidUnmarshalError{Type: reflect.TypeOf(payload{})}
-	if got := mapJSONBodyDecodeError(invalidUnmarshalErr); got != invalidUnmarshalErr {
-		t.Fatalf("mapJSONBodyDecodeError() = %v, want same error", got)
-	}
-
-	data, err := readBody(io.NopCloser(strings.NewReader("ok")), 0)
-	if err != nil || string(data) != "ok" {
-		t.Fatalf("readBody(default max) = (%q, %v), want (ok, nil)", data, err)
-	}
-	if data, err := readBody(nil, 10); err != nil || data != nil {
-		t.Fatalf("readBody(nil) = (%v, %v), want (nil, nil)", data, err)
-	}
-
-	wantErr := errors.New("read failed")
-	if _, err := readBody(failingReadCloser{err: wantErr}, 10); !errors.Is(err, wantErr) {
-		t.Fatalf("readBody(failing) error = %v, want %v", err, wantErr)
-	}
-
-	readErrReq := httptest.NewRequest(http.MethodPost, "/", nil)
-	readErrReq.ContentLength = 1
-	readErrReq.Header.Set("Content-Type", mimeApplicationJSON)
-	readErrReq.Body = failingReadCloser{err: wantErr}
-	if err := bindBodyDefault(readErrReq, &payload{}, defaultBindConfig().body); !errors.Is(err, wantErr) {
-		t.Fatalf("bindBodyDefault(read error) = %v, want %v", err, wantErr)
-	}
-
-	readErrAfterProbeReq := httptest.NewRequest(http.MethodPost, "/", nil)
-	readErrAfterProbeReq.ContentLength = -1
-	readErrAfterProbeReq.Header.Set("Content-Type", mimeApplicationJSON)
-	readErrAfterProbeReq.Body = &byteThenReadErrorCloser{err: wantErr}
-	if err := bindBodyDefault(readErrAfterProbeReq, &payload{}, defaultBindConfig().body); !errors.Is(err, wantErr) {
-		t.Fatalf("bindBodyDefault(read error after probe) = %v, want %v", err, wantErr)
-	}
 }
 
 func TestBindBody_NilBodyIsNoop(t *testing.T) {

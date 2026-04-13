@@ -16,6 +16,11 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
+const (
+	wantNilRequestErr     = "bind: request must not be nil"
+	wantNilDestinationErr = "bind: destination must not be nil"
+)
+
 func newJSONRequest(method, target, body string) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -84,4 +89,27 @@ func assertHTTPErrorLike(t *testing.T, err error) *errx.HTTPError {
 		t.Fatalf("error type = %T, want *errx.HTTPError", err)
 	}
 	return httpErr
+}
+
+func assertErrorString(t *testing.T, err error, want string) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatalf("error = nil, want %q", want)
+	}
+	if got := err.Error(); got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+func assertUsageError(t *testing.T, err error, want string) {
+	t.Helper()
+
+	assertErrorString(t, err, want)
+}
+
+func assertBadRequest(t *testing.T, err error) *errx.HTTPError {
+	t.Helper()
+
+	return assertHTTPError(t, err, http.StatusBadRequest, "bad_request", "Bad Request")
 }
