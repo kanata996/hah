@@ -15,9 +15,9 @@ import (
 )
 
 // 测试清单：
-// [✓] 通过公开 `WriteError` 契约验证诊断日志对常见包装错误的摘要行为
-// [✓] typed-nil / 不安全 Error() 实现会安全退化为稳定日志文本，而不是 panic
-// [✓] 超长诊断文本会在公开日志输出里被截断，并保持 UTF-8 有效
+// [✓] 5xx 公共入口会稳定记录不可比较 error 的诊断字段
+// [✓] typed-nil / 不安全 Error() 作为无法从公开入口稳定触达的边界，保留聚焦 helper 回归
+// [✓] 5xx 独立错误日志中的超长文本会按 UTF-8 rune 边界截断
 
 type nonComparableWrappedTestError struct {
 	op     string
@@ -27,12 +27,6 @@ type nonComparableWrappedTestError struct {
 
 type nilUnsafeTestError struct {
 	err error
-}
-
-type cycleTestError struct{}
-
-type multiUnwrapTestError struct {
-	errs []error
 }
 
 func (e nonComparableWrappedTestError) Error() string {
@@ -51,53 +45,29 @@ func (e *nilUnsafeTestError) Unwrap() error {
 	return e.err
 }
 
-func (e *cycleTestError) Error() string {
-	return "cycle"
-}
-
-func (e *cycleTestError) Unwrap() error {
-	return e
-}
-
-func (e *multiUnwrapTestError) Error() string {
-	return "multi"
-}
-
-func (e *multiUnwrapTestError) Unwrap() []error {
-	return e.errs
-}
-
-func TestWriteErrorLogsWrappedCauseSummary(t *testing.T) {
-	var defaultBuf bytes.Buffer
+func TestWriteErrorLogsNonComparableCauseSafely(t *testing.T) {
+	var buf bytes.Buffer
 	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	defer slog.SetDefault(previousDefault)
 
 	req := httptest.NewRequest(http.MethodGet, "/users/u_1", nil)
-	rr := httptest.NewRecorder()
-	cause := nonComparableWrappedTestError{
-		op:     "query user",
-		frames: []string{"users", "repo"},
-		err:    errors.New("db timeout"),
-	}
-
-	if err := WriteError(rr, req, errx.NewHTTPErrorWithCause(
+	httpErr := errx.NewHTTPErrorWithCause(
 		http.StatusInternalServerError,
 		"internal_error",
 		"",
-		cause,
-	)); err != nil {
+		nonComparableWrappedTestError{
+			op:     "query user",
+			frames: []string{"users", "repo"},
+			err:    errors.New("db timeout"),
+		},
+	)
+
+	if err := WriteError(httptest.NewRecorder(), req, httpErr); err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
-	}
-	if defaultBuf.Len() == 0 {
-		t.Fatal("default logger did not capture output")
-	}
-
-	logEntry := decodePayload(t, bytes.TrimSpace(defaultBuf.Bytes()))
+	logEntry := decodePayload(t, buf.Bytes())
 	if got := logEntry["msg"]; got != "resp: request failed with server error" {
 		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
 	}
@@ -112,239 +82,62 @@ func TestWriteErrorLogsWrappedCauseSummary(t *testing.T) {
 	}
 }
 
-func TestWriteErrorLogsTypedNilCauseSafely(t *testing.T) {
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
-	req := httptest.NewRequest(http.MethodGet, "/users/u_1", nil)
-	rr := httptest.NewRecorder()
+// typed-nil 会在公开入口到达日志构建前就经过 errors.As；这里保留一个聚焦 helper 回归，守住日志摘要层的防御性。
+func TestBuildErrorChainInfoWithTypedNilError(t *testing.T) {
 	var cause error = (*nilUnsafeTestError)(nil)
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			t.Fatalf("WriteError() panicked: %v", recovered)
+			t.Fatalf("buildErrorChainInfo(typed nil) panicked: %v", recovered)
 		}
 	}()
 
-	if err := WriteError(rr, req, errx.NewHTTPErrorWithCause(
-		http.StatusInternalServerError,
-		"internal_error",
-		"",
-		cause,
-	)); err != nil {
-		t.Fatalf("WriteError() error = %v", err)
+	info := buildErrorChainInfo(cause)
+	if got := info.errorType; got != "*resp.nilUnsafeTestError" {
+		t.Fatalf("errorType = %q, want *resp.nilUnsafeTestError", got)
 	}
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	if got := info.rootType; got != "*resp.nilUnsafeTestError" {
+		t.Fatalf("rootType = %q, want *resp.nilUnsafeTestError", got)
 	}
-	if defaultBuf.Len() == 0 {
-		t.Fatal("default logger did not capture output")
+	if got := info.message; !strings.Contains(got, "panic calling Error()") {
+		t.Fatalf("message = %q, want panic fallback text", got)
 	}
-
-	logEntry := decodePayload(t, bytes.TrimSpace(defaultBuf.Bytes()))
-	if got := logEntry["error.type"]; got != "*resp.nilUnsafeTestError" {
-		t.Fatalf("error.type = %#v, want *resp.nilUnsafeTestError", got)
-	}
-	if got := logEntry["error.root_type"]; got != "*resp.nilUnsafeTestError" {
-		t.Fatalf("error.root_type = %#v, want *resp.nilUnsafeTestError", got)
-	}
-	message, ok := logEntry["error.message"].(string)
-	if !ok || !strings.Contains(message, "panic calling Error()") {
-		t.Fatalf("error.message = %#v, want panic fallback text", logEntry["error.message"])
-	}
-	rootMessage, ok := logEntry["error.root_message"].(string)
-	if !ok || !strings.Contains(rootMessage, "panic calling Error()") {
-		t.Fatalf("error.root_message = %#v, want panic fallback text", logEntry["error.root_message"])
+	if got := info.rootMessage; !strings.Contains(got, "panic calling Error()") {
+		t.Fatalf("rootMessage = %q, want panic fallback text", got)
 	}
 }
 
-func TestWriteErrorTruncatesLongDiagnosticMessages(t *testing.T) {
-	var defaultBuf bytes.Buffer
+func TestWriteErrorLogTruncatesAtUTF8Boundary(t *testing.T) {
+	var buf bytes.Buffer
 	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 	defer slog.SetDefault(previousDefault)
-
-	req := httptest.NewRequest(http.MethodGet, "/users/u_1", nil)
-	rr := httptest.NewRecorder()
-	longMessage := strings.Repeat("a", 5000) + "世"
-
-	if err := WriteError(rr, req, errx.NewHTTPErrorWithCause(
-		http.StatusInternalServerError,
-		"internal_error",
-		"",
-		errors.New(longMessage),
-	)); err != nil {
-		t.Fatalf("WriteError() error = %v", err)
-	}
-
-	logEntry := decodePayload(t, bytes.TrimSpace(defaultBuf.Bytes()))
-	message, ok := logEntry["error.message"].(string)
-	if !ok {
-		t.Fatalf("error.message = %#v, want string", logEntry["error.message"])
-	}
-	if !strings.HasSuffix(message, "...(truncated)") {
-		t.Fatalf("error.message = %q, want truncated suffix", message)
-	}
-	if !utf8.ValidString(message) {
-		t.Fatalf("error.message is not valid UTF-8: %q", message)
-	}
-	if strings.Contains(message, "世") {
-		t.Fatalf("error.message = %q, want multibyte tail trimmed", message)
-	}
-}
-
-func TestLogStartedServerError(t *testing.T) {
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
-	var responder *ErrorResponder
-	responder.logStartedServerError(nil, nil, nil, nil)
-	responder.logStartedServerError(nil, nil, errx.BadRequest("bad_request", "bad request"), errors.New("client error"))
-	if defaultBuf.Len() != 0 {
-		t.Fatalf("logStartedServerError() unexpectedly wrote output: %s", defaultBuf.Bytes())
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/started", nil)
-	startedInner := &stateTrackingWriter{inner: httptest.NewRecorder()}
-	startedInner.WriteHeader(http.StatusAccepted)
-	responder.logStartedServerError(
-		req,
-		startedInner,
-		errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"),
-		errors.New("db timeout"),
-	)
-	if defaultBuf.Len() == 0 {
-		t.Fatal("logStartedServerError() did not write 5xx output")
-	}
-
-	logEntry := decodePayload(t, defaultBuf.Bytes())
-	if got := logEntry["msg"]; got != "resp: request failed with server error" {
-		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
-	}
-	if got := logEntry["http.response.status_code"]; got != float64(http.StatusAccepted) {
-		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusAccepted)
-	}
-}
-
-func TestLogStartedServerErrorNoopOnNilAnd4xx(t *testing.T) {
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
-	var responder *ErrorResponder
-	responder.logStartedServerError(nil, nil, nil, nil)
-	responder.logStartedServerError(nil, nil, errx.BadRequest("bad_request", "bad request"), errors.New("client error"))
-
-	if defaultBuf.Len() != 0 {
-		t.Fatalf("logStartedServerError() unexpectedly wrote output: %s", defaultBuf.Bytes())
-	}
-}
-
-func TestLogServerErrorWithAttrsNoopOnNilAnd4xx(t *testing.T) {
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
-	var responder *ErrorResponder
-	responder.logServerErrorWithAttrs(nil, nil, nil, nil)
-	responder.logServerErrorWithAttrs(nil, errx.BadRequest("bad_request", "bad request"), nil, nil)
-
-	if defaultBuf.Len() != 0 {
-		t.Fatalf("logServerErrorWithAttrs() unexpectedly wrote output: %s", defaultBuf.Bytes())
-	}
-}
-
-func TestErrorLogHelpersDefensiveNilPaths(t *testing.T) {
-	if got := requestErrorLogAttrs(nil, nil); got != nil {
-		t.Fatalf("requestErrorLogAttrs(nil, nil) = %#v, want nil", got)
-	}
-	if got := diagnosticErrorLogAttrsWithSource(nil, nil, true); got != nil {
-		t.Fatalf("diagnosticErrorLogAttrsWithSource(nil, nil) = %#v, want nil", got)
-	}
-
-	var responder *ErrorResponder
-	responder.logServerErrorAttrs(nil, errx.BadRequest("bad_request", "bad request"), nil)
-
-	if got := buildErrorChainInfo(nil); got != (errorChainInfo{}) {
-		t.Fatalf("buildErrorChainInfo(nil) = %#v, want zero value", got)
-	}
-	if got := isComparableError(nil); got {
-		t.Fatal("isComparableError(nil) = true, want false")
-	}
-	if got := errorTypeName(nil); got != "" {
-		t.Fatalf("errorTypeName(nil) = %q, want empty", got)
-	}
-	if got := safeErrorString(nil); got != "" {
-		t.Fatalf("safeErrorString(nil) = %q, want empty", got)
-	}
-}
-
-func TestFlattenErrorChainFocusedEdgeCases(t *testing.T) {
-	if got := flattenErrorChain(nil, maxLoggedErrorChainDepth); got != nil {
-		t.Fatalf("flattenErrorChain(nil) = %#v, want nil", got)
-	}
-	if got := flattenErrorChain(errors.New("x"), 0); got != nil {
-		t.Fatalf("flattenErrorChain(limit=0) = %#v, want nil", got)
-	}
-
-	wideJoin := errors.Join(errors.New("a"), errors.New("b"), errors.New("c"))
-	gotWideJoin := flattenErrorChain(wideJoin, 2)
-	if len(gotWideJoin) != 2 {
-		t.Fatalf("flattenErrorChain(wideJoin, 2) len = %d, want 2", len(gotWideJoin))
-	}
-	if got := gotWideJoin[1].Error(); got != "a" {
-		t.Fatalf("flattenErrorChain(wideJoin, 2)[1] = %q, want first child a", got)
-	}
-
-	multi := &multiUnwrapTestError{errs: []error{nil, errors.New("left"), errors.New("right")}}
-	gotMulti := flattenErrorChain(multi, maxLoggedErrorChainDepth)
-	if len(gotMulti) != 3 {
-		t.Fatalf("flattenErrorChain(multi) len = %d, want 3", len(gotMulti))
-	}
-
-	cycle := &cycleTestError{}
-	gotCycle := flattenErrorChain(cycle, maxLoggedErrorChainDepth)
-	if len(gotCycle) != 1 {
-		t.Fatalf("flattenErrorChain(cycle) len = %d, want 1", len(gotCycle))
-	}
-
-	wrapped := fmt.Errorf("wrap: %w", errors.New("root"))
-	gotWrapped := flattenErrorChain(wrapped, 1)
-	if len(gotWrapped) != 1 {
-		t.Fatalf("flattenErrorChain(wrapped, 1) len = %d, want 1", len(gotWrapped))
-	}
-
-	var typedNil error = (*nilUnsafeTestError)(nil)
-	if got := unwrapErrors(typedNil); got != nil {
-		t.Fatalf("unwrapErrors(typed nil) = %#v, want nil after panic recovery", got)
-	}
-}
-
-func TestLimitErrorLogStringPreservesUTF8Boundary(t *testing.T) {
-	if got := limitErrorLogString("   "); got != "" {
-		t.Fatalf("limitErrorLogString(blank) = %q, want empty", got)
-	}
 
 	padding := strings.Repeat("a", maxLoggedErrorStringBytes-1)
 	input := padding + "世"
-	got := limitErrorLogString(input)
+	req := httptest.NewRequest(http.MethodGet, "/truncated", nil)
 
-	if !strings.HasSuffix(got, "...(truncated)") {
-		t.Fatalf("limitErrorLogString() = %q, want truncated suffix", got)
+	if err := WriteError(httptest.NewRecorder(), req, errors.New(input)); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
 	}
-	core := strings.TrimSuffix(got, "...(truncated)")
-	if !utf8.ValidString(core) {
-		t.Fatalf("truncated core is not valid UTF-8: %q", core)
-	}
-	if strings.Contains(core, "世") {
-		t.Fatalf("truncated core contains partial multibyte char: %q", core)
+
+	logEntry := decodePayload(t, buf.Bytes())
+	for _, key := range []string{"error.message", "error.root_message"} {
+		got, ok := logEntry[key].(string)
+		if !ok {
+			t.Fatalf("%s = %#v, want string", key, logEntry[key])
+		}
+		if !strings.HasSuffix(got, "...(truncated)") {
+			t.Fatalf("%s = %q, want truncated suffix", key, got)
+		}
+
+		core := strings.TrimSuffix(got, "...(truncated)")
+		if !utf8.ValidString(core) {
+			t.Fatalf("%s core is not valid UTF-8: %q", key, core)
+		}
+		if strings.Contains(core, "世") {
+			t.Fatalf("%s core contains truncated multibyte rune: %q", key, core)
+		}
 	}
 }
 

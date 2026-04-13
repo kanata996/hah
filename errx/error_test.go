@@ -339,9 +339,9 @@ func TestNewHTTPErrorNormalizesPublicFields(t *testing.T) {
 			wantDetail: http.StatusText(http.StatusInternalServerError),
 		},
 		{
-			name:       "unknown 5xx falls back to internal server error",
+			name:       "unknown 5xx preserves status and falls back to internal error public message",
 			status:     509,
-			wantStatus: http.StatusInternalServerError,
+			wantStatus: 509,
 			wantCode:   "internal_error",
 			wantTitle:  http.StatusText(http.StatusInternalServerError),
 			wantDetail: http.StatusText(http.StatusInternalServerError),

@@ -137,7 +137,9 @@ func TestResponseWriteErrorErrorFallsBackOnBlankCause(t *testing.T) {
 // 底层写 JSON 字节时会拒绝空的 ResponseWriter。
 func TestWriteJSONBytesRejectsNilWriter(t *testing.T) {
 	err := writeJSONBytes(nil, http.StatusOK, []byte(`{"ok":true}`))
-	assertErrorContainsAll(t, err, "response writer is nil")
+	if err == nil || err.Error() != "resp: response writer is nil" {
+		t.Fatalf("writeJSONBytes() error = %v, want response writer is nil", err)
+	}
 }
 
 // 底层写 JSON 字节时会校验 HTTP 状态码合法性。
@@ -145,25 +147,29 @@ func TestWriteJSONBytesRejectsInvalidStatus(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	err := writeJSONBytes(rr, 1000, []byte(`{"ok":true}`))
-	assertErrorContainsAll(t, err, "invalid HTTP status", "1000")
+	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
+		t.Fatalf("writeJSONBytes() error = %v, want invalid status", err)
+	}
 }
 
 // 带 body 的 JSON 写辅助函数应在写出前拒绝 1xx/204/205/304 这类不允许响应体的状态。
 func TestWriteJSONBytesRejectsStatusesThatCannotHaveBody(t *testing.T) {
 	testCases := []struct {
-		status     int
-		wantErrHas []string
+		status  int
+		wantErr string
 	}{
-		{status: http.StatusContinue, wantErrHas: []string{"JSON body writers", "informational status", "100"}},
-		{status: http.StatusNoContent, wantErrHas: []string{"JSON body writers", "bodyless status", "204"}},
-		{status: http.StatusResetContent, wantErrHas: []string{"JSON body writers", "bodyless status", "205"}},
-		{status: http.StatusNotModified, wantErrHas: []string{"JSON body writers", "bodyless status", "304"}},
+		{status: http.StatusContinue, wantErr: "resp: JSON body writers cannot use informational status 100"},
+		{status: http.StatusNoContent, wantErr: "resp: JSON body writers cannot use bodyless status 204"},
+		{status: http.StatusResetContent, wantErr: "resp: JSON body writers cannot use bodyless status 205"},
+		{status: http.StatusNotModified, wantErr: "resp: JSON body writers cannot use bodyless status 304"},
 	}
 
 	for _, tc := range testCases {
 		w := &trackingResponseWriter{}
 		err := writeJSONBytes(w, tc.status, []byte(`{"ok":true}`))
-		assertErrorContainsAll(t, err, tc.wantErrHas...)
+		if err == nil || err.Error() != tc.wantErr {
+			t.Fatalf("writeJSONBytes(status=%d) error = %v, want %q", tc.status, err, tc.wantErr)
+		}
 		if w.writeHeaderCalls != 0 {
 			t.Fatalf("writeJSONBytes(status=%d) wrote header %d times, want 0", tc.status, w.writeHeaderCalls)
 		}
@@ -179,7 +185,9 @@ func TestWriteJSONBytesRejectsStatusesThatCannotHaveBody(t *testing.T) {
 // 仅写状态码的辅助函数也会拒绝空的 ResponseWriter。
 func TestWriteStatusRejectsNilWriter(t *testing.T) {
 	err := writeStatus(nil, http.StatusNoContent)
-	assertErrorContainsAll(t, err, "response writer is nil")
+	if err == nil || err.Error() != "resp: response writer is nil" {
+		t.Fatalf("writeStatus() error = %v, want response writer is nil", err)
+	}
 }
 
 // 仅写状态码的辅助函数会校验 HTTP 状态码合法性。
@@ -187,7 +195,9 @@ func TestWriteStatusRejectsInvalidStatus(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	err := writeStatus(rr, 1000)
-	assertErrorContainsAll(t, err, "invalid HTTP status", "1000")
+	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
+		t.Fatalf("writeStatus() error = %v, want invalid status", err)
+	}
 }
 
 // 仅写状态码的辅助函数成功时不写 body，也不擅自设置 Content-Type。
@@ -214,7 +224,9 @@ func TestWriteStatusWritesStatusWithoutBodyOrContentType(t *testing.T) {
 // JSON 编码阶段遇到不支持的值时直接返回编码错误。
 func TestEncodeJSONRejectsUnsupportedValue(t *testing.T) {
 	_, err := encodeJSON(make(chan int))
-	assertErrorContainsAll(t, err, "unsupported type", "chan int")
+	if err == nil || err.Error() != "json: unsupported type: chan int" {
+		t.Fatalf("encodeJSON() error = %v, want unsupported type error", err)
+	}
 }
 
 // 自定义 MarshalJSON 即使 panic，编码辅助函数也应恢复为普通 error。
@@ -244,21 +256,8 @@ func TestValidateHTTPStatus(t *testing.T) {
 
 	testCases := []int{99, 1000}
 	for _, status := range testCases {
-		assertErrorContainsAll(t, validateHTTPStatus(status), "invalid HTTP status", strconv.Itoa(status))
-	}
-}
-
-func assertErrorContainsAll(t *testing.T, err error, wantParts ...string) {
-	t.Helper()
-
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-
-	message := err.Error()
-	for _, part := range wantParts {
-		if !strings.Contains(message, part) {
-			t.Fatalf("error = %q, want substring %q", message, part)
+		if err := validateHTTPStatus(status); err == nil || err.Error() != "resp: invalid HTTP status "+strconv.Itoa(status) {
+			t.Fatalf("validateHTTPStatus(%d) error = %v, want invalid status error", status, err)
 		}
 	}
 }

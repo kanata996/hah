@@ -43,11 +43,6 @@ type unwrapOnlyWriter struct {
 	inner http.ResponseWriter
 }
 
-type implicitOKStateWriter struct {
-	inner        http.ResponseWriter
-	bytesWritten int
-}
-
 type rawTestError struct {
 	message string
 }
@@ -157,17 +152,6 @@ func (w *unwrapOnlyWriter) Write(p []byte) (int, error) {
 func (w *unwrapOnlyWriter) Unwrap() http.ResponseWriter {
 	return w.inner
 }
-
-func (w *implicitOKStateWriter) Header() http.Header    { return w.inner.Header() }
-func (w *implicitOKStateWriter) WriteHeader(status int) { w.inner.WriteHeader(status) }
-func (w *implicitOKStateWriter) Write(p []byte) (int, error) {
-	n, err := w.inner.Write(p)
-	w.bytesWritten += n
-	return n, err
-}
-func (w *implicitOKStateWriter) Status() int                 { return 0 }
-func (w *implicitOKStateWriter) BytesWritten() int           { return w.bytesWritten }
-func (w *implicitOKStateWriter) Unwrap() http.ResponseWriter { return w.inner }
 
 type explicitStatusWriter struct {
 	inner        http.ResponseWriter
@@ -378,15 +362,12 @@ func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	inner := &headLikeResponseWriter{}
 	w := &writeCallbackResponseWriter{ResponseWriter: inner}
 	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "", "detail")
-
-	// 用普通请求路径产出的响应体长度作为 HEAD 头信息的黑盒对照。
-	rr := httptest.NewRecorder()
-	if err := WriteError(rr, httptest.NewRequest(http.MethodGet, "/", nil), httpErr); err != nil {
-		t.Fatalf("WriteError(GET) error = %v", err)
+	body, err := marshalProblemPayload(httpErr)
+	if err != nil {
+		t.Fatalf("marshalProblemPayload() error = %v", err)
 	}
-	wantBodyLen := rr.Body.Len()
 
-	err := WriteError(w, req, httpErr)
+	err = WriteError(w, req, httpErr)
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
@@ -396,8 +377,8 @@ func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	if got := inner.Header().Get("Content-Type"); got != "application/problem+json" {
 		t.Fatalf("Content-Type = %q, want application/problem+json", got)
 	}
-	if got := inner.Header().Get("Content-Length"); got != strconv.Itoa(wantBodyLen) {
-		t.Fatalf("Content-Length = %q, want %d", got, wantBodyLen)
+	if got := inner.Header().Get("Content-Length"); got != strconv.Itoa(len(body)) {
+		t.Fatalf("Content-Length = %q, want %d", got, len(body))
 	}
 	if w.writeCalls != 1 {
 		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
@@ -576,8 +557,7 @@ func TestWriteErrorDropsPanickingDetails(t *testing.T) {
 	}
 }
 
-// 这些 nil helper 分支无法通过公开 WriteError 契约自然触发，保留最小直测即可。
-func TestInternalWriteErrorNilHelpers(t *testing.T) {
+func TestMarshalProblemPayloadNilHTTPError(t *testing.T) {
 	body, err := marshalProblemPayload(nil)
 	if err != nil {
 		t.Fatalf("marshalProblemPayload(nil) error = %v", err)
@@ -598,14 +578,85 @@ func TestInternalWriteErrorNilHelpers(t *testing.T) {
 	if _, exists := payload["errors"]; exists {
 		t.Fatalf("errors unexpectedly present: %#v", payload["errors"])
 	}
+}
+
+func TestProblemPayloadFromHTTPErrorNil(t *testing.T) {
 	if got := problemPayloadFromHTTPError(nil, true); got.Title != "" || got.Status != 0 || got.Detail != "" || got.Code != "" || got.Errors != nil {
 		t.Fatalf("problemPayloadFromHTTPError(nil) = %#v, want zero value", got)
 	}
+}
+
+// ErrorWriteDegraded 在 nil 接收者和普通错误场景下都应提供稳定的错误语义。
+func TestErrorWriteDegradedMethods(t *testing.T) {
+	var nilErr *ErrorWriteDegraded
+	if got := nilErr.Error(); got != "resp: error response errors were dropped" {
+		t.Fatalf("nil Error() = %q", got)
+	}
+	if got := nilErr.Unwrap(); got != nil {
+		t.Fatalf("nil Unwrap() = %v, want nil", got)
+	}
+
+	cause := errors.New("json: unsupported type: func()")
+	err := &ErrorWriteDegraded{Cause: cause}
+	if got := err.Error(); got != "resp: error response errors were dropped: "+cause.Error() {
+		t.Fatalf("Error() = %q", got)
+	}
+	if got := err.Unwrap(); !errors.Is(got, cause) {
+		t.Fatalf("Unwrap() = %v, want %v", got, cause)
+	}
+
+	if got := (&ErrorWriteDegraded{Cause: blankWriteCause{}}).Error(); got != "resp: error response errors were dropped" {
+		t.Fatalf("blank cause Error() = %q, want default message", got)
+	}
+
+	if got := (&ErrorWriteDegraded{Cause: panicWriteCause{}}).Error(); !strings.Contains(got, "resp: error response errors were dropped: panic calling Error()") {
+		t.Fatalf("panic cause Error() = %q, want panic fallback text", got)
+	}
+}
+
+// asHTTPError 会保留已有 HTTPError，并对 nil 输入保持安全。
+func TestAsHTTPError(t *testing.T) {
 	if got := asHTTPError(nil); got != nil {
 		t.Fatalf("asHTTPError(nil) = %#v, want nil", got)
 	}
 
+	httpErr := errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")
+	if got := asHTTPError(httpErr); got != httpErr {
+		t.Fatalf("asHTTPError(httpErr) = %#v, want same pointer", got)
+	}
+}
+
+func TestAsHTTPErrorMapsContextAndUnknownErrors(t *testing.T) {
+	canceled := asHTTPError(context.Canceled)
+	if got := canceled.Status(); got != 499 {
+		t.Fatalf("canceled.Status() = %d, want 499", got)
+	}
+	if got := canceled.Code(); got != "client_closed_request" {
+		t.Fatalf("canceled.Code() = %q, want client_closed_request", got)
+	}
+
+	timeout := asHTTPError(context.DeadlineExceeded)
+	if got := timeout.Status(); got != http.StatusGatewayTimeout {
+		t.Fatalf("timeout.Status() = %d, want %d", got, http.StatusGatewayTimeout)
+	}
+	if got := timeout.Code(); got != "timeout" {
+		t.Fatalf("timeout.Code() = %q, want timeout", got)
+	}
+
+	root := errors.New("db timeout")
+	internal := asHTTPError(root)
+	if got := internal.Status(); got != http.StatusInternalServerError {
+		t.Fatalf("internal.Status() = %d, want %d", got, http.StatusInternalServerError)
+	}
+	if !errors.Is(internal.Unwrap(), root) {
+		t.Fatalf("internal.Unwrap() = %v, want %v", internal.Unwrap(), root)
+	}
+}
+
+// 底层写 HTTP 错误时，空的 HTTPError 会直接视为 no-op。
+func TestWriteHTTPErrorNilHTTPErrorIsNoop(t *testing.T) {
 	rr := httptest.NewRecorder()
+
 	if err := writeHTTPError(rr, nil); err != nil {
 		t.Fatalf("writeHTTPError() error = %v, want nil", err)
 	}
@@ -617,39 +668,28 @@ func TestInternalWriteErrorNilHelpers(t *testing.T) {
 	}
 }
 
-// ErrorWriteDegraded 在 nil 接收者和普通错误场景下都应提供稳定的错误语义。
-func TestErrorWriteDegradedMethods(t *testing.T) {
-	var nilErr *ErrorWriteDegraded
-	assertErrorContainsAll(t, nilErr, "error response errors were dropped")
-	if got := nilErr.Unwrap(); got != nil {
-		t.Fatalf("nil Unwrap() = %v, want nil", got)
-	}
+func TestProblemPayloadFromHTTPErrorIncludeErrorsToggle(t *testing.T) {
+	httpErr := errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request", map[string]any{"field": "name"})
 
-	cause := errors.New("json: unsupported type: func()")
-	err := &ErrorWriteDegraded{Cause: cause}
-	assertErrorContainsAll(t, err, "error response errors were dropped", cause.Error())
-	if got := err.Unwrap(); !errors.Is(got, cause) {
-		t.Fatalf("Unwrap() = %v, want %v", got, cause)
+	withErrors := problemPayloadFromHTTPError(httpErr, true)
+	if len(withErrors.Errors) != 1 {
+		t.Fatalf("problemPayloadFromHTTPError(includeErrors=true).Errors = %#v, want 1 item", withErrors.Errors)
 	}
+	assertPublicErrorObject(t, withErrors.Errors[0], map[string]any{
+		"field": "name",
+	})
 
-	assertErrorContainsAll(t, &ErrorWriteDegraded{Cause: blankWriteCause{}}, "error response errors were dropped")
-	assertErrorContainsAll(t, &ErrorWriteDegraded{Cause: panicWriteCause{}}, "error response errors were dropped", "panic calling Error()")
+	withoutErrors := problemPayloadFromHTTPError(httpErr, false)
+	if withoutErrors.Errors != nil {
+		t.Fatalf("problemPayloadFromHTTPError(includeErrors=false).Errors = %#v, want nil", withoutErrors.Errors)
+	}
 }
 
 // details 降级后如果补写响应也失败，调用方会同时拿到降级错误和写出错误。
-func TestWriteErrorReturnsJoinedErrorWhenFallbackWriteFails(t *testing.T) {
+func TestWriteErrorPayloadReturnsJoinedErrorWhenFallbackWriteFails(t *testing.T) {
 	w := &failingWriter{}
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
 
-	err := WriteError(w, httptest.NewRequest(http.MethodGet, "/", nil), errx.NewHTTPError(
-		http.StatusBadRequest,
-		"bad_request",
-		"bad request",
-		func() {},
-	))
+	err := writeErrorPayload(w, errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request", func() {}))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -705,18 +745,13 @@ func TestWriteErrorSkipsRewriteAfterResponseStarted(t *testing.T) {
 	if got := logEntry["msg"]; got != "resp: request failed with server error" {
 		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
 	}
-	if _, exists := logEntry["http.response.status_code"]; exists {
-		t.Fatalf("http.response.status_code unexpectedly present: %#v", logEntry["http.response.status_code"])
+	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
+		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
 	}
 }
 
 // 显式暴露状态的包装 ResponseWriter 一旦已经发出状态或字节，WriteError 不应再改写响应。
 func TestWriteErrorSkipsRewriteAfterWrappedResponseStarted(t *testing.T) {
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
 	rr := httptest.NewRecorder()
 	w := &stateTrackingWriter{inner: rr}
 	w.Header().Set("Content-Type", "text/plain")
@@ -739,14 +774,6 @@ func TestWriteErrorSkipsRewriteAfterWrappedResponseStarted(t *testing.T) {
 	if got := rr.Body.String(); got != "partial" {
 		t.Errorf("body = %q, want partial", got)
 	}
-	if defaultBuf.Len() == 0 {
-		t.Fatal("default logger did not capture output")
-	}
-
-	logEntry := decodePayload(t, defaultBuf.Bytes())
-	if got := logEntry["http.response.status_code"]; got != float64(http.StatusAccepted) {
-		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusAccepted)
-	}
 }
 
 func TestResponseAlreadyStartedThroughUnwrapChain(t *testing.T) {
@@ -764,29 +791,6 @@ func TestResponseAlreadyStartedThroughUnwrapChain(t *testing.T) {
 	started := &unwrapOnlyWriter{inner: startedInner}
 	if got := responseAlreadyStarted(started); !got {
 		t.Fatal("responseAlreadyStarted(started unwrap chain) = false, want true")
-	}
-}
-
-func TestResponseStatusForLogging(t *testing.T) {
-	if got, ok := responseStatusForLogging(nil); ok || got != 0 {
-		t.Fatalf("responseStatusForLogging(nil) = (%d, %v), want (0, false)", got, ok)
-	}
-
-	fresh := &unwrapOnlyWriter{inner: &stateTrackingWriter{inner: httptest.NewRecorder()}}
-	if got, ok := responseStatusForLogging(fresh); ok || got != 0 {
-		t.Fatalf("responseStatusForLogging(fresh) = (%d, %v), want (0, false)", got, ok)
-	}
-
-	startedInner := &stateTrackingWriter{inner: httptest.NewRecorder()}
-	startedInner.WriteHeader(http.StatusAccepted)
-	started := &unwrapOnlyWriter{inner: startedInner}
-	if got, ok := responseStatusForLogging(started); !ok || got != http.StatusAccepted {
-		t.Fatalf("responseStatusForLogging(started) = (%d, %v), want (%d, true)", got, ok, http.StatusAccepted)
-	}
-
-	implicitOK := &implicitOKStateWriter{inner: httptest.NewRecorder(), bytesWritten: 7}
-	if got, ok := responseStatusForLogging(implicitOK); !ok || got != http.StatusOK {
-		t.Fatalf("responseStatusForLogging(implicitOK) = (%d, %v), want (%d, true)", got, ok, http.StatusOK)
 	}
 }
 
@@ -916,7 +920,7 @@ func TestWriteErrorWithNilRequestLogsWriteFailureToDefaultLogger(t *testing.T) {
 }
 
 // 错误响应写出失败时，独立错误日志会回退到 slog.Default。
-func TestLogErrorResponseWriteIssueFallsBackToDefaultLogger(t *testing.T) {
+func TestLogErrorResponseWriteFailureFallsBackToDefaultLogger(t *testing.T) {
 	var defaultBuf bytes.Buffer
 	previousDefault := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
@@ -930,7 +934,7 @@ func TestLogErrorResponseWriteIssueFallsBackToDefaultLogger(t *testing.T) {
 		"Internal Server Error",
 		errors.New("db timeout"),
 	)
-	responder.logErrorResponseWriteIssue(
+	responder.logErrorResponseWriteFailure(
 		req,
 		httpErr,
 		errors.New("socket closed"),
@@ -961,50 +965,6 @@ func TestLogErrorResponseWriteIssueFallsBackToDefaultLogger(t *testing.T) {
 	}
 	if got := logEntry["url.path"]; got != "/failure" {
 		t.Fatalf("url.path = %#v, want /failure", got)
-	}
-}
-
-func TestLogErrorResponseWriteIssueLogsPreservedDegradationAsWarn(t *testing.T) {
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
-	req := httptest.NewRequest(http.MethodGet, "/failure", nil)
-	var responder *ErrorResponder
-	httpErr := errx.NewHTTPError(
-		http.StatusBadRequest,
-		"bad_request",
-		"bad request",
-	)
-	responder.logErrorResponseWriteIssue(
-		req,
-		httpErr,
-		&ErrorWriteDegraded{
-			Cause:                   errors.New("json: unsupported type: func()"),
-			PreservedPublicResponse: true,
-		},
-	)
-
-	if defaultBuf.Len() == 0 {
-		t.Fatal("default logger did not capture output")
-	}
-
-	logEntry := decodePayload(t, defaultBuf.Bytes())
-	if got := logEntry["level"]; got != "WARN" {
-		t.Fatalf("level = %#v, want WARN", got)
-	}
-	if got := logEntry["msg"]; got != "resp: error response degraded" {
-		t.Fatalf("msg = %#v, want resp: error response degraded", got)
-	}
-	if got := logEntry["resp.error_degraded"]; got != true {
-		t.Fatalf("resp.error_degraded = %#v, want true", got)
-	}
-	if got := logEntry["resp.public_response_preserved"]; got != true {
-		t.Fatalf("resp.public_response_preserved = %#v, want true", got)
-	}
-	if got := logEntry["http.response.status_code"]; got != float64(http.StatusBadRequest) {
-		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusBadRequest)
 	}
 }
 

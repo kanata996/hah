@@ -63,16 +63,15 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
 // responseAlreadyStarted 仅在 writer 显式暴露响应状态时判断是否已经开始写出。
 // 对于通用 http.ResponseWriter，标准接口本身无法可靠探测“是否已发出 header/body”。
 // 这里采用最小判断：若可读到 status/bytes 且任一非零，则视为已开始。
-type responseStateWriter interface {
-	Status() int
-	BytesWritten() int
-}
-
-type responseUnwrapper interface {
-	Unwrap() http.ResponseWriter
-}
-
 func responseAlreadyStarted(w http.ResponseWriter) bool {
+	type responseStateWriter interface {
+		Status() int
+		BytesWritten() int
+	}
+	type responseUnwrapper interface {
+		Unwrap() http.ResponseWriter
+	}
+
 	for depth := 0; w != nil && depth < 8; depth++ {
 		if state, ok := w.(responseStateWriter); ok && (state.Status() != 0 || state.BytesWritten() > 0) {
 			return true
@@ -88,27 +87,6 @@ func responseAlreadyStarted(w http.ResponseWriter) bool {
 	return false
 }
 
-func responseStatusForLogging(w http.ResponseWriter) (int, bool) {
-	for depth := 0; w != nil && depth < 8; depth++ {
-		if state, ok := w.(responseStateWriter); ok {
-			if status := state.Status(); status != 0 {
-				return status, true
-			}
-			if state.BytesWritten() > 0 {
-				return http.StatusOK, true
-			}
-		}
-
-		unwrapper, ok := w.(responseUnwrapper)
-		if !ok {
-			break
-		}
-		w = unwrapper.Unwrap()
-	}
-
-	return 0, false
-}
-
 // asHTTPError 把任意 error 适配为 HTTPError。
 // 这是错误响应语义的收敛点，负责得到最终 status/code/detail/errors。
 //
@@ -122,14 +100,14 @@ func asHTTPError(err error) *errx.HTTPError {
 	}
 
 	var httpErr *errx.HTTPError
-	if safeErrorsAs(err, &httpErr) && httpErr != nil {
+	if errors.As(err, &httpErr) && httpErr != nil {
 		return httpErr
 	}
 
 	switch {
-	case safeErrorsIs(err, context.Canceled):
+	case errors.Is(err, context.Canceled):
 		return errx.NewHTTPErrorWithCause(499, "client_closed_request", "Client Closed Request", err)
-	case safeErrorsIs(err, context.DeadlineExceeded):
+	case errors.Is(err, context.DeadlineExceeded):
 		return errx.NewHTTPErrorWithCause(http.StatusGatewayTimeout, "timeout", "", err)
 	}
 

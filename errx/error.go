@@ -16,14 +16,14 @@ type HTTPError struct {
 	code string
 	// detail 是公开错误详情；缺省时会回退到稳定的标题文案。
 	detail string
-	// errors 是公开结构化错误详情列表；构造与读取时都会做顶层切片拷贝。
+	// errors 是公开结构化错误详情列表；这里只做切片浅拷贝，不尝试深拷贝元素。
 	errors []any
 	// cause 仅用于内部错误链，不直接暴露给客户端。
 	cause error
 }
 
 // NewHTTPError 构造一个不带底层 cause 的公共 HTTP 错误。
-// 它会统一补齐默认 status/code/detail，并对 errors 做防御性切片拷贝。
+// 它会统一补齐默认 status/code/detail，并对 errors 做防御性浅拷贝。
 func NewHTTPError(status int, code, detail string, errors ...any) *HTTPError {
 	return NewHTTPErrorWithCause(status, code, detail, nil, errors...)
 }
@@ -106,7 +106,7 @@ func (e *HTTPError) Detail() string {
 	return normalizeErrorDetail(e.Status(), e.detail)
 }
 
-// Errors 返回公开结构化错误详情列表的防御性切片拷贝。
+// Errors 返回公开结构化错误详情列表的防御性浅拷贝。
 // 调用方修改返回切片时，不会影响已构造的 HTTPError。
 func (e *HTTPError) Errors() []any {
 	if e == nil || len(e.errors) == 0 {
@@ -155,7 +155,7 @@ func TooManyRequests(code, detail string, errors ...any) *HTTPError {
 	return NewHTTPError(http.StatusTooManyRequests, code, detail, errors...)
 }
 
-// cloneErrors 返回 errors 的浅拷贝，避免调用方后续修改顶层切片影响错误对象。
+// cloneErrors 返回 errors 的浅拷贝，避免调用方后续修改影响已构造的错误对象。
 func cloneErrors(errors []any) []any {
 	if len(errors) == 0 {
 		return nil
@@ -163,16 +163,10 @@ func cloneErrors(errors []any) []any {
 	return slices.Clone(errors)
 }
 
-// normalizeErrorStatus 把非法、未知或越界状态码收敛到 500。
-// 这里仅允许标准 4xx/5xx，以及显式白名单的 499。
+// normalizeErrorStatus 把非法或越界状态码收敛到 500。
+// 这里仅允许错误语义下的 4xx/5xx；像 499 这类非标准但常用的错误状态也允许保留。
 func normalizeErrorStatus(status int) int {
-	if status == 499 {
-		return status
-	}
 	if status < 400 || status > 599 {
-		return http.StatusInternalServerError
-	}
-	if http.StatusText(status) == "" {
 		return http.StatusInternalServerError
 	}
 	return status
