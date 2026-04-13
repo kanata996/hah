@@ -18,14 +18,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 ### Breaking
 
 - Removed the public `reqx.PathParam[T](...)` / `reqx.QueryParam[T](...)` APIs and their root `hah` facade re-exports. Single-field request access now converges on `Path(...)` / `Query(...)`, while complex decoding continues to use `bind`.
+- Split the single-parameter request helper roots into `reqx.PathParam` and `reqx.QueryParam`, and updated the root `hah` facade to re-export those two distinct builder types instead of the old shared `Param` root.
+- Narrowed `reqx.Path(...)` / `hah.Path(...)` to resource-identifier-oriented types only: `String`, `UUID`, `Int`, `Int64`, `Uint`, and `Uint64`. Time, duration, float, and bool builders are now query-only.
 
 ### Added
 
-- Added `Uint64()` and `Duration()` to the `reqx.Path(...)` / `reqx.Query(...)` single-parameter builders.
+- Added `Uint64()` to the `reqx.Path(...)` / `reqx.Query(...)` single-parameter builders.
+- Added query-only helpers to `reqx.Query(...)` / `hah.Query(...)`, including `Duration()` and raw repeated-value readers `Values()` / `Strings()`.
 
 ### Documentation
 
-- Expanded `REQUESTS.md` with a clearer capability table for the supported `Path` / `Query` parameter types and validators.
+- Expanded `REQUESTS.md` and refreshed `README.md` to clarify the boundary between `Path` and `Query`: `Path` stays narrow and resource-oriented, while `Query` carries the wider parameter surface, including raw repeated-key access before you need full `bind.Bind*` decoding.
 
 ## [v0.4.1] - 2026-04-13
 

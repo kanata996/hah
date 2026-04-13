@@ -15,8 +15,10 @@ type (
 	RequestValidator = reqx.RequestValidator
 	// Normalizer 允许 DTO 在校验前做标准化处理。
 	Normalizer = reqx.Normalizer
-	// Param 表示一个待解析的 path/query 单参数。
-	Param = reqx.Param
+	// PathParam 表示一个待解析的 path 单参数。
+	PathParam = reqx.PathParam
+	// QueryParam 表示一个待解析的 query 单参数。
+	QueryParam = reqx.QueryParam
 	// ErrorResponder 协调错误收敛、错误响应写回与 5xx 独立错误日志。
 	ErrorResponder = resp.ErrorResponder
 )
@@ -47,12 +49,12 @@ func BindHeaders(r *http.Request, target any) error {
 }
 
 // Path 创建 path 单参数读取与校验 builder。
-func Path(r *http.Request, name string) *Param {
+func Path(r *http.Request, name string) *PathParam {
 	return reqx.Path(r, name)
 }
 
 // Query 创建 query 单参数读取与校验 builder。
-func Query(r *http.Request, name string) *Param {
+func Query(r *http.Request, name string) *QueryParam {
 	return reqx.Query(r, name)
 }
 

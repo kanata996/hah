@@ -146,7 +146,20 @@ func main() {
 - `hah.BindQueryParams` / `hah.BindPathValues` / `hah.BindHeaders` / `hah.BindBody`
 - `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders` / `bind.BindBody`
 - `reqx.Validate(..., reqx.SourceQuery)` / `reqx.SourcePath` / `reqx.SourceHeader` / `reqx.SourceBody`
-- `hah.Path` / `hah.Query` 适合单字段 path/query 读取；query 同名参数重复出现时默认只消费第一个值，多值语义请改用 `bind.Bind*`
+
+单字段 request helper 的边界：
+
+- `hah.Path(...)` 面向 path segment 中的资源标识，只保留 `String()`、`UUID()`、`Int()`、`Int64()`、`Uint()`、`Uint64()`
+- `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`、`UnixMilliTime()`
+- `hah.Query(...).String()` / `Int()` / `UUID()` 等标量 helper 在重复 query key 上默认只消费第一个值
+- `hah.Query(...).Values()` / `Strings()` 可直接读取同名 query 参数的全部原始值；如果你需要结构化多值解码，仍然优先用 `bind.Bind*`
+
+示例：
+
+```go
+accountID, err := hah.Path(r, "account_id").UUID().Required().Get()
+tags, err := hah.Query(r, "tag").Values().Get()
+```
 
 ## 请求输入文档
 

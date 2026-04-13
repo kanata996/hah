@@ -132,6 +132,19 @@ func TestQuery_DelegatesToReqx(t *testing.T) {
 	}
 }
 
+// Query 也会通过根包 facade 暴露 query 专用的多值读取 builder。
+func TestQuery_ValuesDelegatesToReqx(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts?tag=a&tag=b", nil)
+
+	tags, err := Query(req, "tag").Values().Required().Get()
+	if err != nil {
+		t.Fatalf("Query().Values().Required().Get() error = %v", err)
+	}
+	if got := strings.Join(tags, ","); got != "a,b" {
+		t.Fatalf("tags = %q, want a,b", got)
+	}
+}
+
 // BindAndValidate 会在根包 facade 中同时复用绑定和校验能力。
 func TestBindAndValidate_DelegatesToReqx(t *testing.T) {
 	type request struct {

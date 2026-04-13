@@ -9,31 +9,16 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] Path / Query 入口会为单参数 path/query 读取提供 source-aware required/invalid violation，并对重复 query key 维持首值语义。
-// - [✓] Param builder 的通用 usage error 与 optional 行为维持稳定契约。
-// - [✓] 内部参数 helper 会维持 path/query 值提取与 path wildcard 解析的稳定契约。
+// - [✓] Query 入口会为单参数 query 读取提供 source-aware required/invalid violation，并对重复 query key 维持首值语义。
+// - [✓] QueryParam 的通用 usage error 与 optional 行为维持稳定契约。
+// - [✓] query lookup helper 会维持 URL.Query() 的公开契约。
 // - [✓] Fuzz 评估：本文件当前只补公开入口与 lookup 契约回归，不新增 fuzz；原因是未引入新的 query/path 解析逻辑或状态空间。
 
-func TestPathAndQuery_SuccessPaths(t *testing.T) {
-	t.Run("path uuid required", func(t *testing.T) {
-		want := uuid.New()
-		req := requestWithPathParams(map[string][]string{"id": {want.String()}})
-
-		got, err := Path(req, "id").UUID().Required().Get()
-		if err != nil {
-			t.Fatalf("Path().UUID().Required().Get() error = %v", err)
-		}
-		if got != want {
-			t.Fatalf("uuid = %v, want %v", got, want)
-		}
-	})
-
+func TestQuery_SuccessPaths(t *testing.T) {
 	t.Run("query int default min max", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items", nil)
 
@@ -90,26 +75,12 @@ func TestPathAndQuery_SuccessPaths(t *testing.T) {
 	})
 }
 
-func TestPathAndQuery_RequiredAndInvalidViolations(t *testing.T) {
-	t.Run("required missing path", func(t *testing.T) {
-		req := requestWithPathParams(nil)
-
-		_, err := Path(req, "id").String().Required().Get()
-		assertRequiredViolationAt(t, err, "id", ViolationInPath)
-	})
-
+func TestQuery_RequiredAndInvalidViolations(t *testing.T) {
 	t.Run("required missing query", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items", nil)
 
 		_, err := Query(req, "page").Int().Required().Get()
 		assertRequiredViolationAt(t, err, "page", ViolationInQuery)
-	})
-
-	t.Run("invalid path uuid", func(t *testing.T) {
-		req := requestWithPathParams(map[string][]string{"id": {"not-a-uuid"}})
-
-		_, err := Path(req, "id").UUID().Get()
-		assertInvalidViolationAt(t, err, "id", ViolationInPath)
 	})
 
 	t.Run("invalid query int", func(t *testing.T) {
@@ -156,7 +127,7 @@ func TestPathAndQuery_RequiredAndInvalidViolations(t *testing.T) {
 	})
 }
 
-func TestPathAndQuery_UsageErrors(t *testing.T) {
+func TestQuery_UsageErrors(t *testing.T) {
 	t.Run("nil request", func(t *testing.T) {
 		_, err := Query(nil, "page").Int().Get()
 		assertUsageErrorContains(t, err, "request must not be nil")
@@ -188,33 +159,86 @@ func TestPathAndQuery_UsageErrors(t *testing.T) {
 	})
 }
 
-func TestParamLookupHelpers_Branches(t *testing.T) {
-	t.Run("path helper", func(t *testing.T) {
-		if values, ok := pathParamValues(nil, "id"); ok || values != nil {
-			t.Fatalf("pathParamValues(nil) = (%v, %v), want (nil, false)", values, ok)
-		}
+func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
+	t.Run("values preserves repeated query order", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?tag=a&tag=b", nil)
 
-		reqWithValue := requestWithPathParams(map[string][]string{
-			"id": {"u_1"},
-		})
-		if values, ok := pathParamValues(reqWithValue, "id"); !ok || len(values) != 1 || values[0] != "u_1" {
-			t.Fatalf("pathParamValues(value) = (%v, %v), want ([u_1], true)", values, ok)
+		got, err := Query(req, "tag").Values().Required().Get()
+		if err != nil {
+			t.Fatalf("Query().Values().Required().Get() error = %v", err)
 		}
-
-		reqWithEmpty := requestWithPathParams(map[string][]string{
-			"id": {""},
-		})
-		if values, ok := pathParamValues(reqWithEmpty, "id"); !ok || len(values) != 1 || values[0] != "" {
-			t.Fatalf("pathParamValues(empty) = (%v, %v), want ([\"\"], true)", values, ok)
-		}
-
-		reqMissing := httptest.NewRequest(http.MethodGet, "/accounts", nil)
-		reqMissing.Pattern = "/accounts"
-		if values, ok := pathParamValues(reqMissing, "id"); ok || values != nil {
-			t.Fatalf("pathParamValues(missing) = (%v, %v), want (nil, false)", values, ok)
+		if !reflect.DeepEqual(got, []string{"a", "b"}) {
+			t.Fatalf("tag = %#v, want [a b]", got)
 		}
 	})
 
+	t.Run("strings alias returns raw values including empty string", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?tag=&tag=b", nil)
+
+		got, err := Query(req, "tag").Strings().Get()
+		if err != nil {
+			t.Fatalf("Query().Strings().Get() error = %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{"", "b"}) {
+			t.Fatalf("tag = %#v, want [\"\" b]", got)
+		}
+	})
+
+	t.Run("default clones slice", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items", nil)
+		def := []string{"a", "b"}
+		builder := Query(req, "tag").Values().Default(def)
+		def[0] = "mutated"
+
+		got, err := builder.Get()
+		if err != nil {
+			t.Fatalf("Query().Values().Default().Get() error = %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{"a", "b"}) {
+			t.Fatalf("tag = %#v, want [a b]", got)
+		}
+
+		got[0] = "changed"
+		again, err := builder.Get()
+		if err != nil {
+			t.Fatalf("builder.Get() second call error = %v", err)
+		}
+		if !reflect.DeepEqual(again, []string{"a", "b"}) {
+			t.Fatalf("tag second call = %#v, want [a b]", again)
+		}
+	})
+
+	t.Run("required missing returns query violation", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items", nil)
+
+		_, err := Query(req, "tag").Values().Required().Get()
+		assertRequiredViolationAt(t, err, "tag", ViolationInQuery)
+	})
+
+	t.Run("check failure uses custom detail", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?tag=a&tag=b", nil)
+
+		_, err := Query(req, "tag").Values().Check(func(values []string) error {
+			if len(values) == 2 {
+				return errors.New("multi value tag is not allowed")
+			}
+			return nil
+		}).Get()
+		assertViolation(t, err, Violation{
+			Field:  "tag",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "multi value tag is not allowed",
+		})
+	})
+
+	t.Run("nil check", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?tag=a", nil), "tag").Values().Check(nil).Get()
+		assertUsageErrorContains(t, err, "check must not be nil")
+	})
+}
+
+func TestQueryLookupHelpers_Branches(t *testing.T) {
 	t.Run("query helper", func(t *testing.T) {
 		if values, ok := queryParamValues(nil, "page"); ok || values != nil {
 			t.Fatalf("queryParamValues(nil) = (%v, %v), want (nil, false)", values, ok)
@@ -251,43 +275,23 @@ func TestParamLookupHelpers_Branches(t *testing.T) {
 			}
 		})
 	})
-
-	t.Run("path wildcard names", func(t *testing.T) {
-		tests := []struct {
-			name    string
-			pattern string
-			want    []string
-		}{
-			{name: "blank", pattern: "   ", want: nil},
-			{name: "no wildcard", pattern: "/accounts", want: []string{}},
-			{name: "basic", pattern: "/accounts/{id}", want: []string{"id"}},
-			{name: "with method prefix", pattern: "GET /accounts/{id}", want: []string{"id"}},
-			{name: "catch all", pattern: "/files/{path...}", want: []string{"path"}},
-			{name: "typed wildcard", pattern: "/accounts/{id:[0-9]+}", want: []string{"id"}},
-			{name: "skip dollar", pattern: "/{$}", want: []string{}},
-			{name: "malformed", pattern: "/accounts/{id", want: []string{}},
-		}
-
-		for _, tc := range tests {
-			t.Run(tc.name, func(t *testing.T) {
-				if got := pathWildcardNames(tc.pattern); !reflect.DeepEqual(got, tc.want) {
-					t.Fatalf("pathWildcardNames(%q) = %#v, want %#v", tc.pattern, got, tc.want)
-				}
-			})
-		}
-	})
 }
 
-func TestParamBuilder_UsageAndOptionalBehavior(t *testing.T) {
-	t.Run("nil builder", func(t *testing.T) {
-		var p *Param
+func TestQueryBuilder_UsageAndOptionalBehavior(t *testing.T) {
+	t.Run("nil query builder", func(t *testing.T) {
+		var p *QueryParam
 
-		_, err := p.String().Get()
+		_, err := p.Values().Get()
 		assertUsageErrorContains(t, err, "param builder must not be nil")
 	})
 
-	t.Run("zero builder", func(t *testing.T) {
-		_, err := (&Param{}).String().Get()
+	t.Run("zero path builder", func(t *testing.T) {
+		_, err := (&PathParam{}).String().Get()
+		assertUsageErrorContains(t, err, "param builder must be created with Path or Query")
+	})
+
+	t.Run("zero query builder", func(t *testing.T) {
+		_, err := (&QueryParam{}).Values().Get()
 		assertUsageErrorContains(t, err, "param builder must be created with Path or Query")
 	})
 

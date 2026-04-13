@@ -10,69 +10,79 @@ import (
 	"github.com/google/uuid"
 )
 
-// String 读取 string 参数。
-func (p *Param) String() *StringParam {
-	return &StringParam{value: newParamValue(p, parseStringValue)}
+func newStringParam(spec paramSpec, builderNil bool) *StringParam {
+	return &StringParam{value: newParamValue(spec, builderNil, parseStringValue)}
 }
 
-// Int 读取 int 参数。
-func (p *Param) Int() *IntParam {
-	return &IntParam{value: newParamValue(p, parseIntValue)}
+func newIntParam(spec paramSpec, builderNil bool) *IntParam {
+	return &IntParam{value: newParamValue(spec, builderNil, parseIntValue)}
 }
 
-// Int64 读取 int64 参数。
-func (p *Param) Int64() *Int64Param {
-	return &Int64Param{value: newParamValue(p, parseInt64Value)}
+func newInt64Param(spec paramSpec, builderNil bool) *Int64Param {
+	return &Int64Param{value: newParamValue(spec, builderNil, parseInt64Value)}
 }
 
-// Uint64 读取 uint64 参数。
-func (p *Param) Uint64() *Uint64Param {
-	return &Uint64Param{value: newParamValue(p, parseUint64Value)}
+func newUint64Param(spec paramSpec, builderNil bool) *Uint64Param {
+	return &Uint64Param{value: newParamValue(spec, builderNil, parseUint64Value)}
 }
 
-// Uint 读取 uint 参数。
-func (p *Param) Uint() *UintParam {
-	return &UintParam{value: newParamValue(p, parseUintValue)}
+func newUintParam(spec paramSpec, builderNil bool) *UintParam {
+	return &UintParam{value: newParamValue(spec, builderNil, parseUintValue)}
 }
 
-// Bool 读取 bool 参数。
-func (p *Param) Bool() *BoolParam {
-	return &BoolParam{value: newParamValue(p, parseBoolValue)}
+func newBoolParam(spec paramSpec, builderNil bool) *BoolParam {
+	return &BoolParam{value: newParamValue(spec, builderNil, parseBoolValue)}
 }
 
-// Float64 读取 float64 参数。
-func (p *Param) Float64() *Float64Param {
-	return &Float64Param{value: newParamValue(p, parseFloat64Value)}
+func newFloat64Param(spec paramSpec, builderNil bool) *Float64Param {
+	return &Float64Param{value: newParamValue(spec, builderNil, parseFloat64Value)}
 }
 
-// Duration 读取 time.Duration 参数。
-func (p *Param) Duration() *DurationParam {
-	return &DurationParam{value: newParamValue(p, parseDurationValue)}
+func newDurationParam(spec paramSpec, builderNil bool) *DurationParam {
+	return &DurationParam{value: newParamValue(spec, builderNil, parseDurationValue)}
 }
 
-// UUID 读取 uuid.UUID 参数。
-func (p *Param) UUID() *UUIDParam {
-	return &UUIDParam{value: newParamValue(p, parseUUIDValue)}
+func newUUIDParam(spec paramSpec, builderNil bool) *UUIDParam {
+	return &UUIDParam{value: newParamValue(spec, builderNil, parseUUIDValue)}
 }
 
-// Time 按 RFC3339 读取 time.Time 参数。
-func (p *Param) Time() *TimeParam {
-	return &TimeParam{value: newParamValue(p, parseRFC3339Time)}
+func newTimeParam(spec paramSpec, builderNil bool, parse func(string) (time.Time, error)) *TimeParam {
+	return &TimeParam{value: newParamValue(spec, builderNil, parse)}
 }
 
-// UnixTime 按 10 位秒级 Unix 时间戳读取 time.Time 参数。
-func (p *Param) UnixTime() *TimeParam {
-	return &TimeParam{value: newParamValue(p, parseUnixTime)}
-}
-
-// UnixMilliTime 按 13 位毫秒级 Unix 时间戳读取 time.Time 参数。
-func (p *Param) UnixMilliTime() *TimeParam {
-	return &TimeParam{value: newParamValue(p, parseUnixMilliTime)}
+func newValuesParam(spec paramSpec, builderNil bool) *ValuesParam {
+	return &ValuesParam{
+		value: newMultiParamValue(spec, builderNil, parseRawValues, cloneStringSlice),
+	}
 }
 
 // StringParam 读取并校验 string 参数。
 type StringParam struct {
 	value paramValue[string]
+}
+
+// ValuesParam 读取并校验 query 多值参数的原始 []string。
+type ValuesParam struct {
+	value multiParamValue[[]string]
+}
+
+func (p *ValuesParam) Required() *ValuesParam {
+	p.value.setRequired()
+	return p
+}
+
+func (p *ValuesParam) Default(value []string) *ValuesParam {
+	p.value.setDefault(value)
+	return p
+}
+
+func (p *ValuesParam) Check(check func([]string) error) *ValuesParam {
+	p.value.addCheck(check)
+	return p
+}
+
+func (p *ValuesParam) Get() ([]string, error) {
+	return p.value.resolve()
 }
 
 func (p *StringParam) Required() *StringParam {
@@ -592,6 +602,10 @@ func (p *TimeParam) Check(check func(time.Time) error) *TimeParam {
 
 func (p *TimeParam) Get() (time.Time, error) {
 	return p.value.resolve()
+}
+
+func parseRawValues(values []string) ([]string, error) {
+	return cloneStringSlice(values), nil
 }
 
 func parseStringValue(value string) (string, error) {

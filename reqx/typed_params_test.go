@@ -13,7 +13,7 @@ import (
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] Param builder typed getter 会覆盖默认值成功路径，以及范围/枚举/正则/自定义 Check 与 usage error 边界。
+// - [✓] PathParam / QueryParam typed getter 会覆盖默认值成功路径，以及范围/枚举/正则/自定义 Check 与 usage error 边界。
 // - [✓] Int / Int64 / Uint / Uint64 / Bool / Float64 / Duration builder 会在 present-empty query 值下维持公开零值语义，而不是把空值当成缺失。
 // - [✓] 各独立 typed builder 的 Default(...) / Check(...) 失败路径会在自身 API 上直接校验；Default(...) 返回值不会绕过后续约束。
 // - [✓] Time / UnixTime / UnixMilliTime builder 会覆盖公开成功路径、失败路径与区间约束。

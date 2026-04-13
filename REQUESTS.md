@@ -67,9 +67,17 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+如果 query 需要保留重复 key 的全部原始值，可以直接走 `Values()` / `Strings()`：
+
+```go
+tags, err := hah.Query(r, "tag").Values().Get()
+```
+
 几个公开语义需要注意：
 
-- `Path(r, name)` / `Query(r, name)` 先指定来源，再选择类型，例如 `String()`、`Int()`、`UUID()`、`Time()`
+- `Path(r, name)` / `Query(r, name)` 先指定来源，再选择类型；`Path` 只暴露 path 适用的单值能力，`Query` 额外支持 `Values()` / `Strings()` 读取重复 query 的原始值
+- `Path` 只支持更适合资源标识的类型：`String()`、`UUID()`、`Int()`、`Int64()`、`Uint()`、`Uint64()`
+- `Query` 继续承载更宽的参数语义，例如布尔、浮点、时长、时间戳和原始重复值
 - 这些链式 builder 的返回类型（例如 `reqx.StringParam`、`reqx.IntParam`、`reqx.TimeParam`）也是公开 API，但大多数调用方不需要直接声明它们
 - `Required()`：参数缺失时返回 `required` violation
 - `Default(v)`：参数缺失时使用默认值；与 `Required()` 互斥
@@ -77,9 +85,20 @@ func handler(w http.ResponseWriter, r *http.Request) {
 - `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` violation
 - `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
 - `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
-- query 中同名参数重复出现时，`Path` / `Query` 这类单字段 helper 默认只消费第一个值；如果你需要多值语义，改用 `bind.Bind*`
+- query 中同名参数重复出现时，`Query(...).String()` / `Int()` / `UUID()` 这类标量 helper 默认只消费第一个值；如果你需要全部原始值，改用 `Query(...).Values()` / `Strings()`；如果你需要结构化多值解码，改用 `bind.Bind*`
 
-#### `Path` / `Query` 能力表
+#### `Path` 能力表
+
+| 类型选择器 | 返回值类型 | 输入格式 | 可链式校验 | 备注 |
+| --- | --- | --- | --- | --- |
+| `String()` | `string` | 原样读取字符串 | `MinLen` / `MaxLen` / `OneOf` / `Match` / `Check` | 适合 slug、业务 ID、枚举型 segment |
+| `Int()` | `int` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析；宽度跟随当前平台的 `int` |
+| `Int64()` | `int64` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `Uint()` | `uint` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `Uint64()` | `uint64` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `UUID()` | `uuid.UUID` | 符合 `github.com/google/uuid.Parse` 的 UUID 字符串 | `Check` | 适合 path 中的资源 ID |
+
+#### `Query` 能力表
 
 | 类型选择器 | 返回值类型 | 输入格式 | 可链式校验 | 备注 |
 | --- | --- | --- | --- | --- |
@@ -95,16 +114,17 @@ func handler(w http.ResponseWriter, r *http.Request) {
 | `Time()` | `time.Time` | RFC3339 时间字符串 | `After` / `Before` / `Check` | `After` / `Before` 为含边界比较 |
 | `UnixTime()` | `time.Time` | 10 位秒级 Unix 时间戳 | `After` / `Before` / `Check` | 解析结果为 UTC 时间 |
 | `UnixMilliTime()` | `time.Time` | 13 位毫秒级 Unix 时间戳 | `After` / `Before` / `Check` | 解析结果为 UTC 时间 |
+| `Values()` / `Strings()` | `[]string` | query 同名参数的全部原始值 | `Check` | 仅 `Query` 支持；保留重复值顺序；`Required` / `Default` 仍可用 |
 
 补充说明：
 
 - 所有类型都支持 `Required()`、`Default(v)`、`Get()`；其中 `Required()` 和 `Default(v)` 互斥
 - 参数缺失时，`Required()` 返回 `required` violation；参数存在但解析失败或校验失败时，返回 `invalid` violation
-- 如果输入已经超出这些常见标量类型，例如自定义类型、多值 query、重复参数或结构化解码，优先改用 `bind.Bind*`
+- `Query(...).Values()` / `Strings()` 只提供原始 `[]string` 读取；如果输入已经超出这些常见标量类型，例如自定义类型、结构化多值 query、重复参数解码或 DTO 映射，优先改用 `bind.Bind*`
 
 ### 自定义类型输入
 
-如果单参数不是内建标量，或者你已经需要自定义解码、重复 query、多值语义，直接交给 `bind`。这一层只保留常见标量 builder，不再为复杂类型单独扩 request helper。
+如果单参数不是内建标量，或者你已经需要自定义解码、结构化多值 query 语义，直接交给 `bind`。`reqx.Query(...).Values()` / `Strings()` 只覆盖“读取原始重复值”这一层，不负责复杂解码。
 
 ## 用 `bind` 绑定 DTO
 
