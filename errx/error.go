@@ -2,7 +2,7 @@ package errx
 
 import (
 	"net/http"
-	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -16,14 +16,14 @@ type HTTPError struct {
 	code string
 	// detail 是公开错误详情；缺省时会回退到稳定的标题文案。
 	detail string
-	// errors 是公开结构化错误详情列表；构造与读取时都会对公开 JSON 容器做递归拷贝。
+	// errors 是公开结构化错误详情列表；构造与读取时都会做顶层切片拷贝。
 	errors []any
 	// cause 仅用于内部错误链，不直接暴露给客户端。
 	cause error
 }
 
 // NewHTTPError 构造一个不带底层 cause 的公共 HTTP 错误。
-// 它会统一补齐默认 status/code/detail，并对 errors 做防御性拷贝。
+// 它会统一补齐默认 status/code/detail，并对 errors 做防御性切片拷贝。
 func NewHTTPError(status int, code, detail string, errors ...any) *HTTPError {
 	return NewHTTPErrorWithCause(status, code, detail, nil, errors...)
 }
@@ -106,7 +106,7 @@ func (e *HTTPError) Detail() string {
 	return normalizeErrorDetail(e.Status(), e.detail)
 }
 
-// Errors 返回公开结构化错误详情列表的防御性拷贝。
+// Errors 返回公开结构化错误详情列表的防御性切片拷贝。
 // 调用方修改返回切片时，不会影响已构造的 HTTPError。
 func (e *HTTPError) Errors() []any {
 	if e == nil || len(e.errors) == 0 {
@@ -155,95 +155,12 @@ func TooManyRequests(code, detail string, errors ...any) *HTTPError {
 	return NewHTTPError(http.StatusTooManyRequests, code, detail, errors...)
 }
 
-// cloneErrors 返回 errors 的递归拷贝，避免公开 JSON 容器与调用方共享状态。
-// 这里只处理 map/slice/array 这类容器，并保留其原始动态类型；其他值保持原样。
+// cloneErrors 返回 errors 的浅拷贝，避免调用方后续修改顶层切片影响错误对象。
 func cloneErrors(errors []any) []any {
 	if len(errors) == 0 {
 		return nil
 	}
-
-	cloned := make([]any, len(errors))
-	seen := make(map[cloneVisit]reflect.Value)
-	for i, value := range errors {
-		cloned[i] = cloneErrorInterface(value, seen)
-	}
-	return cloned
-}
-
-type cloneVisit struct {
-	typ reflect.Type
-	ptr uintptr
-	len int
-}
-
-func cloneErrorInterface(value any, seen map[cloneVisit]reflect.Value) any {
-	cloned := cloneErrorValue(reflect.ValueOf(value), seen)
-	if !cloned.IsValid() {
-		return nil
-	}
-	return cloned.Interface()
-}
-
-func cloneErrorValue(value reflect.Value, seen map[cloneVisit]reflect.Value) reflect.Value {
-	if !value.IsValid() {
-		return reflect.Value{}
-	}
-
-	switch value.Kind() {
-	case reflect.Interface:
-		if value.IsNil() {
-			return reflect.Zero(value.Type())
-		}
-		return cloneErrorValue(value.Elem(), seen)
-	case reflect.Map:
-		if value.IsNil() {
-			return reflect.Zero(value.Type())
-		}
-		visit := cloneVisit{typ: value.Type(), ptr: value.Pointer()}
-		if cloned, ok := seen[visit]; ok {
-			return cloned
-		}
-		cloned := reflect.MakeMapWithSize(value.Type(), value.Len())
-		seen[visit] = cloned
-		iter := value.MapRange()
-		for iter.Next() {
-			cloned.SetMapIndex(iter.Key(), cloneAssignableValue(iter.Value(), value.Type().Elem(), seen))
-		}
-		return cloned
-	case reflect.Slice:
-		if value.IsNil() {
-			return reflect.Zero(value.Type())
-		}
-		visit := cloneVisit{typ: value.Type(), ptr: value.Pointer(), len: value.Len()}
-		if cloned, ok := seen[visit]; ok {
-			return cloned
-		}
-		cloned := reflect.MakeSlice(value.Type(), value.Len(), value.Len())
-		seen[visit] = cloned
-		for i := 0; i < value.Len(); i++ {
-			cloned.Index(i).Set(cloneAssignableValue(value.Index(i), value.Type().Elem(), seen))
-		}
-		return cloned
-	case reflect.Array:
-		cloned := reflect.New(value.Type()).Elem()
-		for i := 0; i < value.Len(); i++ {
-			cloned.Index(i).Set(cloneAssignableValue(value.Index(i), value.Type().Elem(), seen))
-		}
-		return cloned
-	default:
-		return value
-	}
-}
-
-func cloneAssignableValue(value reflect.Value, target reflect.Type, seen map[cloneVisit]reflect.Value) reflect.Value {
-	cloned := cloneErrorValue(value, seen)
-	if !cloned.IsValid() {
-		return reflect.Zero(target)
-	}
-	if cloned.Type().AssignableTo(target) {
-		return cloned
-	}
-	return value
+	return slices.Clone(errors)
 }
 
 // normalizeErrorStatus 把非法、未知或越界状态码收敛到 500。
