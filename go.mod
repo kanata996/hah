@@ -1,6 +1,6 @@
 module github.com/kanata996/hah
 
-go 1.25.0
+go 1.25.9
 
 require (
 	github.com/go-playground/universal-translator v0.18.1

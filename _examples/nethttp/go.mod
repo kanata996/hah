@@ -1,6 +1,6 @@
 module github.com/kanata996/hah/_examples/nethttp
 
-go 1.25.0
+go 1.25.9
 
 require github.com/kanata996/hah v0.0.0
 
