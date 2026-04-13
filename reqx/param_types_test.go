@@ -13,8 +13,11 @@ import (
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] Param builder typed getter 会覆盖默认值、范围/枚举/正则/自定义 Check 与 usage error 边界。
+// - [✓] Param builder typed getter 会覆盖默认值成功路径，以及范围/枚举/正则/自定义 Check 与 usage error 边界。
+// - [✓] Int / Int64 / Uint / Uint64 / Bool / Float64 / Duration builder 会在 present-empty query 值下维持公开零值语义，而不是把空值当成缺失。
+// - [✓] 各独立 typed builder 的 Default(...) / Check(...) 失败路径会在自身 API 上直接校验；Default(...) 返回值不会绕过后续约束。
 // - [✓] Time / UnixTime / UnixMilliTime builder 会覆盖公开成功路径、失败路径与区间约束。
+// - [✓] Fuzz 评估：本文件当前只补 builder 组合回归，不新增 fuzz；原因是未引入新的 query/path 解析逻辑或输入状态空间。
 
 func TestTimeParam_UnixBuilders(t *testing.T) {
 	t.Run("unix time success", func(t *testing.T) {
@@ -77,6 +80,35 @@ func TestTimeParam_UnixBuilders(t *testing.T) {
 		}
 	})
 
+	t.Run("unix milli default still honors before", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items", nil)
+		def := time.Date(2024, 4, 12, 8, 30, 0, 123*int(time.Millisecond), time.UTC)
+
+		_, err := Query(req, "ms").UnixMilliTime().
+			Default(def).
+			Before(def.Add(-time.Millisecond)).
+			Get()
+		assertInvalidViolationAt(t, err, "ms", ViolationInQuery)
+	})
+
+	t.Run("unix time default check invalid uses custom detail", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items", nil)
+		def := time.Date(2024, 4, 12, 8, 30, 0, 0, time.UTC)
+
+		_, err := Query(req, "sec").UnixTime().
+			Default(def).
+			Check(func(value time.Time) error {
+				return errors.New("default unix time must be rejected")
+			}).
+			Get()
+		assertViolation(t, err, Violation{
+			Field:  "sec",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "default unix time must be rejected",
+		})
+	})
+
 	t.Run("unix time required missing returns query violation", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items", nil)
 
@@ -125,6 +157,37 @@ func TestStringParam_ValidationAndUsageErrors(t *testing.T) {
 		if got != "kanata" {
 			t.Fatalf("name = %q, want kanata", got)
 		}
+	})
+
+	t.Run("default one-of invalid", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "status").String().
+			Default("pending").
+			OneOf("open", "closed").
+			Get()
+		assertInvalidViolationAt(t, err, "status", ViolationInQuery)
+	})
+
+	t.Run("default match invalid", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "slug").String().
+			Default("GO").
+			Match(regexp.MustCompile(`^[a-z]+$`)).
+			Get()
+		assertInvalidViolationAt(t, err, "slug", ViolationInQuery)
+	})
+
+	t.Run("default check invalid uses custom detail", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "name").String().
+			Default("kanata").
+			Check(func(value string) error {
+				return errors.New("default must be rejected")
+			}).
+			Get()
+		assertViolation(t, err, Violation{
+			Field:  "name",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "default must be rejected",
+		})
 	})
 
 	t.Run("min and max len success", func(t *testing.T) {
@@ -188,6 +251,21 @@ func TestIntParam_ValidationAndRangeErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("empty string parses zero when required", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=", nil), "page").Int().Required().Get()
+		if err != nil || got != 0 {
+			t.Fatalf("Int().Required().Get() = (%d, %v), want (0, nil)", got, err)
+		}
+	})
+
+	t.Run("default min invalid", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
+			Default(1).
+			Min(2).
+			Get()
+		assertInvalidViolationAt(t, err, "page", ViolationInQuery)
+	})
+
 	t.Run("min invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=1", nil), "page").Int().Min(2).Get()
 		assertInvalidViolationAt(t, err, "page", ViolationInQuery)
@@ -225,6 +303,28 @@ func TestTypedParams_ValidationAndRangeErrors(t *testing.T) {
 		if err != nil || got != 9 {
 			t.Fatalf("Int64().Default().Get() = (%d, %v), want (9, nil)", got, err)
 		}
+	})
+
+	t.Run("int64 empty string parses zero when required", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=", nil), "v").Int64().Required().Get()
+		if err != nil || got != 0 {
+			t.Fatalf("Int64().Required().Get() = (%d, %v), want (0, nil)", got, err)
+		}
+	})
+
+	t.Run("int64 default check invalid uses custom detail", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "v").Int64().
+			Default(9).
+			Check(func(value int64) error {
+				return errors.New("default int64 must be rejected")
+			}).
+			Get()
+		assertViolation(t, err, Violation{
+			Field:  "v",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "default int64 must be rejected",
+		})
 	})
 
 	t.Run("int64 min invalid", func(t *testing.T) {
@@ -274,6 +374,28 @@ func TestTypedParams_ValidationAndRangeErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("uint empty string parses zero when required", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=", nil), "v").Uint().Required().Get()
+		if err != nil || got != 0 {
+			t.Fatalf("Uint().Required().Get() = (%d, %v), want (0, nil)", got, err)
+		}
+	})
+
+	t.Run("uint default check invalid uses custom detail", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "v").Uint().
+			Default(7).
+			Check(func(value uint) error {
+				return errors.New("default uint must be rejected")
+			}).
+			Get()
+		assertViolation(t, err, Violation{
+			Field:  "v",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "default uint must be rejected",
+		})
+	})
+
 	t.Run("uint min invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=1", nil), "v").Uint().Min(2).Get()
 		assertInvalidViolationAt(t, err, "v", ViolationInQuery)
@@ -321,6 +443,28 @@ func TestTypedParams_ValidationAndRangeErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("uint64 empty string parses zero when required", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=", nil), "v").Uint64().Required().Get()
+		if err != nil || got != 0 {
+			t.Fatalf("Uint64().Required().Get() = (%d, %v), want (0, nil)", got, err)
+		}
+	})
+
+	t.Run("uint64 default check invalid uses custom detail", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "v").Uint64().
+			Default(11).
+			Check(func(value uint64) error {
+				return errors.New("default uint64 must be rejected")
+			}).
+			Get()
+		assertViolation(t, err, Violation{
+			Field:  "v",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "default uint64 must be rejected",
+		})
+	})
+
 	t.Run("uint64 min invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?v=1", nil), "v").Uint64().Min(2).Get()
 		assertInvalidViolationAt(t, err, "v", ViolationInQuery)
@@ -366,6 +510,28 @@ func TestTypedParams_ValidationAndRangeErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("bool empty string parses false when required", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?active=", nil), "active").Bool().Required().Get()
+		if err != nil || got {
+			t.Fatalf("Bool().Required().Get() = (%v, %v), want (false, nil)", got, err)
+		}
+	})
+
+	t.Run("bool default check invalid uses custom detail", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "active").Bool().
+			Default(true).
+			Check(func(value bool) error {
+				return errors.New("default bool must be rejected")
+			}).
+			Get()
+		assertViolation(t, err, Violation{
+			Field:  "active",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "default bool must be rejected",
+		})
+	})
+
 	t.Run("bool parse invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?active=maybe", nil), "active").Bool().Get()
 		assertInvalidViolationAt(t, err, "active", ViolationInQuery)
@@ -391,6 +557,28 @@ func TestTypedParams_ValidationAndRangeErrors(t *testing.T) {
 		if err != nil || got != 1.25 {
 			t.Fatalf("Float64().Default().Get() = (%v, %v), want (1.25, nil)", got, err)
 		}
+	})
+
+	t.Run("float64 empty string parses zero when required", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?price=", nil), "price").Float64().Required().Get()
+		if err != nil || got != 0 {
+			t.Fatalf("Float64().Required().Get() = (%v, %v), want (0, nil)", got, err)
+		}
+	})
+
+	t.Run("float64 default check invalid uses custom detail", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "price").Float64().
+			Default(1.25).
+			Check(func(value float64) error {
+				return errors.New("default float64 must be rejected")
+			}).
+			Get()
+		assertViolation(t, err, Violation{
+			Field:  "price",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "default float64 must be rejected",
+		})
 	})
 
 	t.Run("float64 min invalid", func(t *testing.T) {
@@ -440,11 +628,26 @@ func TestTypedParams_ValidationAndRangeErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("duration empty string parses zero", func(t *testing.T) {
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?timeout=", nil), "timeout").Duration().Get()
+	t.Run("duration empty string parses zero when required", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?timeout=", nil), "timeout").Duration().Required().Get()
 		if err != nil || got != 0 {
-			t.Fatalf("Duration().Get() = (%v, %v), want (0, nil)", got, err)
+			t.Fatalf("Duration().Required().Get() = (%v, %v), want (0, nil)", got, err)
 		}
+	})
+
+	t.Run("duration default check invalid uses custom detail", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "timeout").Duration().
+			Default(1500 * time.Millisecond).
+			Check(func(value time.Duration) error {
+				return errors.New("default duration must be rejected")
+			}).
+			Get()
+		assertViolation(t, err, Violation{
+			Field:  "timeout",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "default duration must be rejected",
+		})
 	})
 
 	t.Run("duration min invalid", func(t *testing.T) {
@@ -479,6 +682,23 @@ func TestTypedParams_ValidationAndRangeErrors(t *testing.T) {
 		if err != nil || got != want {
 			t.Fatalf("UUID().Default().Get() = (%v, %v), want (%v, nil)", got, err, want)
 		}
+	})
+
+	t.Run("uuid default check invalid uses custom detail", func(t *testing.T) {
+		want := uuid.New()
+
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "id").UUID().
+			Default(want).
+			Check(func(value uuid.UUID) error {
+				return errors.New("default uuid must be rejected")
+			}).
+			Get()
+		assertViolation(t, err, Violation{
+			Field:  "id",
+			In:     ViolationInQuery,
+			Code:   ViolationCodeInvalid,
+			Detail: "default uuid must be rejected",
+		})
 	})
 
 	t.Run("uuid check success", func(t *testing.T) {
@@ -520,6 +740,16 @@ func TestTypedParams_ValidationAndRangeErrors(t *testing.T) {
 		if err != nil || !got.Equal(at) {
 			t.Fatalf("Time().Default().Get() = (%v, %v), want (%v, nil)", got, err, at)
 		}
+	})
+
+	t.Run("time default still honors after", func(t *testing.T) {
+		at := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "at").Time().
+			Default(at).
+			After(at.Add(time.Minute)).
+			Get()
+		assertInvalidViolationAt(t, err, "at", ViolationInQuery)
 	})
 
 	t.Run("time after invalid", func(t *testing.T) {

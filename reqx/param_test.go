@@ -15,9 +15,10 @@ import (
 
 // 测试清单：
 // - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] Path / Query 入口会为单参数 path/query 读取提供 source-aware required/invalid violation。
+// - [✓] Path / Query 入口会为单参数 path/query 读取提供 source-aware required/invalid violation，并对重复 query key 维持首值语义。
 // - [✓] Param builder 的通用 usage error 与 optional 行为维持稳定契约。
 // - [✓] 内部参数 helper 会维持 path/query 值提取与 path wildcard 解析的稳定契约。
+// - [✓] Fuzz 评估：本文件当前只补公开入口与 lookup 契约回归，不新增 fuzz；原因是未引入新的 query/path 解析逻辑或状态空间。
 
 func TestPathAndQuery_SuccessPaths(t *testing.T) {
 	t.Run("path uuid required", func(t *testing.T) {
@@ -42,6 +43,18 @@ func TestPathAndQuery_SuccessPaths(t *testing.T) {
 		}
 		if got != 20 {
 			t.Fatalf("page = %d, want 20", got)
+		}
+	})
+
+	t.Run("query duplicate key uses first value", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?page=5&page=9", nil)
+
+		got, err := Query(req, "page").Int().Get()
+		if err != nil {
+			t.Fatalf("Query().Int().Get() error = %v", err)
+		}
+		if got != 5 {
+			t.Fatalf("page = %d, want 5", got)
 		}
 	})
 
@@ -106,6 +119,13 @@ func TestPathAndQuery_RequiredAndInvalidViolations(t *testing.T) {
 		assertInvalidViolationAt(t, err, "page", ViolationInQuery)
 	})
 
+	t.Run("duplicate query validates first value", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?page=oops&page=3", nil)
+
+		_, err := Query(req, "page").Int().Get()
+		assertInvalidViolationAt(t, err, "page", ViolationInQuery)
+	})
+
 	t.Run("check failure uses custom detail", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?page=3", nil)
 
@@ -123,12 +143,12 @@ func TestPathAndQuery_RequiredAndInvalidViolations(t *testing.T) {
 		})
 	})
 
-	t.Run("present empty string remains empty", func(t *testing.T) {
+	t.Run("present empty string remains empty when required", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?name=", nil)
 
-		got, err := Query(req, "name").String().Get()
+		got, err := Query(req, "name").String().Required().Get()
 		if err != nil {
-			t.Fatalf("Query().String().Get() error = %v", err)
+			t.Fatalf("Query().String().Required().Get() error = %v", err)
 		}
 		if got != "" {
 			t.Fatalf("name = %q, want empty string", got)
