@@ -13,9 +13,19 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.4.2] - 2026-04-13
+
 ### Breaking
 
 - Removed the public `reqx.PathParam[T](...)` / `reqx.QueryParam[T](...)` APIs and their root `hah` facade re-exports. Single-field request access now converges on `Path(...)` / `Query(...)`, while complex decoding continues to use `bind`.
+
+### Added
+
+- Added `Uint64()` and `Duration()` to the `reqx.Path(...)` / `reqx.Query(...)` single-parameter builders.
+
+### Documentation
+
+- Expanded `REQUESTS.md` with a clearer capability table for the supported `Path` / `Query` parameter types and validators.
 
 ## [v0.4.1] - 2026-04-13
 

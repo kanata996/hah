@@ -78,6 +78,29 @@ func handler(w http.ResponseWriter, r *http.Request) {
 - `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
 - `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
 
+#### `Path` / `Query` 能力表
+
+| 类型选择器 | 返回值类型 | 输入格式 | 可链式校验 | 备注 |
+| --- | --- | --- | --- | --- |
+| `String()` | `string` | 原样读取字符串 | `MinLen` / `MaxLen` / `OneOf` / `Match` / `Check` | 长度按 rune 数计算；`?name=` 解析为空字符串且算“存在” |
+| `Int()` | `int` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析；宽度跟随当前平台的 `int` |
+| `Int64()` | `int64` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `Uint()` | `uint` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `Uint64()` | `uint64` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `Bool()` | `bool` | 符合 `strconv.ParseBool` 的布尔字面量 | `Check` | 空串按 `false` 解析 |
+| `Float64()` | `float64` | 符合 `strconv.ParseFloat(..., 64)` 的数字字面量 | `Min` / `Max` / `Check` | 空串按 `0.0` 解析 |
+| `Duration()` | `time.Duration` | 符合 `time.ParseDuration` 的时长字面量 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `UUID()` | `uuid.UUID` | 符合 `github.com/google/uuid.Parse` 的 UUID 字符串 | `Check` | 适合 path / query 中的 ID 字段 |
+| `Time()` | `time.Time` | RFC3339 时间字符串 | `After` / `Before` / `Check` | `After` / `Before` 为含边界比较 |
+| `UnixTime()` | `time.Time` | 10 位秒级 Unix 时间戳 | `After` / `Before` / `Check` | 解析结果为 UTC 时间 |
+| `UnixMilliTime()` | `time.Time` | 13 位毫秒级 Unix 时间戳 | `After` / `Before` / `Check` | 解析结果为 UTC 时间 |
+
+补充说明：
+
+- 所有类型都支持 `Required()`、`Default(v)`、`Get()`；其中 `Required()` 和 `Default(v)` 互斥
+- 参数缺失时，`Required()` 返回 `required` violation；参数存在但解析失败或校验失败时，返回 `invalid` violation
+- 如果输入已经超出这些常见标量类型，例如自定义类型、多值 query、重复参数或结构化解码，优先改用 `bind.Bind*`
+
 ### 自定义类型输入
 
 如果单参数不是内建标量，或者你已经需要自定义解码、重复 query、多值语义，直接交给 `bind`。这一层只保留常见标量 builder，不再为复杂类型单独扩 request helper。

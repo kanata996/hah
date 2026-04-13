@@ -15,7 +15,8 @@
 // 公开 API：
 //   - request helper 入口：Path、Query、Param
 //   - Path/Query builder 返回类型：StringParam、IntParam、Int64Param、
-//     UintParam、BoolParam、Float64Param、UUIDParam、TimeParam
+//     UintParam、Uint64Param、BoolParam、Float64Param、DurationParam、
+//     UUIDParam、TimeParam
 //   - 校验入口：BindAndValidate、Validate、Source
 //   - 公开 Source 常量：SourceBody、SourceQuery、SourcePath、
 //     SourceHeader、SourceRequest
