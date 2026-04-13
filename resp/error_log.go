@@ -68,11 +68,19 @@ func requestErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
 }
 
 func diagnosticErrorLogAttrs(err error, httpErr *errx.HTTPError) []slog.Attr {
+	return diagnosticErrorLogAttrsWithSource(err, httpErr, true)
+}
+
+func diagnosticErrorLogAttrsWithSource(err error, httpErr *errx.HTTPError, preferHTTPErrorCause bool) []slog.Attr {
 	if err == nil || httpErr == nil {
 		return nil
 	}
 
-	chain := buildErrorChainInfo(errorForDiagnostics(err, httpErr))
+	diagnosticSource := err
+	if preferHTTPErrorCause {
+		diagnosticSource = errorForDiagnostics(err, httpErr)
+	}
+	chain := buildErrorChainInfo(diagnosticSource)
 	attrs := make([]slog.Attr, 0, 7)
 	attrs = append(attrs, slog.String("error.code", httpErr.Code()))
 	if chain.message != "" {
@@ -125,7 +133,8 @@ func (r *ErrorResponder) logErrorResponseWriteFailure(req *http.Request, httpErr
 	attrs := []slog.Attr{
 		slog.Int("http.response.status_code", httpErr.Status()),
 	}
-	attrs = append(attrs, diagnosticErrorLogAttrs(err, httpErr)...)
+	// 错误响应写出失败时，诊断起点必须是 writeErr 本身，而不是业务 cause。
+	attrs = append(attrs, diagnosticErrorLogAttrsWithSource(err, httpErr, false)...)
 	attrs = append(attrs, requestMetadataAttrs(req)...)
 	attrs = append(attrs, r.contextAttrs(ctx)...)
 

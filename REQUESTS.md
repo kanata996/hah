@@ -3,7 +3,7 @@
 这份文档聚焦 `hah` 的输入侧能力，覆盖两个核心包：
 
 - `bind`：负责把 path / query / header / body 绑定到 Go 目标值
-- `reqx`：负责 typed request helper、Normalize、请求级规则和字段校验
+- `reqx`：负责 request helper、Normalize、请求级规则和字段校验
 
 `hah` 是 `net/http`-first 的设计，不提供额外的请求上下文抽象，而是围绕标准库 `*http.Request`、显式 binding 和显式 validation 组合能力来组织 API。
 
@@ -12,7 +12,7 @@
 | 目标 | 推荐 API | 说明 |
 | --- | --- | --- |
 | 单字段 path / query 读取并顺手做常见验证 | `hah.Path` / `hah.Query` | 适合不定义 DTO，但希望直接返回 source-aware `required` / `invalid` 错误 |
-| 高级单字段读取 | `hah.PathParam` / `hah.QueryParam` | 适合只做 typed getter，或需要 pointer / slice / 自定义类型等低层语义 |
+| 自定义类型或结构化输入 | `bind.Bind*` | 复杂类型、多值 query、自定义解码统一走 `bind`，避免再扩单字段 helper |
 | 标准 handler 的默认 happy path | `hah.BindAndValidate` | 默认执行 `path -> query(GET/DELETE/HEAD) -> body`，再做 Normalize / RequestValidator / validator |
 | 只做 body 绑定，不做校验 | `hah.BindBody` | 适合只需要 JSON 解码的场景 |
 | 显式只绑定 query / path / header / body | `hah.BindQueryParams` / `hah.BindPathValues` / `hah.BindHeaders` / `hah.BindBody` | 常用 source-specific binding；底层实现仍在 `bind` 包 |
@@ -67,9 +67,17 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+如果 query 需要保留重复 key 的全部原始值，可以直接走 `Values()` / `Strings()`：
+
+```go
+tags, err := hah.Query(r, "tag").Values().Get()
+```
+
 几个公开语义需要注意：
 
-- `Path(r, name)` / `Query(r, name)` 先指定来源，再选择类型，例如 `String()`、`Int()`、`UUID()`、`Time()`
+- `Path(r, name)` / `Query(r, name)` 先指定来源，再选择类型；`Path` 只暴露 path 适用的单值能力，`Query` 额外支持 `Values()` / `Strings()` 读取重复 query 的原始值
+- `Path` 只支持更适合资源标识的类型：`String()`、`UUID()`、`Int()`、`Int64()`、`Uint()`、`Uint64()`
+- `Query` 继续承载更宽的参数语义，例如布尔、浮点、时长、时间戳和原始重复值
 - 这些链式 builder 的返回类型（例如 `reqx.StringParam`、`reqx.IntParam`、`reqx.TimeParam`）也是公开 API，但大多数调用方不需要直接声明它们
 - `Required()`：参数缺失时返回 `required` violation
 - `Default(v)`：参数缺失时使用默认值；与 `Required()` 互斥
@@ -77,23 +85,46 @@ func handler(w http.ResponseWriter, r *http.Request) {
 - `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` violation
 - `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
 - `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
+- query 中同名参数重复出现时，`Query(...).String()` / `Int()` / `UUID()` 这类标量 helper 默认只消费第一个值；如果你需要全部原始值，改用 `Query(...).Values()` / `Strings()`；如果你需要结构化多值解码，改用 `bind.Bind*`
 
-### typed path / query helper
+#### `Path` 能力表
 
-如果你需要的是“只做 typed getter，不附带快捷校验 DSL”，保留低层 helper：
+| 类型选择器 | 返回值类型 | 输入格式 | 可链式校验 | 备注 |
+| --- | --- | --- | --- | --- |
+| `String()` | `string` | 原样读取字符串 | `MinLen` / `MaxLen` / `OneOf` / `Match` / `Check` | 适合 slug、业务 ID、枚举型 segment |
+| `Int()` | `int` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析；宽度跟随当前平台的 `int` |
+| `Int64()` | `int64` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `Uint()` | `uint` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `Uint64()` | `uint64` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `UUID()` | `uuid.UUID` | 符合 `github.com/google/uuid.Parse` 的 UUID 字符串 | `Check` | 适合 path 中的资源 ID |
 
-```go
-tags, err := hah.QueryParam[[]string](r, "tag")
-cursor, err := hah.QueryParam[*uuid.UUID](r, "cursor")
-```
+#### `Query` 能力表
 
-几个公开语义需要注意：
+| 类型选择器 | 返回值类型 | 输入格式 | 可链式校验 | 备注 |
+| --- | --- | --- | --- | --- |
+| `String()` | `string` | 原样读取字符串 | `MinLen` / `MaxLen` / `OneOf` / `Match` / `Check` | 长度按 rune 数计算；`?name=` 解析为空字符串且算“存在” |
+| `Int()` | `int` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析；宽度跟随当前平台的 `int` |
+| `Int64()` | `int64` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `Uint()` | `uint` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `Uint64()` | `uint64` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `Bool()` | `bool` | 符合 `strconv.ParseBool` 的布尔字面量 | `Check` | 空串按 `false` 解析 |
+| `Float64()` | `float64` | 符合 `strconv.ParseFloat(..., 64)` 的数字字面量 | `Min` / `Max` / `Check` | 空串按 `0.0` 解析 |
+| `Duration()` | `time.Duration` | 符合 `time.ParseDuration` 的时长字面量 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
+| `UUID()` | `uuid.UUID` | 符合 `github.com/google/uuid.Parse` 的 UUID 字符串 | `Check` | 适合 path / query 中的 ID 字段 |
+| `Time()` | `time.Time` | RFC3339 时间字符串 | `After` / `Before` / `Check` | `After` / `Before` 为含边界比较 |
+| `UnixTime()` | `time.Time` | 10 位秒级 Unix 时间戳 | `After` / `Before` / `Check` | 解析结果为 UTC 时间 |
+| `UnixMilliTime()` | `time.Time` | 13 位毫秒级 Unix 时间戳 | `After` / `Before` / `Check` | 解析结果为 UTC 时间 |
+| `Values()` / `Strings()` | `[]string` | query 同名参数的全部原始值 | `Check` | 仅 `Query` 支持；保留重复值顺序；`Required` / `Default` 仍可用 |
 
-- 缺失值返回零值；例如 `QueryParam[int]` 缺失时返回 `0`
-- 如果要区分“缺失”和“有值”，用指针类型，例如 `QueryParam[*uuid.UUID]`
-- query 多值支持 slice：`?tag=a&tag=b` 可以用 `QueryParam[[]string](r, "tag")`
-- 对标量目标，重复 query 只取第一个值
-- 支持 `bind.BindUnmarshaler` 和 `encoding.TextUnmarshaler`
+补充说明：
+
+- 所有类型都支持 `Required()`、`Default(v)`、`Get()`；其中 `Required()` 和 `Default(v)` 互斥
+- 参数缺失时，`Required()` 返回 `required` violation；参数存在但解析失败或校验失败时，返回 `invalid` violation
+- `Query(...).Values()` / `Strings()` 只提供原始 `[]string` 读取；如果输入已经超出这些常见标量类型，例如自定义类型、结构化多值 query、重复参数解码或 DTO 映射，优先改用 `bind.Bind*`
+
+### 自定义类型输入
+
+如果单参数不是内建标量，或者你已经需要自定义解码、结构化多值 query 语义，直接交给 `bind`。`reqx.Query(...).Values()` / `Strings()` 只覆盖“读取原始重复值”这一层，不负责复杂解码。
 
 ## 用 `bind` 绑定 DTO
 
@@ -200,11 +231,26 @@ func (t *Timestamp) UnmarshalParam(src string) error {
 }
 ```
 
-然后这个类型既可以被 `bind.Bind*` 使用，也可以被 `hah.PathParam` / `hah.QueryParam` 使用。
+除 `UnmarshalParam(string) error` 外，当前默认 binder 还支持：
+
+- 字段实现 `encoding.TextUnmarshaler`
+- `time.Time` 字段配合 `format:"..."` tag 做按格式解析
+- 重复 query/header 值绑定到切片字段；如果目标字段需要自行消费全部重复值，可以实现 `UnmarshalParams([]string) error`
+
+示例：
+
+```go
+type SearchQuery struct {
+	At   time.Time `query:"at" format:"2006-01-02"`
+	Tags []string  `query:"tag"`
+}
+```
+
+这类自定义解码主要服务于 `bind.Bind*`。如果输入已经超出常见标量，优先定义 DTO 并让 `bind` 接管，而不是继续堆单字段 helper。
 
 ## 用 `reqx` 做校验和请求级规则
 
-`reqx` 负责 typed request helper、Normalize、请求级规则、字段校验和 violation 包络，把输入后的校验流程集中在同一层。
+`reqx` 负责 request helper、Normalize、请求级规则、字段校验和 violation 包络，把输入后的校验流程集中在同一层。
 
 ### 默认 mixed-source happy path
 
@@ -385,11 +431,11 @@ func handler(w http.ResponseWriter, r *http.Request) {
 ### 4. 只拿一个 path / query 参数
 
 ```go
-orgID, err := hah.PathParam[string](r, "org_id")
-limit, err := hah.QueryParam[int](r, "limit")
+orgID, err := hah.Path(r, "org_id").String().Required().Get()
+limit, err := hah.Query(r, "limit").Int().Default(20).Min(1).Max(100).Get()
 ```
 
-这种场景不必为了一个参数单独创建 DTO。
+这种场景不必为了一两个参数单独创建 DTO。
 
 ## 注意事项
 

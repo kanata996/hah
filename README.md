@@ -55,7 +55,7 @@ import (
 
 - `hah`：根包 facade，聚合常用的绑定、校验和响应写回入口
 - `bind`：请求绑定层，负责 path/query/header/body 到目标值的映射
-- `reqx`：请求 helper、请求规则与校验层，负责 `Path` / `Query`、`PathParam` / `QueryParam`、`Validate`、`Normalize`、`RequestValidator`、`RequireBody` 和 `validator/v10`
+- `reqx`：请求 helper、请求规则与校验层，负责 `Path` / `Query`、`Validate`、`Normalize`、`RequestValidator`、`RequireBody` 和 `validator/v10`
 - `errx`：共享公共 HTTP 错误模型
 - `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
 
@@ -125,8 +125,6 @@ func main() {
 
 - `Path`
 - `Query`
-- `PathParam`
-- `QueryParam`
 - `Bind`
 - `BindBody`
 - `BindQueryParams`
@@ -149,9 +147,24 @@ func main() {
 - `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders` / `bind.BindBody`
 - `reqx.Validate(..., reqx.SourceQuery)` / `reqx.SourcePath` / `reqx.SourceHeader` / `reqx.SourceBody`
 
+单字段 request helper 的边界：
+
+- `hah.Path(...)` 面向 path segment 中的资源标识，只保留 `String()`、`UUID()`、`Int()`、`Int64()`、`Uint()`、`Uint64()`
+- `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`、`UnixMilliTime()`
+- `hah.Query(...).String()` / `Int()` / `UUID()` 等标量 helper 在重复 query key 上默认只消费第一个值
+- `hah.Query(...).Values()` / `Strings()` 可直接读取同名 query 参数的全部原始值；如果你需要结构化多值解码，仍然优先用 `bind.Bind*`
+
+示例：
+
+```go
+accountID, err := hah.Path(r, "account_id").UUID().Required().Get()
+tags, err := hah.Query(r, "tag").Values().Get()
+```
+
 ## 请求输入文档
 
 - [`REQUESTS.md`](./REQUESTS.md)：`bind` / `reqx` 的 request helper、binding、validation、请求级规则和常见组合模式
+  其中也包含 `bind` 的自定义解码契约，例如 `UnmarshalParam`、`encoding.TextUnmarshaler`、`time.Time` + `format:"..."`，以及重复值输入的处理方式
 
 ## 错误响应
 

@@ -2,223 +2,87 @@ package reqx
 
 import (
 	"errors"
-	"net/http"
 	"regexp"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
 
-var errInvalidParamValue = errors.New("invalid param value")
-
-type paramLookupFunc func(r *http.Request, name string) ([]string, bool)
-
-// Param 表示一个待解析的 path/query 单参数。
-type Param struct {
-	r      *http.Request
-	name   string
-	input  string
-	lookup paramLookupFunc
+func newStringParam(spec paramSpec, builderNil bool) *StringParam {
+	return &StringParam{value: newParamValue(spec, builderNil, parseStringValue)}
 }
 
-// Path 创建 path 单参数读取与校验 builder。
-func Path(r *http.Request, name string) *Param {
-	return &Param{
-		r:      r,
-		name:   strings.TrimSpace(name),
-		input:  ViolationInPath,
-		lookup: pathParamValues,
+func newIntParam(spec paramSpec, builderNil bool) *IntParam {
+	return &IntParam{value: newParamValue(spec, builderNil, parseIntValue)}
+}
+
+func newInt64Param(spec paramSpec, builderNil bool) *Int64Param {
+	return &Int64Param{value: newParamValue(spec, builderNil, parseInt64Value)}
+}
+
+func newUint64Param(spec paramSpec, builderNil bool) *Uint64Param {
+	return &Uint64Param{value: newParamValue(spec, builderNil, parseUint64Value)}
+}
+
+func newUintParam(spec paramSpec, builderNil bool) *UintParam {
+	return &UintParam{value: newParamValue(spec, builderNil, parseUintValue)}
+}
+
+func newBoolParam(spec paramSpec, builderNil bool) *BoolParam {
+	return &BoolParam{value: newParamValue(spec, builderNil, parseBoolValue)}
+}
+
+func newFloat64Param(spec paramSpec, builderNil bool) *Float64Param {
+	return &Float64Param{value: newParamValue(spec, builderNil, parseFloat64Value)}
+}
+
+func newDurationParam(spec paramSpec, builderNil bool) *DurationParam {
+	return &DurationParam{value: newParamValue(spec, builderNil, parseDurationValue)}
+}
+
+func newUUIDParam(spec paramSpec, builderNil bool) *UUIDParam {
+	return &UUIDParam{value: newParamValue(spec, builderNil, parseUUIDValue)}
+}
+
+func newTimeParam(spec paramSpec, builderNil bool, parse func(string) (time.Time, error)) *TimeParam {
+	return &TimeParam{value: newParamValue(spec, builderNil, parse)}
+}
+
+func newValuesParam(spec paramSpec, builderNil bool) *ValuesParam {
+	return &ValuesParam{
+		value: newMultiParamValue(spec, builderNil, parseRawValues, cloneStringSlice),
 	}
-}
-
-// Query 创建 query 单参数读取与校验 builder。
-func Query(r *http.Request, name string) *Param {
-	return &Param{
-		r:      r,
-		name:   strings.TrimSpace(name),
-		input:  ViolationInQuery,
-		lookup: queryParamValues,
-	}
-}
-
-// String 读取 string 参数。
-func (p *Param) String() *StringParam {
-	return &StringParam{value: newParamValue(p, parseStringValue)}
-}
-
-// Int 读取 int 参数。
-func (p *Param) Int() *IntParam {
-	return &IntParam{value: newParamValue(p, parseIntValue)}
-}
-
-// Int64 读取 int64 参数。
-func (p *Param) Int64() *Int64Param {
-	return &Int64Param{value: newParamValue(p, parseInt64Value)}
-}
-
-// Uint 读取 uint 参数。
-func (p *Param) Uint() *UintParam {
-	return &UintParam{value: newParamValue(p, parseUintValue)}
-}
-
-// Bool 读取 bool 参数。
-func (p *Param) Bool() *BoolParam {
-	return &BoolParam{value: newParamValue(p, parseBoolValue)}
-}
-
-// Float64 读取 float64 参数。
-func (p *Param) Float64() *Float64Param {
-	return &Float64Param{value: newParamValue(p, parseFloat64Value)}
-}
-
-// UUID 读取 uuid.UUID 参数。
-func (p *Param) UUID() *UUIDParam {
-	return &UUIDParam{value: newParamValue(p, parseUUIDValue)}
-}
-
-// Time 按 RFC3339 读取 time.Time 参数。
-func (p *Param) Time() *TimeParam {
-	return &TimeParam{value: newParamValue(p, parseRFC3339Time)}
-}
-
-// UnixTime 按 10 位秒级 Unix 时间戳读取 time.Time 参数。
-func (p *Param) UnixTime() *TimeParam {
-	return &TimeParam{value: newParamValue(p, parseUnixTime)}
-}
-
-// UnixMilliTime 按 13 位毫秒级 Unix 时间戳读取 time.Time 参数。
-func (p *Param) UnixMilliTime() *TimeParam {
-	return &TimeParam{value: newParamValue(p, parseUnixMilliTime)}
-}
-
-type paramSpec struct {
-	r      *http.Request
-	name   string
-	input  string
-	lookup paramLookupFunc
-}
-
-func (s paramSpec) values() ([]string, bool, error) {
-	if s.lookup == nil || s.input == "" {
-		return nil, false, errorsf("param builder must be created with Path or Query")
-	}
-	if s.r == nil {
-		return nil, false, errorsf("request must not be nil")
-	}
-	if s.name == "" {
-		return nil, false, errorsf("parameter name must not be empty")
-	}
-
-	values, exists := s.lookup(s.r, s.name)
-	return values, exists, nil
-}
-
-type paramValue[T any] struct {
-	spec         paramSpec
-	parse        func(string) (T, error)
-	required     bool
-	hasDefault   bool
-	defaultValue T
-	checks       []func(T) error
-	usageErr     error
-}
-
-func newParamValue[T any](p *Param, parse func(string) (T, error)) paramValue[T] {
-	if p == nil {
-		return paramValue[T]{usageErr: errorsf("param builder must not be nil")}
-	}
-
-	return paramValue[T]{
-		spec: paramSpec{
-			r:      p.r,
-			name:   p.name,
-			input:  p.input,
-			lookup: p.lookup,
-		},
-		parse: parse,
-	}
-}
-
-func (p *paramValue[T]) setUsageErr(err error) {
-	if p.usageErr == nil {
-		p.usageErr = err
-	}
-}
-
-func (p *paramValue[T]) setRequired() {
-	if p.hasDefault {
-		p.setUsageErr(errorsf("required and default are mutually exclusive"))
-		return
-	}
-	p.required = true
-}
-
-func (p *paramValue[T]) setDefault(value T) {
-	if p.required {
-		p.setUsageErr(errorsf("required and default are mutually exclusive"))
-		return
-	}
-	p.hasDefault = true
-	p.defaultValue = value
-}
-
-func (p *paramValue[T]) addCheck(check func(T) error) {
-	if check == nil {
-		p.setUsageErr(errorsf("check must not be nil"))
-		return
-	}
-	p.checks = append(p.checks, check)
-}
-
-func (p *paramValue[T]) resolve() (T, error) {
-	var zero T
-	if p.usageErr != nil {
-		return zero, p.usageErr
-	}
-
-	values, exists, err := p.spec.values()
-	if err != nil {
-		return zero, err
-	}
-
-	if !exists || len(values) == 0 {
-		switch {
-		case p.hasDefault:
-			return p.runChecks(p.defaultValue)
-		case p.required:
-			return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, ViolationCodeRequired, ""))
-		default:
-			return zero, nil
-		}
-	}
-
-	value, err := p.parse(values[0])
-	if err != nil {
-		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, ViolationCodeInvalid, ""))
-	}
-
-	return p.runChecks(value)
-}
-
-func (p *paramValue[T]) runChecks(value T) (T, error) {
-	for _, check := range p.checks {
-		if err := check(value); err != nil {
-			detail := ""
-			if !errors.Is(err, errInvalidParamValue) {
-				detail = strings.TrimSpace(err.Error())
-			}
-			return value, InvalidRequest(newViolation(p.spec.name, p.spec.input, ViolationCodeInvalid, detail))
-		}
-	}
-	return value, nil
 }
 
 // StringParam 读取并校验 string 参数。
 type StringParam struct {
 	value paramValue[string]
+}
+
+// ValuesParam 读取并校验 query 多值参数的原始 []string。
+type ValuesParam struct {
+	value multiParamValue[[]string]
+}
+
+func (p *ValuesParam) Required() *ValuesParam {
+	p.value.setRequired()
+	return p
+}
+
+func (p *ValuesParam) Default(value []string) *ValuesParam {
+	p.value.setDefault(value)
+	return p
+}
+
+func (p *ValuesParam) Check(check func([]string) error) *ValuesParam {
+	p.value.addCheck(check)
+	return p
+}
+
+func (p *ValuesParam) Get() ([]string, error) {
+	return p.value.resolve()
 }
 
 func (p *StringParam) Required() *StringParam {
@@ -468,6 +332,62 @@ func (p *UintParam) Get() (uint, error) {
 	return p.value.resolve()
 }
 
+// Uint64Param 读取并校验 uint64 参数。
+type Uint64Param struct {
+	value paramValue[uint64]
+	min   *uint64
+	max   *uint64
+}
+
+func (p *Uint64Param) Required() *Uint64Param {
+	p.value.setRequired()
+	return p
+}
+
+func (p *Uint64Param) Default(value uint64) *Uint64Param {
+	p.value.setDefault(value)
+	return p
+}
+
+func (p *Uint64Param) Min(value uint64) *Uint64Param {
+	if p.max != nil && value > *p.max {
+		p.value.setUsageErr(errorsf("minimum must be less than or equal to maximum"))
+		return p
+	}
+	p.min = &value
+	p.value.addCheck(func(v uint64) error {
+		if v < value {
+			return errInvalidParamValue
+		}
+		return nil
+	})
+	return p
+}
+
+func (p *Uint64Param) Max(value uint64) *Uint64Param {
+	if p.min != nil && *p.min > value {
+		p.value.setUsageErr(errorsf("maximum must be greater than or equal to minimum"))
+		return p
+	}
+	p.max = &value
+	p.value.addCheck(func(v uint64) error {
+		if v > value {
+			return errInvalidParamValue
+		}
+		return nil
+	})
+	return p
+}
+
+func (p *Uint64Param) Check(check func(uint64) error) *Uint64Param {
+	p.value.addCheck(check)
+	return p
+}
+
+func (p *Uint64Param) Get() (uint64, error) {
+	return p.value.resolve()
+}
+
 // BoolParam 读取并校验 bool 参数。
 type BoolParam struct {
 	value paramValue[bool]
@@ -545,6 +465,62 @@ func (p *Float64Param) Check(check func(float64) error) *Float64Param {
 }
 
 func (p *Float64Param) Get() (float64, error) {
+	return p.value.resolve()
+}
+
+// DurationParam 读取并校验 time.Duration 参数。
+type DurationParam struct {
+	value paramValue[time.Duration]
+	min   *time.Duration
+	max   *time.Duration
+}
+
+func (p *DurationParam) Required() *DurationParam {
+	p.value.setRequired()
+	return p
+}
+
+func (p *DurationParam) Default(value time.Duration) *DurationParam {
+	p.value.setDefault(value)
+	return p
+}
+
+func (p *DurationParam) Min(value time.Duration) *DurationParam {
+	if p.max != nil && value > *p.max {
+		p.value.setUsageErr(errorsf("minimum must be less than or equal to maximum"))
+		return p
+	}
+	p.min = &value
+	p.value.addCheck(func(v time.Duration) error {
+		if v < value {
+			return errInvalidParamValue
+		}
+		return nil
+	})
+	return p
+}
+
+func (p *DurationParam) Max(value time.Duration) *DurationParam {
+	if p.min != nil && *p.min > value {
+		p.value.setUsageErr(errorsf("maximum must be greater than or equal to minimum"))
+		return p
+	}
+	p.max = &value
+	p.value.addCheck(func(v time.Duration) error {
+		if v > value {
+			return errInvalidParamValue
+		}
+		return nil
+	})
+	return p
+}
+
+func (p *DurationParam) Check(check func(time.Duration) error) *DurationParam {
+	p.value.addCheck(check)
+	return p
+}
+
+func (p *DurationParam) Get() (time.Duration, error) {
 	return p.value.resolve()
 }
 
@@ -628,6 +604,10 @@ func (p *TimeParam) Get() (time.Time, error) {
 	return p.value.resolve()
 }
 
+func parseRawValues(values []string) ([]string, error) {
+	return cloneStringSlice(values), nil
+}
+
 func parseStringValue(value string) (string, error) {
 	return value, nil
 }
@@ -655,6 +635,13 @@ func parseUintValue(value string) (uint, error) {
 	return uint(parsed), err
 }
 
+func parseUint64Value(value string) (uint64, error) {
+	if value == "" {
+		value = "0"
+	}
+	return strconv.ParseUint(value, 10, 64)
+}
+
 func parseBoolValue(value string) (bool, error) {
 	if value == "" {
 		value = "false"
@@ -667,6 +654,13 @@ func parseFloat64Value(value string) (float64, error) {
 		value = "0.0"
 	}
 	return strconv.ParseFloat(value, 64)
+}
+
+func parseDurationValue(value string) (time.Duration, error) {
+	if value == "" {
+		value = "0"
+	}
+	return time.ParseDuration(value)
 }
 
 func parseUUIDValue(value string) (uuid.UUID, error) {

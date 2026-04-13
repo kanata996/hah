@@ -105,32 +105,6 @@ func TestBindHeaders_DelegatesToBind(t *testing.T) {
 	}
 }
 
-// PathParam 会通过根包 facade 暴露 reqx 的 typed path getter。
-func TestPathParam_DelegatesToReqx(t *testing.T) {
-	req := newRouteRequest(http.MethodGet, "/accounts/42", "id", "42")
-
-	got, err := PathParam[int](req, "id")
-	if err != nil {
-		t.Fatalf("PathParam() error = %v", err)
-	}
-	if got != 42 {
-		t.Fatalf("PathParam() = %d, want 42", got)
-	}
-}
-
-// QueryParam 会通过根包 facade 暴露 reqx 的 typed query getter。
-func TestQueryParam_DelegatesToReqx(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts?page=42", nil)
-
-	got, err := QueryParam[int](req, "page")
-	if err != nil {
-		t.Fatalf("QueryParam() error = %v", err)
-	}
-	if got != 42 {
-		t.Fatalf("QueryParam() = %d, want 42", got)
-	}
-}
-
 // Path 会通过根包 facade 暴露 reqx 的 path 单参数校验 builder。
 func TestPath_DelegatesToReqx(t *testing.T) {
 	want := uuid.New()
@@ -155,6 +129,19 @@ func TestQuery_DelegatesToReqx(t *testing.T) {
 	}
 	if got := at.UTC().Format(time.RFC3339); got != "2026-04-12T08:30:00Z" {
 		t.Fatalf("at = %q, want 2026-04-12T08:30:00Z", got)
+	}
+}
+
+// Query 也会通过根包 facade 暴露 query 专用的多值读取 builder。
+func TestQuery_ValuesDelegatesToReqx(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/accounts?tag=a&tag=b", nil)
+
+	tags, err := Query(req, "tag").Values().Required().Get()
+	if err != nil {
+		t.Fatalf("Query().Values().Required().Get() error = %v", err)
+	}
+	if got := strings.Join(tags, ","); got != "a,b" {
+		t.Fatalf("tags = %q, want a,b", got)
 	}
 }
 
