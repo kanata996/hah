@@ -10,6 +10,10 @@ type panicWriteCause struct{}
 
 type blankWriteCause struct{}
 
+type namedErrorDetail map[string]any
+type namedStringMap map[string]string
+type namedStringSlice []string
+
 func (panicWriteCause) Error() string {
 	panic("boom")
 }
@@ -18,12 +22,110 @@ func (blankWriteCause) Error() string {
 	return "   "
 }
 
+type standardHTTPErrorConstructorCase struct {
+	name       string
+	build      func(string, string, ...any) *HTTPError
+	wantStatus int
+	wantCode   string
+}
+
+var standardHTTPErrorConstructors = []standardHTTPErrorConstructorCase{
+	{
+		name:       "bad request",
+		build:      BadRequest,
+		wantStatus: http.StatusBadRequest,
+		wantCode:   "bad_request",
+	},
+	{
+		name:       "unauthorized",
+		build:      Unauthorized,
+		wantStatus: http.StatusUnauthorized,
+		wantCode:   "unauthorized",
+	},
+	{
+		name:       "forbidden",
+		build:      Forbidden,
+		wantStatus: http.StatusForbidden,
+		wantCode:   "forbidden",
+	},
+	{
+		name:       "not found",
+		build:      NotFound,
+		wantStatus: http.StatusNotFound,
+		wantCode:   "not_found",
+	},
+	{
+		name:       "method not allowed",
+		build:      MethodNotAllowed,
+		wantStatus: http.StatusMethodNotAllowed,
+		wantCode:   "method_not_allowed",
+	},
+	{
+		name:       "conflict",
+		build:      Conflict,
+		wantStatus: http.StatusConflict,
+		wantCode:   "conflict",
+	},
+	{
+		name:       "unprocessable entity",
+		build:      UnprocessableEntity,
+		wantStatus: http.StatusUnprocessableEntity,
+		wantCode:   "unprocessable_entity",
+	},
+	{
+		name:       "too many requests",
+		build:      TooManyRequests,
+		wantStatus: http.StatusTooManyRequests,
+		wantCode:   "too_many_requests",
+	},
+}
+
+func assertHTTPErrorStatusAndCode(t *testing.T, err *HTTPError, wantStatus int, wantCode string) {
+	t.Helper()
+
+	if got := err.Status(); got != wantStatus {
+		t.Fatalf("Status() = %d, want %d", got, wantStatus)
+	}
+	if got := err.Code(); got != wantCode {
+		t.Fatalf("Code() = %q, want %q", got, wantCode)
+	}
+}
+
+func assertHTTPErrorUsesStatusTextPublicMessage(t *testing.T, err *HTTPError, wantStatus int) {
+	t.Helper()
+
+	want := http.StatusText(wantStatus)
+	if got := err.Title(); got != want {
+		t.Fatalf("Title() = %q, want %q", got, want)
+	}
+	if got := err.Detail(); got != want {
+		t.Fatalf("Detail() = %q, want %q", got, want)
+	}
+	if got := err.Error(); got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+}
+
+func assertHTTPErrorErrors(t *testing.T, err *HTTPError, want ...string) {
+	t.Helper()
+
+	got := err.Errors()
+	if len(got) != len(want) {
+		t.Fatalf("Errors() = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Errors() = %#v, want %#v", got, want)
+		}
+	}
+}
+
 // 测试清单：
 // [✓] nil 接收者返回安全默认值
 // [✓] cause、Error、Unwrap、Detail、Errors 的公开语义稳定
-// [✓] Detail 和 Errors 对外暴露标准化后的字段，并在构造时与读取时都做防御性切片拷贝
+// [✓] Detail 和 Errors 对外暴露标准化后的字段，并在构造时与读取时都做 JSON 容器的防御性深拷贝
 // [✓] 常用错误构造器输出稳定的状态码、错误码和公开消息
-// [✓] 状态码、错误码、标题、详情标准化包含 499 特例
+// [✓] 状态码、错误码、标题、详情标准化包含 499 特例与非常规状态的公开退化语义
 // [✓] errors.Is / errors.As 标准 error 链互操作
 // [✓] 快捷构造器自定义 code/detail 透传
 // [✓] 构造时不传 errors 时 Errors() 返回 nil
@@ -128,6 +230,47 @@ func TestHTTPErrorDetailAndErrorsExposePublicFields(t *testing.T) {
 	}
 }
 
+// Errors 返回给调用方的 JSON 容器也应是递归拷贝，避免调用方修改嵌套结构污染错误对象。
+func TestHTTPErrorErrorsReturnsDeepClonedNestedValues(t *testing.T) {
+	err := NewHTTPError(
+		http.StatusBadRequest,
+		"bad_request",
+		"bad request",
+		map[string]any{
+			"field": "name",
+			"meta":  []any{map[string]any{"code": "required"}},
+		},
+	)
+
+	gotErrors := err.Errors()
+	gotDetail, ok := gotErrors[0].(map[string]any)
+	if !ok {
+		t.Fatalf("Errors()[0] type = %T, want map[string]any", gotErrors[0])
+	}
+	gotDetail["field"] = "changed"
+	gotDetail["meta"].([]any)[0].(map[string]any)["code"] = "changed"
+
+	freshErrors := err.Errors()
+	freshDetail, ok := freshErrors[0].(map[string]any)
+	if !ok {
+		t.Fatalf("fresh Errors()[0] type = %T, want map[string]any", freshErrors[0])
+	}
+	if freshDetail["field"] != "name" {
+		t.Fatalf("fresh Errors()[0][field] = %#v, want name", freshDetail["field"])
+	}
+	freshMeta, ok := freshDetail["meta"].([]any)
+	if !ok || len(freshMeta) != 1 {
+		t.Fatalf("fresh Errors()[0][meta] = %#v, want one-item []any", freshDetail["meta"])
+	}
+	freshMetaItem, ok := freshMeta[0].(map[string]any)
+	if !ok {
+		t.Fatalf("fresh Errors()[0][meta][0] type = %T, want map[string]any", freshMeta[0])
+	}
+	if freshMetaItem["code"] != "required" {
+		t.Fatalf("fresh Errors()[0][meta][0][code] = %#v, want required", freshMetaItem["code"])
+	}
+}
+
 // 构造 HTTPError 时会立刻拷贝 errors 入参，避免调用方后续修改原切片影响错误对象。
 func TestNewHTTPErrorClonesInputErrorsSlice(t *testing.T) {
 	input := []any{"detail"}
@@ -138,6 +281,137 @@ func TestNewHTTPErrorClonesInputErrorsSlice(t *testing.T) {
 	gotErrors := err.Errors()
 	if len(gotErrors) != 1 || gotErrors[0] != "detail" {
 		t.Fatalf("Errors() = %#v, want original [detail]", gotErrors)
+	}
+}
+
+// 构造 HTTPError 时会递归拷贝公开 JSON 容器，避免嵌套 map/slice 与调用方共享状态。
+func TestNewHTTPErrorDeepClonesNestedErrorValues(t *testing.T) {
+	inputDetail := map[string]any{
+		"field": "name",
+		"meta":  []any{map[string]any{"code": "required"}},
+	}
+
+	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request", inputDetail)
+
+	inputDetail["field"] = "changed"
+	inputDetail["meta"].([]any)[0].(map[string]any)["code"] = "changed"
+
+	gotErrors := err.Errors()
+	if len(gotErrors) != 1 {
+		t.Fatalf("Errors() len = %d, want 1", len(gotErrors))
+	}
+
+	gotDetail, ok := gotErrors[0].(map[string]any)
+	if !ok {
+		t.Fatalf("Errors()[0] type = %T, want map[string]any", gotErrors[0])
+	}
+	if gotDetail["field"] != "name" {
+		t.Fatalf("Errors()[0][field] = %#v, want name", gotDetail["field"])
+	}
+	gotMeta, ok := gotDetail["meta"].([]any)
+	if !ok || len(gotMeta) != 1 {
+		t.Fatalf("Errors()[0][meta] = %#v, want one-item []any", gotDetail["meta"])
+	}
+	gotMetaItem, ok := gotMeta[0].(map[string]any)
+	if !ok {
+		t.Fatalf("Errors()[0][meta][0] type = %T, want map[string]any", gotMeta[0])
+	}
+	if gotMetaItem["code"] != "required" {
+		t.Fatalf("Errors()[0][meta][0][code] = %#v, want required", gotMetaItem["code"])
+	}
+}
+
+// 构造 HTTPError 时也应拷贝常见 JSON-safe map/slice 及其命名类型，而不是只处理精确的 []any/map[string]any。
+func TestNewHTTPErrorClonesCommonJSONContainerTypes(t *testing.T) {
+	nestedLabels := namedStringMap{"code": "required"}
+	nestedNames := namedStringSlice{"name"}
+	namedDetail := namedErrorDetail{
+		"field":  "account",
+		"labels": nestedLabels,
+		"names":  nestedNames,
+	}
+	plainLabels := map[string]string{"scope": "query"}
+	plainNames := []string{"id"}
+
+	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request", namedDetail, plainLabels, plainNames)
+
+	namedDetail["field"] = "changed"
+	nestedLabels["code"] = "changed"
+	nestedNames[0] = "changed"
+	plainLabels["scope"] = "changed"
+	plainNames[0] = "changed"
+
+	gotErrors := err.Errors()
+	if len(gotErrors) != 3 {
+		t.Fatalf("Errors() len = %d, want 3", len(gotErrors))
+	}
+
+	gotNamedDetail, ok := gotErrors[0].(namedErrorDetail)
+	if !ok {
+		t.Fatalf("Errors()[0] type = %T, want namedErrorDetail", gotErrors[0])
+	}
+	if gotNamedDetail["field"] != "account" {
+		t.Fatalf("Errors()[0][field] = %#v, want account", gotNamedDetail["field"])
+	}
+	gotNestedLabels, ok := gotNamedDetail["labels"].(namedStringMap)
+	if !ok {
+		t.Fatalf("Errors()[0][labels] type = %T, want namedStringMap", gotNamedDetail["labels"])
+	}
+	if gotNestedLabels["code"] != "required" {
+		t.Fatalf("Errors()[0][labels][code] = %#v, want required", gotNestedLabels["code"])
+	}
+	gotNestedNames, ok := gotNamedDetail["names"].(namedStringSlice)
+	if !ok {
+		t.Fatalf("Errors()[0][names] type = %T, want namedStringSlice", gotNamedDetail["names"])
+	}
+	if gotNestedNames[0] != "name" {
+		t.Fatalf("Errors()[0][names][0] = %q, want name", gotNestedNames[0])
+	}
+
+	gotPlainLabels, ok := gotErrors[1].(map[string]string)
+	if !ok {
+		t.Fatalf("Errors()[1] type = %T, want map[string]string", gotErrors[1])
+	}
+	if gotPlainLabels["scope"] != "query" {
+		t.Fatalf("Errors()[1][scope] = %#v, want query", gotPlainLabels["scope"])
+	}
+
+	gotPlainNames, ok := gotErrors[2].([]string)
+	if !ok {
+		t.Fatalf("Errors()[2] type = %T, want []string", gotErrors[2])
+	}
+	if gotPlainNames[0] != "id" {
+		t.Fatalf("Errors()[2][0] = %q, want id", gotPlainNames[0])
+	}
+}
+
+// 共享同一 backing array 的不同 subslice 也应各自独立克隆，不能因为起始指针相同而复用成同一个结果。
+func TestNewHTTPErrorClonesDistinctSubSlicesSharingBackingArray(t *testing.T) {
+	source := []string{"first", "second"}
+	short := source[:1]
+	long := source[:2]
+
+	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request", short, long)
+
+	gotErrors := err.Errors()
+	if len(gotErrors) != 2 {
+		t.Fatalf("Errors() len = %d, want 2", len(gotErrors))
+	}
+
+	gotShort, ok := gotErrors[0].([]string)
+	if !ok {
+		t.Fatalf("Errors()[0] type = %T, want []string", gotErrors[0])
+	}
+	if len(gotShort) != 1 || gotShort[0] != "first" {
+		t.Fatalf("Errors()[0] = %#v, want []string{\"first\"}", gotShort)
+	}
+
+	gotLong, ok := gotErrors[1].([]string)
+	if !ok {
+		t.Fatalf("Errors()[1] type = %T, want []string", gotErrors[1])
+	}
+	if len(gotLong) != 2 || gotLong[0] != "first" || gotLong[1] != "second" {
+		t.Fatalf("Errors()[1] = %#v, want []string{\"first\", \"second\"}", gotLong)
 	}
 }
 
@@ -159,103 +433,32 @@ func TestHTTPErrorErrorFallsBackToNormalizedDetail(t *testing.T) {
 	}
 }
 
-// 各个常用错误构造器都会生成稳定的状态码、错误码和公开消息。
-func TestHTTPErrorConstructors(t *testing.T) {
-	testCases := []struct {
-		name       string
-		build      func() *HTTPError
-		wantStatus int
-		wantCode   string
-		wantTitle  string
-		wantDetail string
-	}{
-		{
-			name:       "bad request",
-			build:      func() *HTTPError { return BadRequest("", "", "detail") },
-			wantStatus: http.StatusBadRequest,
-			wantCode:   "bad_request",
-			wantTitle:  http.StatusText(http.StatusBadRequest),
-			wantDetail: http.StatusText(http.StatusBadRequest),
-		},
-		{
-			name:       "unauthorized",
-			build:      func() *HTTPError { return Unauthorized("", "", "detail") },
-			wantStatus: http.StatusUnauthorized,
-			wantCode:   "unauthorized",
-			wantTitle:  http.StatusText(http.StatusUnauthorized),
-			wantDetail: http.StatusText(http.StatusUnauthorized),
-		},
-		{
-			name:       "forbidden",
-			build:      func() *HTTPError { return Forbidden("", "", "detail") },
-			wantStatus: http.StatusForbidden,
-			wantCode:   "forbidden",
-			wantTitle:  http.StatusText(http.StatusForbidden),
-			wantDetail: http.StatusText(http.StatusForbidden),
-		},
-		{
-			name:       "not found",
-			build:      func() *HTTPError { return NotFound("", "", "detail") },
-			wantStatus: http.StatusNotFound,
-			wantCode:   "not_found",
-			wantTitle:  http.StatusText(http.StatusNotFound),
-			wantDetail: http.StatusText(http.StatusNotFound),
-		},
-		{
-			name:       "method not allowed",
-			build:      func() *HTTPError { return MethodNotAllowed("", "", "detail") },
-			wantStatus: http.StatusMethodNotAllowed,
-			wantCode:   "method_not_allowed",
-			wantTitle:  http.StatusText(http.StatusMethodNotAllowed),
-			wantDetail: http.StatusText(http.StatusMethodNotAllowed),
-		},
-		{
-			name:       "conflict",
-			build:      func() *HTTPError { return Conflict("", "", "detail") },
-			wantStatus: http.StatusConflict,
-			wantCode:   "conflict",
-			wantTitle:  http.StatusText(http.StatusConflict),
-			wantDetail: http.StatusText(http.StatusConflict),
-		},
-		{
-			name:       "unprocessable entity",
-			build:      func() *HTTPError { return UnprocessableEntity("", "", "detail") },
-			wantStatus: http.StatusUnprocessableEntity,
-			wantCode:   "unprocessable_entity",
-			wantTitle:  http.StatusText(http.StatusUnprocessableEntity),
-			wantDetail: http.StatusText(http.StatusUnprocessableEntity),
-		},
-		{
-			name:       "too many requests",
-			build:      func() *HTTPError { return TooManyRequests("", "", "detail") },
-			wantStatus: http.StatusTooManyRequests,
-			wantCode:   "too_many_requests",
-			wantTitle:  http.StatusText(http.StatusTooManyRequests),
-			wantDetail: http.StatusText(http.StatusTooManyRequests),
-		},
-	}
-
-	for _, tc := range testCases {
+// 各个常用错误构造器都会生成稳定的状态码和错误码。
+func TestHTTPErrorConstructorsSetStatusAndCode(t *testing.T) {
+	for _, tc := range standardHTTPErrorConstructors {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.build()
-			if got := err.Status(); got != tc.wantStatus {
-				t.Fatalf("Status() = %d, want %d", got, tc.wantStatus)
-			}
-			if got := err.Code(); got != tc.wantCode {
-				t.Fatalf("Code() = %q, want %q", got, tc.wantCode)
-			}
-			if got := err.Title(); got != tc.wantTitle {
-				t.Fatalf("Title() = %q, want %q", got, tc.wantTitle)
-			}
-			if got := err.Detail(); got != tc.wantDetail {
-				t.Fatalf("Detail() = %q, want %q", got, tc.wantDetail)
-			}
-			if got := err.Error(); got != tc.wantDetail {
-				t.Fatalf("Error() = %q, want %q", got, tc.wantDetail)
-			}
-			if got := err.Errors(); len(got) != 1 || got[0] != "detail" {
-				t.Fatalf("Errors() = %#v, want [detail]", got)
-			}
+			err := tc.build("", "", "detail")
+			assertHTTPErrorStatusAndCode(t, err, tc.wantStatus, tc.wantCode)
+		})
+	}
+}
+
+// 各个常用错误构造器在未显式传 detail 时都会回退到状态文案。
+func TestHTTPErrorConstructorsUseStatusTextPublicMessageByDefault(t *testing.T) {
+	for _, tc := range standardHTTPErrorConstructors {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.build("", "", "detail")
+			assertHTTPErrorUsesStatusTextPublicMessage(t, err, tc.wantStatus)
+		})
+	}
+}
+
+// 各个常用错误构造器都会保留传入的结构化错误项。
+func TestHTTPErrorConstructorsExposeStructuredErrors(t *testing.T) {
+	for _, tc := range standardHTTPErrorConstructors {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.build("", "", "detail")
+			assertHTTPErrorErrors(t, err, "detail")
 		})
 	}
 }
@@ -339,6 +542,29 @@ func TestNewHTTPErrorSupports499Defaults(t *testing.T) {
 	}
 	if got := err.Detail(); got != "Client Closed Request" {
 		t.Fatalf("Detail() = %q, want Client Closed Request", got)
+	}
+}
+
+func TestNewHTTPErrorUsesPublicDefaultsForIrregularStatuses(t *testing.T) {
+	testCases := []struct {
+		name       string
+		status     int
+		wantStatus int
+	}{
+		{name: "success status", status: http.StatusOK, wantStatus: http.StatusInternalServerError},
+		{name: "unknown 5xx", status: 509, wantStatus: http.StatusInternalServerError},
+		{name: "unknown 7xx", status: 777, wantStatus: http.StatusInternalServerError},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := NewHTTPError(tc.status, "", "")
+			assertHTTPErrorStatusAndCode(t, err, tc.wantStatus, "internal_error")
+			assertHTTPErrorUsesStatusTextPublicMessage(t, err, http.StatusInternalServerError)
+			if got := err.Errors(); got != nil {
+				t.Fatalf("Errors() = %#v, want nil", got)
+			}
+		})
 	}
 }
 
