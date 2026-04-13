@@ -77,6 +77,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 - `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` violation
 - `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
 - `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
+- query 中同名参数重复出现时，`Path` / `Query` 这类单字段 helper 默认只消费第一个值；如果你需要多值语义，改用 `bind.Bind*`
 
 #### `Path` / `Query` 能力表
 
@@ -207,6 +208,21 @@ func (t *Timestamp) UnmarshalParam(src string) error {
 	parsed, err := time.Parse(time.RFC3339, src)
 	*t = Timestamp(parsed)
 	return err
+}
+```
+
+除 `UnmarshalParam(string) error` 外，当前默认 binder 还支持：
+
+- 字段实现 `encoding.TextUnmarshaler`
+- `time.Time` 字段配合 `format:"..."` tag 做按格式解析
+- 重复 query/header 值绑定到切片字段；如果目标字段需要自行消费全部重复值，可以实现 `UnmarshalParams([]string) error`
+
+示例：
+
+```go
+type SearchQuery struct {
+	At   time.Time `query:"at" format:"2006-01-02"`
+	Tags []string  `query:"tag"`
 }
 ```
 

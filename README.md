@@ -146,10 +146,12 @@ func main() {
 - `hah.BindQueryParams` / `hah.BindPathValues` / `hah.BindHeaders` / `hah.BindBody`
 - `bind.BindQueryParams` / `bind.BindPathValues` / `bind.BindHeaders` / `bind.BindBody`
 - `reqx.Validate(..., reqx.SourceQuery)` / `reqx.SourcePath` / `reqx.SourceHeader` / `reqx.SourceBody`
+- `hah.Path` / `hah.Query` 适合单字段 path/query 读取；query 同名参数重复出现时默认只消费第一个值，多值语义请改用 `bind.Bind*`
 
 ## 请求输入文档
 
 - [`REQUESTS.md`](./REQUESTS.md)：`bind` / `reqx` 的 request helper、binding、validation、请求级规则和常见组合模式
+  其中也包含 `bind` 的自定义解码契约，例如 `UnmarshalParam`、`encoding.TextUnmarshaler`、`time.Time` + `format:"..."`，以及重复值输入的处理方式
 
 ## 错误响应
 
