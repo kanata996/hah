@@ -1,12 +1,5 @@
 package bind
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] BindBody 的 Content-Type、空 body、未知字段与非法 JSON 契约。
-// - [✓] BindBody 支持标准 decoder 目标，包括 struct、slice、map。
-// - [✓] BindBody 在 body 大小达到上限、超出上限和 unknown-length 超限时维持稳定契约。
-// - [✓] BindBody 在 req.Body 为 nil 时保持 no-op。
-
 import (
 	"bytes"
 	"errors"
@@ -54,7 +47,7 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 	t.Run("rejects missing content type for non empty body", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
 
-		var dst request
+		dst := request{Name: "existing"}
 		_ = assertHTTPError(
 			t,
 			BindBody(req, &dst),
@@ -62,6 +55,9 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 			CodeUnsupportedMediaType,
 			"Content-Type must be application/json",
 		)
+		if dst.Name != "existing" {
+			t.Fatalf("name = %q, want existing value preserved before decode starts", dst.Name)
+		}
 	})
 
 	t.Run("rejects application json suffix media type", func(t *testing.T) {
@@ -139,9 +135,12 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 		req.Header.Set("Content-Type", mimeApplicationJSON)
 		req.Body = &byteThenReadErrorCloser{err: wantErr}
 
-		var dst request
+		dst := request{Name: "existing"}
 		if err := BindBody(req, &dst); !errors.Is(err, wantErr) {
 			t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+		}
+		if dst.Name != "existing" {
+			t.Fatalf("name = %q, want existing value preserved when body read fails", dst.Name)
 		}
 	})
 }
@@ -251,8 +250,11 @@ func TestBindBody_JSONContract(t *testing.T) {
 		}
 
 		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","age":"oops"}`)
-		var dst request
+		dst := request{Name: "existing", Age: 17}
 		_ = assertHTTPError(t, BindBody(req, &dst), http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		if dst.Name != "kanata" || dst.Age != 17 {
+			t.Fatalf("dst = %#v, want earlier decoded fields preserved and failing field unchanged", dst)
+		}
 	})
 
 	t.Run("unknown fields are accepted by default", func(t *testing.T) {

@@ -1,14 +1,5 @@
 package bind
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] BindPathValues、BindQueryParams、BindHeaders 的公开成功、失败和保留语义。
-// - [✓] 单源公开 API 支持约定的 map 目标语义。
-// - [✓] BindHeaders 支持切片字段绑定多值 header。
-// - [✓] BindQueryParams 对指针字段在缺失/空值时的保留与清零语义。
-// - [✓] 单源公开 API 定义字段级失败时的部分写入语义。
-// - [✓] BindQueryParams 通过公开入口覆盖复杂类型、匿名嵌入字段和解码失败契约。
-
 import (
 	"errors"
 	"fmt"
@@ -561,6 +552,8 @@ func TestBindQueryParams_PointerFieldPreservation(t *testing.T) {
 		Page *int `query:"page"`
 	}
 
+	intPtr := func(v int) *int { return &v }
+
 	t.Run("nil pointer preserved when query param is missing", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/?other=1", nil)
 
@@ -573,10 +566,34 @@ func TestBindQueryParams_PointerFieldPreservation(t *testing.T) {
 		}
 	})
 
+	t.Run("existing pointer value is preserved when query param is missing", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/?other=1", nil)
+
+		dst := request{Page: intPtr(7)}
+		if err := BindQueryParams(req, &dst); err != nil {
+			t.Fatalf("BindQueryParams() error = %v", err)
+		}
+		if dst.Page == nil || *dst.Page != 7 {
+			t.Fatalf("page = %#v, want &7", dst.Page)
+		}
+	})
+
 	t.Run("empty value allocates pointer and sets zero", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/?page=", nil)
 
 		var dst request
+		if err := BindQueryParams(req, &dst); err != nil {
+			t.Fatalf("BindQueryParams() error = %v", err)
+		}
+		if dst.Page == nil || *dst.Page != 0 {
+			t.Fatalf("page = %#v, want &0", dst.Page)
+		}
+	})
+
+	t.Run("empty value overwrites existing pointer with zero", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/?page=", nil)
+
+		dst := request{Page: intPtr(7)}
 		if err := BindQueryParams(req, &dst); err != nil {
 			t.Fatalf("BindQueryParams() error = %v", err)
 		}

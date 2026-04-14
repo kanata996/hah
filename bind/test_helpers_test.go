@@ -1,9 +1,5 @@
 package bind
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] 测试辅助文件：提供请求构造、path pattern 构造与 HTTPError 断言 helper。
-
 import (
 	"errors"
 	"io"

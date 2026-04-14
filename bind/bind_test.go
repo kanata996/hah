@@ -1,11 +1,5 @@
 package bind
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] 公开 Bind* 入口在 nil request 或 nil destination 下返回稳定错误。
-// - [✓] Bind 的默认顺序、方法规则和 header 排除语义。
-// - [✓] Bind 在 empty body no-op 和阶段失败时保留前序已写入值。
-
 import (
 	"net/http"
 	"net/http/httptest"
@@ -14,28 +8,41 @@ import (
 
 func TestBind_PublicEntryPointsRejectInvalidInputs(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	var dst struct{}
 
-	tests := []struct {
+	type destination struct{}
+
+	var typedNil *destination
+
+	entryPoints := []struct {
 		name string
-		call func() error
-		want string
+		call func(*http.Request, any) error
 	}{
-		{name: "Bind rejects nil request", call: func() error { return Bind(nil, &dst) }, want: wantNilRequestErr},
-		{name: "Bind rejects nil destination", call: func() error { return Bind(req, nil) }, want: wantNilDestinationErr},
-		{name: "BindBody rejects nil request", call: func() error { return BindBody(nil, &dst) }, want: wantNilRequestErr},
-		{name: "BindBody rejects nil destination", call: func() error { return BindBody(req, nil) }, want: wantNilDestinationErr},
-		{name: "BindQueryParams rejects nil request", call: func() error { return BindQueryParams(nil, &dst) }, want: wantNilRequestErr},
-		{name: "BindQueryParams rejects nil destination", call: func() error { return BindQueryParams(req, nil) }, want: wantNilDestinationErr},
-		{name: "BindPathValues rejects nil request", call: func() error { return BindPathValues(nil, &dst) }, want: wantNilRequestErr},
-		{name: "BindPathValues rejects nil destination", call: func() error { return BindPathValues(req, nil) }, want: wantNilDestinationErr},
-		{name: "BindHeaders rejects nil request", call: func() error { return BindHeaders(nil, &dst) }, want: wantNilRequestErr},
-		{name: "BindHeaders rejects nil destination", call: func() error { return BindHeaders(req, nil) }, want: wantNilDestinationErr},
+		{name: "Bind", call: Bind},
+		{name: "BindBody", call: BindBody},
+		{name: "BindQueryParams", call: BindQueryParams},
+		{name: "BindPathValues", call: BindPathValues},
+		{name: "BindHeaders", call: BindHeaders},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assertUsageError(t, tt.call(), tt.want)
+	invalidInputs := []struct {
+		name   string
+		req    *http.Request
+		target any
+		want   string
+	}{
+		{name: "rejects nil request", req: nil, target: &destination{}, want: wantNilRequestErr},
+		{name: "rejects nil destination", req: req, target: nil, want: wantNilDestinationErr},
+		{name: "rejects non-pointer destination", req: req, target: destination{}, want: wantNilDestinationErr},
+		{name: "rejects typed nil destination", req: req, target: typedNil, want: wantNilDestinationErr},
+	}
+
+	for _, entryPoint := range entryPoints {
+		t.Run(entryPoint.name, func(t *testing.T) {
+			for _, tc := range invalidInputs {
+				t.Run(tc.name, func(t *testing.T) {
+					assertUsageError(t, entryPoint.call(tc.req, tc.target), tc.want)
+				})
+			}
 		})
 	}
 }
@@ -176,7 +183,7 @@ func TestBind_DoesNotUseHeadersByDefault(t *testing.T) {
 	}
 }
 
-func TestBind_EmptyBodyNoopUsesBodyProbe(t *testing.T) {
+func TestBind_EmptyBodyNoopPreservesEarlierStageWrites(t *testing.T) {
 	type request struct {
 		ID   string `param:"id"`
 		Page int    `query:"page"`
@@ -212,7 +219,7 @@ func TestBind_EmptyBodyNoopUsesBodyProbe(t *testing.T) {
 		t.Fatalf("Bind(unknown-length empty body) error = %v", err)
 	}
 	if dst.ID != "route-id" || dst.Page != 2 || dst.Name != "existing-name" {
-		t.Fatalf("dst = %#v, want path/query updates and body probe no-op", dst)
+		t.Fatalf("dst = %#v, want path/query updates and empty body no-op", dst)
 	}
 }
 
