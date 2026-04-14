@@ -70,6 +70,20 @@ func TestPath_SuccessPaths(t *testing.T) {
 			t.Fatalf("path = %q, want empty string", got)
 		}
 	})
+
+	t.Run("method-prefixed typed wildcard counts as declared", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/accounts/42", nil)
+		req.Pattern = "GET /accounts/{id:[0-9]+}"
+		req.SetPathValue("id", "42")
+
+		got, err := Path(req, "id").Int().Required().Get()
+		if err != nil {
+			t.Fatalf("Path().Int().Required().Get() error = %v", err)
+		}
+		if got != 42 {
+			t.Fatalf("id = %d, want 42", got)
+		}
+	})
 }
 
 func TestPath_RequiredAndInvalidViolations(t *testing.T) {

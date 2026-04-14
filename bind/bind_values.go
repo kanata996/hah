@@ -151,6 +151,17 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 
 	for i := 0; i < typ.NumField(); i++ {
 		typeField := typ.Field(i)
+		inputFieldName := typeField.Tag.Get(tag)
+		if typeField.Anonymous {
+			embeddedType := typeField.Type
+			if embeddedType.Kind() == reflect.Pointer {
+				embeddedType = embeddedType.Elem()
+			}
+			if embeddedType.Kind() == reflect.Struct && inputFieldName != "" {
+				return errors.New("query/param/header tags are not allowed with anonymous struct field")
+			}
+		}
+
 		structField := val.Field(i)
 		if typeField.Anonymous && structField.Kind() == reflect.Pointer {
 			if structField.IsNil() {
@@ -163,10 +174,6 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 		}
 
 		structFieldKind := structField.Kind()
-		inputFieldName := typeField.Tag.Get(tag)
-		if typeField.Anonymous && structFieldKind == reflect.Struct && inputFieldName != "" {
-			return errors.New("query/param/header tags are not allowed with anonymous struct field")
-		}
 
 		if inputFieldName == "" {
 			// 未显式标注输入名时，仅递归进入普通嵌套 struct；自定义解码字段保持自行接管。
@@ -197,55 +204,52 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 			continue
 		}
 
+		writeField, commitWrite := stagedFieldValueDefault(structField)
+		writeFieldKind := writeField.Kind()
+
 		// 多值自定义解码拥有最高优先级，用于字段自行决定如何消费重复输入。
-		if ok, err := unmarshalInputsToFieldDefault(typeField.Type.Kind(), inputValue, structField); ok {
+		if ok, err := unmarshalInputsToFieldDefault(inputValue, writeField); ok {
 			if err != nil {
 				return err
 			}
+			commitWrite()
 			continue
 		}
 
 		formatTag := typeField.Tag.Get("format")
 		// 单值自定义解码和 format 驱动的 time 解析在标量转换前执行。
-		if ok, err := unmarshalInputToFieldDefault(typeField.Type.Kind(), inputValue[0], structField, formatTag); ok {
+		if ok, err := unmarshalInputToFieldDefault(inputValue[0], writeField, formatTag); ok {
 			if err != nil {
 				return err
 			}
+			commitWrite()
 			continue
 		}
 
-		structField, structFieldKind = concreteFieldValueDefault(structField, structFieldKind)
-
-		if structFieldKind == reflect.Slice {
-			sliceOf := structField.Type().Elem().Kind()
+		if writeFieldKind == reflect.Slice {
 			numElems := len(inputValue)
-			slice := reflect.MakeSlice(structField.Type(), numElems, numElems)
+			slice := reflect.MakeSlice(writeField.Type(), numElems, numElems)
 			for j := 0; j < numElems; j++ {
-				if err := setWithProperTypeDefault(sliceOf, inputValue[j], slice.Index(j), formatTag); err != nil {
+				if err := setWithProperTypeDefault(inputValue[j], slice.Index(j), formatTag); err != nil {
 					return err
 				}
 			}
-			structField.Set(slice)
+			writeField.Set(slice)
+			commitWrite()
 			continue
 		}
 
-		if err := setWithProperTypeDefault(structFieldKind, inputValue[0], structField, formatTag); err != nil {
+		if err := setWithProperTypeDefault(inputValue[0], writeField, formatTag); err != nil {
 			return err
 		}
+		commitWrite()
 	}
 
 	return nil
 }
 
 // unmarshalInputsToFieldDefault 优先尝试多值自定义解码接口。
-// 对指针字段，先通过类型探测接口是否匹配，避免在不匹配时产生指针分配副作用。
-func unmarshalInputsToFieldDefault(valueKind reflect.Kind, values []string, field reflect.Value) (bool, error) {
-	if valueKind == reflect.Pointer &&
-		!reflect.PointerTo(field.Type().Elem()).Implements(reflect.TypeFor[bindMultipleUnmarshaler]()) {
-		return false, nil
-	}
-
-	field, _ = concreteFieldValueDefault(field, valueKind)
+func unmarshalInputsToFieldDefault(values []string, field reflect.Value) (bool, error) {
 	unmarshaler, ok := field.Addr().Interface().(bindMultipleUnmarshaler)
 	if !ok {
 		return false, nil
@@ -254,20 +258,7 @@ func unmarshalInputsToFieldDefault(valueKind reflect.Kind, values []string, fiel
 }
 
 // unmarshalInputToFieldDefault 优先尝试单值自定义解码接口和 time format 解析。
-// 对指针字段，先通过类型探测接口是否匹配，避免在不匹配时产生指针分配副作用。
-func unmarshalInputToFieldDefault(valueKind reflect.Kind, value string, field reflect.Value, formatTag string) (bool, error) {
-	if valueKind == reflect.Pointer {
-		elemType := reflect.PointerTo(field.Type().Elem())
-		_, isTime := reflect.New(field.Type().Elem()).Interface().(*time.Time)
-		if (formatTag == "" || !isTime) &&
-			!elemType.Implements(reflect.TypeFor[BindUnmarshaler]()) &&
-			!elemType.Implements(reflect.TypeFor[encoding.TextUnmarshaler]()) {
-			return false, nil
-		}
-	}
-
-	field, _ = concreteFieldValueDefault(field, valueKind)
-
+func unmarshalInputToFieldDefault(value string, field reflect.Value, formatTag string) (bool, error) {
 	fieldIValue := field.Addr().Interface()
 	if formatTag != "" {
 		if _, isTime := fieldIValue.(*time.Time); isTime {
@@ -291,14 +282,21 @@ func unmarshalInputToFieldDefault(valueKind reflect.Kind, value string, field re
 }
 
 // setWithProperTypeDefault 按字段 kind 把单个字符串值转换并写入字段。
-func setWithProperTypeDefault(valueKind reflect.Kind, value string, structField reflect.Value, formatTag string) error {
-	if ok, err := unmarshalInputToFieldDefault(valueKind, value, structField, formatTag); ok {
+func setWithProperTypeDefault(value string, structField reflect.Value, formatTag string) error {
+	if structField.Kind() == reflect.Pointer {
+		writeField, commitWrite := stagedFieldValueDefault(structField)
+		if err := setWithProperTypeDefault(value, writeField, formatTag); err != nil {
+			return err
+		}
+		commitWrite()
+		return nil
+	}
+
+	if ok, err := unmarshalInputToFieldDefault(value, structField, formatTag); ok {
 		return err
 	}
 
-	structField, valueKind = concreteFieldValueDefault(structField, valueKind)
-
-	switch valueKind {
+	switch structField.Kind() {
 	case reflect.Int:
 		return setIntFieldDefault(value, 0, structField)
 	case reflect.Int8:
@@ -333,16 +331,21 @@ func setWithProperTypeDefault(valueKind reflect.Kind, value string, structField 
 	return nil
 }
 
-// concreteFieldValueDefault 为写入流程统一处理指针字段：必要时分配，并返回可写入的具体值。
-func concreteFieldValueDefault(field reflect.Value, kind reflect.Kind) (reflect.Value, reflect.Kind) {
-	if kind != reflect.Pointer {
-		return field, kind
+// stagedFieldValueDefault 为 pointer 字段准备一个可写入的具体值。
+// 对 nil pointer 会先写入临时值，只有整个字段绑定成功后才提交到原字段。
+func stagedFieldValueDefault(field reflect.Value) (reflect.Value, func()) {
+	if field.Kind() != reflect.Pointer {
+		return field, func() {}
 	}
+
 	if field.IsNil() {
-		field.Set(reflect.New(field.Type().Elem()))
+		staged := reflect.New(field.Type().Elem())
+		return staged.Elem(), func() {
+			field.Set(staged)
+		}
 	}
-	field = field.Elem()
-	return field, field.Kind()
+
+	return field.Elem(), func() {}
 }
 
 func setIntFieldDefault(value string, bitSize int, field reflect.Value) error {

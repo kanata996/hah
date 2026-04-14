@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
 	"github.com/kanata996/hah/bind"
 )
@@ -42,58 +41,20 @@ func bindAndValidateHeaders(r *http.Request, target any) error {
 	return Validate(r, target, SourceHeader)
 }
 
-type fakeFieldError struct {
-	namespace string
-	field     string
-	tag       string
-}
+func mustValidationErrors(t *testing.T, source Source, target any) validator.ValidationErrors {
+	t.Helper()
 
-func (e fakeFieldError) Tag() string {
-	return e.tag
-}
+	err := validatorFor(source).Struct(target)
+	if err == nil {
+		t.Fatalf("validatorFor(%q).Struct(%T) error = nil, want validation errors", source, target)
+	}
 
-func (e fakeFieldError) ActualTag() string {
-	return e.tag
-}
+	var validationErrs validator.ValidationErrors
+	if !errors.As(err, &validationErrs) {
+		t.Fatalf("validatorFor(%q).Struct(%T) error = %T, want validator.ValidationErrors", source, target, err)
+	}
 
-func (e fakeFieldError) Namespace() string {
-	return e.namespace
-}
-
-func (e fakeFieldError) StructNamespace() string {
-	return e.namespace
-}
-
-func (e fakeFieldError) Field() string {
-	return e.field
-}
-
-func (e fakeFieldError) StructField() string {
-	return e.field
-}
-
-func (e fakeFieldError) Value() interface{} {
-	return nil
-}
-
-func (e fakeFieldError) Param() string {
-	return ""
-}
-
-func (e fakeFieldError) Kind() reflect.Kind {
-	return reflect.String
-}
-
-func (e fakeFieldError) Type() reflect.Type {
-	return reflect.TypeOf("")
-}
-
-func (e fakeFieldError) Translate(ut.Translator) string {
-	return e.Error()
-}
-
-func (e fakeFieldError) Error() string {
-	return e.tag
+	return validationErrs
 }
 
 func TestBindAndValidateRejectsInvalidInputs(t *testing.T) {
@@ -178,11 +139,19 @@ func TestValidateRejectsInvalidInputs(t *testing.T) {
 
 func TestValidationResultFromError(t *testing.T) {
 	t.Run("validation errors are sorted and deduplicated by field", func(t *testing.T) {
-		errs := validator.ValidationErrors{
-			fakeFieldError{namespace: "request.z", field: "z", tag: "required"},
-			fakeFieldError{namespace: "request.a", field: "a", tag: "required"},
-			fakeFieldError{namespace: "request.a", field: "a", tag: "min"},
+		type zRequiredRequest struct {
+			Z string `query:"z" validate:"required"`
 		}
+		type aRequiredRequest struct {
+			A string `query:"a" validate:"required"`
+		}
+		type aMinRequest struct {
+			A string `query:"a" validate:"min=2"`
+		}
+
+		errs := append(validator.ValidationErrors{}, mustValidationErrors(t, SourceQuery, zRequiredRequest{})...)
+		errs = append(errs, mustValidationErrors(t, SourceQuery, aRequiredRequest{})...)
+		errs = append(errs, mustValidationErrors(t, SourceQuery, aMinRequest{A: "x"})...)
 
 		got, err := validationResultFromError(SourceQuery, errs)
 		if err != nil {

@@ -36,6 +36,18 @@ func (v *customParamsValue) UnmarshalParams(params []string) error {
 	return nil
 }
 
+type alwaysFailingParamValue struct{}
+
+func (*alwaysFailingParamValue) UnmarshalParam(string) error {
+	return errors.New("custom failed")
+}
+
+type alwaysFailingParamsValue struct{}
+
+func (*alwaysFailingParamsValue) UnmarshalParams([]string) error {
+	return errors.New("multi failed")
+}
+
 type customTextValue string
 
 func (v *customTextValue) UnmarshalText(text []byte) error {
@@ -570,6 +582,20 @@ func TestBindQueryParams_EmbeddedFieldContracts(t *testing.T) {
 		_ = assertBadRequest(t, BindQueryParams(req, &dst))
 	})
 
+	t.Run("rejects tagged anonymous embedded pointer even when nil", func(t *testing.T) {
+		type Embedded struct {
+			Name string
+		}
+		type request struct {
+			*Embedded `query:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
+
+		var dst request
+		_ = assertBadRequest(t, BindQueryParams(req, &dst))
+	})
+
 	t.Run("traverses non nil anonymous embedded pointer", func(t *testing.T) {
 		type Embedded struct {
 			Name string `query:"name"`
@@ -678,6 +704,26 @@ func TestBindHeaders_BindsSliceFields(t *testing.T) {
 	}
 }
 
+func TestBindQueryParams_BindsPointerSliceFields(t *testing.T) {
+	type request struct {
+		IDs   []*int       `query:"id"`
+		Whens []*time.Time `query:"when" format:"15:04:05"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?id=1&id=2&when=10:11:12&when=13:14:15", nil)
+
+	var dst request
+	if err := BindQueryParams(req, &dst); err != nil {
+		t.Fatalf("BindQueryParams() error = %v", err)
+	}
+	if len(dst.IDs) != 2 || dst.IDs[0] == nil || *dst.IDs[0] != 1 || dst.IDs[1] == nil || *dst.IDs[1] != 2 {
+		t.Fatalf("IDs = %#v, want pointer slice values [1 2]", dst.IDs)
+	}
+	if len(dst.Whens) != 2 || dst.Whens[0] == nil || dst.Whens[0].Format("15:04:05") != "10:11:12" || dst.Whens[1] == nil || dst.Whens[1].Format("15:04:05") != "13:14:15" {
+		t.Fatalf("Whens = %#v, want pointer slice times 10:11:12 and 13:14:15", dst.Whens)
+	}
+}
+
 func TestBindQueryParams_PointerFieldPreservation(t *testing.T) {
 	type request struct {
 		Page *int `query:"page"`
@@ -730,6 +776,64 @@ func TestBindQueryParams_PointerFieldPreservation(t *testing.T) {
 		}
 		if dst.Page == nil || *dst.Page != 0 {
 			t.Fatalf("page = %#v, want &0", dst.Page)
+		}
+	})
+}
+
+func TestBindQueryParams_PointerFieldFailuresDoNotAllocate(t *testing.T) {
+	t.Run("scalar parse failure keeps nil pointer nil", func(t *testing.T) {
+		type request struct {
+			Page *int `query:"page"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?page=oops", nil)
+
+		var dst request
+		_ = assertBadRequest(t, BindQueryParams(req, &dst))
+		if dst.Page != nil {
+			t.Fatalf("Page = %#v, want nil after failed bind", dst.Page)
+		}
+	})
+
+	t.Run("time parse failure keeps nil pointer nil", func(t *testing.T) {
+		type request struct {
+			When *time.Time `query:"when" format:"2006-01-02"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?when=bad", nil)
+
+		var dst request
+		_ = assertBadRequest(t, BindQueryParams(req, &dst))
+		if dst.When != nil {
+			t.Fatalf("When = %#v, want nil after failed bind", dst.When)
+		}
+	})
+
+	t.Run("custom single-value failure keeps nil pointer nil", func(t *testing.T) {
+		type request struct {
+			Custom *alwaysFailingParamValue `query:"custom"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?custom=x", nil)
+
+		var dst request
+		_ = assertBadRequest(t, BindQueryParams(req, &dst))
+		if dst.Custom != nil {
+			t.Fatalf("Custom = %#v, want nil after failed bind", dst.Custom)
+		}
+	})
+
+	t.Run("custom multi-value failure keeps nil pointer nil", func(t *testing.T) {
+		type request struct {
+			Custom *alwaysFailingParamsValue `query:"custom"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?custom=a&custom=b", nil)
+
+		var dst request
+		_ = assertBadRequest(t, BindQueryParams(req, &dst))
+		if dst.Custom != nil {
+			t.Fatalf("Custom = %#v, want nil after failed bind", dst.Custom)
 		}
 	})
 }
