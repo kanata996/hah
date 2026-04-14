@@ -74,6 +74,8 @@
 - `http.request.method` / `url.path` 仅在 `*http.Request` 非空时写入
 - `error.timeout` 仅在 `errors.Is(err, context.DeadlineExceeded)` 时写入
 - `error.canceled` 仅在 `errors.Is(err, context.Canceled)` 时写入
+- `error.message` / `error.type` 来自诊断起点本身
+- `error.root_message` / `error.root_type` 来自默认单链 `Unwrap() error` 向下追踪后的尾部摘要
 
 ### 错误响应写出失败
 
@@ -110,15 +112,17 @@
 - 始终从实际的 `writeErr` 开始
 - 不再回跳到原始 `HTTPError.cause`
 
-错误链展开同时兼容：
+默认诊断摘要只沿单链 `Unwrap() error` 下钻，不展开多分支错误图。
 
-- `Unwrap() error`
-- `Unwrap() []error`
+这意味着：
+
+- 常见 `fmt.Errorf("...: %w", err)` / 包装 error 场景会保留首层和尾部摘要
+- `errors.Join(...)` 或自定义 `Unwrap() []error` 不会被继续展开
+- 若 `Error()` / `Unwrap()` 实现本身 panic，会安全降级为停止下钻或说明性文本
 
 限制为：
 
-- 最大深度 `8`
-- 使用 `seen` 集合避免循环引用
+- 最大下钻深度 `8`
 
-`error.root_message` 和 `error.root_type` 在普通单链包装场景里通常对应最底层
-错误；在 `errors.Join(...)` 场景里，它们表示本次遍历尾部摘要，不保证是唯一根因。
+`error.root_message` 和 `error.root_type` 表示默认单链诊断路径的尾部摘要，
+用于帮助排查常见包装错误，不承诺覆盖所有复杂错误组合形式。

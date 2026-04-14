@@ -207,6 +207,7 @@ if writeErr := responder.Respond(w, r, err); writeErr != nil {
 
 - `4xx` 不额外输出独立错误日志
 - 正常 `5xx` 会通过 `slog.Default()` 输出一条独立错误日志
+- 默认诊断字段面向常见单链 error wrapping；不会对复杂多分支错误图做完整展开
 - 如果错误响应本身写出失败，还会额外记录一条写失败日志
 - `HEAD` 场景沿用 `net/http` 默认语义：handler 正常写回，对外是否发送响应体由底层决定
 - 如果响应已经开始写出，不再尝试二次改写响应

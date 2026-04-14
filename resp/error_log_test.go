@@ -3,7 +3,6 @@ package resp
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -14,23 +13,11 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-type nonComparableWrappedTestError struct {
-	op     string
-	frames []string
-	err    error
-}
-
 type nilUnsafeTestError struct {
 	err error
 }
 
-func (e nonComparableWrappedTestError) Error() string {
-	return fmt.Sprintf("%s: %v", e.op, e.err)
-}
-
-func (e nonComparableWrappedTestError) Unwrap() error {
-	return e.err
-}
+type panicUnwrapTestError struct{}
 
 func (e *nilUnsafeTestError) Error() string {
 	return e.err.Error()
@@ -40,7 +27,15 @@ func (e *nilUnsafeTestError) Unwrap() error {
 	return e.err
 }
 
-func TestWriteErrorLogsNonComparableCauseSafely(t *testing.T) {
+func (panicUnwrapTestError) Error() string {
+	return "unwrap panic"
+}
+
+func (panicUnwrapTestError) Unwrap() error {
+	panic("boom")
+}
+
+func TestWriteErrorLogsWrappedCauseSummary(t *testing.T) {
 	var buf bytes.Buffer
 	previousDefault := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
@@ -51,10 +46,9 @@ func TestWriteErrorLogsNonComparableCauseSafely(t *testing.T) {
 		http.StatusInternalServerError,
 		"internal_error",
 		"",
-		nonComparableWrappedTestError{
-			op:     "query user",
-			frames: []string{"users", "repo"},
-			err:    errors.New("db timeout"),
+		&wrappedTestError{
+			op:  "query user",
+			err: &rawTestError{message: "db timeout"},
 		},
 	)
 
@@ -72,33 +66,62 @@ func TestWriteErrorLogsNonComparableCauseSafely(t *testing.T) {
 	if got := logEntry["error.message"]; got != "query user: db timeout" {
 		t.Fatalf("error.message = %#v, want query user: db timeout", got)
 	}
+	if got := logEntry["error.type"]; got != "*resp.wrappedTestError" {
+		t.Fatalf("error.type = %#v, want *resp.wrappedTestError", got)
+	}
 	if got := logEntry["error.root_message"]; got != "db timeout" {
 		t.Fatalf("error.root_message = %#v, want db timeout", got)
 	}
+	if got := logEntry["error.root_type"]; got != "*resp.rawTestError" {
+		t.Fatalf("error.root_type = %#v, want *resp.rawTestError", got)
+	}
 }
 
-// typed-nil 会在公开入口到达日志构建前就经过 errors.As；这里保留一个聚焦 helper 回归，守住日志摘要层的防御性。
-func TestBuildErrorChainInfoWithTypedNilError(t *testing.T) {
+// typed-nil 和不安全 Error() 实现都不应把日志摘要路径打崩。
+func TestSummarizeDiagnosticErrorWithTypedNilError(t *testing.T) {
 	var cause error = (*nilUnsafeTestError)(nil)
 
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			t.Fatalf("buildErrorChainInfo(typed nil) panicked: %v", recovered)
+			t.Fatalf("summarizeDiagnosticError(typed nil) panicked: %v", recovered)
 		}
 	}()
 
-	info := buildErrorChainInfo(cause)
-	if got := info.errorType; got != "*resp.nilUnsafeTestError" {
+	summary := summarizeDiagnosticError(cause)
+	if got := summary.errorType; got != "*resp.nilUnsafeTestError" {
 		t.Fatalf("errorType = %q, want *resp.nilUnsafeTestError", got)
 	}
-	if got := info.rootType; got != "*resp.nilUnsafeTestError" {
+	if got := summary.rootType; got != "*resp.nilUnsafeTestError" {
 		t.Fatalf("rootType = %q, want *resp.nilUnsafeTestError", got)
 	}
-	if got := info.message; !strings.Contains(got, "panic calling Error()") {
+	if got := summary.message; !strings.Contains(got, "panic calling Error()") {
 		t.Fatalf("message = %q, want panic fallback text", got)
 	}
-	if got := info.rootMessage; !strings.Contains(got, "panic calling Error()") {
+	if got := summary.rootMessage; !strings.Contains(got, "panic calling Error()") {
 		t.Fatalf("rootMessage = %q, want panic fallback text", got)
+	}
+}
+
+// 不安全 Unwrap() 实现会被降级为停止下钻，而不是反向影响错误响应主流程。
+func TestSummarizeDiagnosticErrorStopsAfterUnwrapPanic(t *testing.T) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("summarizeDiagnosticError(unwrap panic) panicked: %v", recovered)
+		}
+	}()
+
+	summary := summarizeDiagnosticError(panicUnwrapTestError{})
+	if got := summary.message; got != "unwrap panic" {
+		t.Fatalf("message = %q, want unwrap panic", got)
+	}
+	if got := summary.errorType; got != "resp.panicUnwrapTestError" {
+		t.Fatalf("errorType = %q, want resp.panicUnwrapTestError", got)
+	}
+	if got := summary.rootMessage; got != "unwrap panic" {
+		t.Fatalf("rootMessage = %q, want unwrap panic", got)
+	}
+	if got := summary.rootType; got != "resp.panicUnwrapTestError" {
+		t.Fatalf("rootType = %q, want resp.panicUnwrapTestError", got)
 	}
 }
 
