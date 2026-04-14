@@ -133,16 +133,6 @@ func (e *ErrorWriteDegraded) Unwrap() error {
 	return e.Cause
 }
 
-// writeHTTPError 负责把已经收敛好的 HTTPError 写回到响应。
-// 这里不再做错误语义推断，统一走 JSON 错误写回路径；
-// 对 HEAD 等请求也复用正常的 Write 回调链路，保持与 net/http 默认行为一致。
-func writeHTTPError(w http.ResponseWriter, httpErr *errx.HTTPError) error {
-	if httpErr == nil {
-		return nil
-	}
-	return writeErrorPayload(w, httpErr)
-}
-
 // writeErrorPayload 负责真正把错误对象编码并写到响应里。
 // 如果 errors 序列化失败，会降级为只保留 title/status/detail/code 的响应，
 // 尽量避免整次错误响应完全失败。
@@ -172,18 +162,10 @@ func marshalProblemPayload(httpErr *errx.HTTPError) (body []byte, err error) {
 		}
 	}()
 
-	if httpErr == nil {
-		return json.Marshal(problemPayload{})
-	}
-
 	return json.Marshal(problemPayloadFromHTTPError(httpErr, true))
 }
 
 func problemPayloadFromHTTPError(httpErr *errx.HTTPError, includeErrors bool) problemPayload {
-	if httpErr == nil {
-		return problemPayload{}
-	}
-
 	payload := problemPayload{
 		Title:  httpErr.Title(),
 		Status: httpErr.Status(),
