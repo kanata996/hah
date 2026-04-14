@@ -1,12 +1,5 @@
 package resp
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `JSON` / `OK` / `Created` 在任意字符串 payload 输入下维持稳定写回契约。
-// - [✓] `JSONBlob` 在任意原始字节与状态码输入下维持 raw bytes 透传与拒绝契约。
-// - [✓] `WriteError` 在任意公开 detail、状态码和常见 error 变体下维持稳定的公共错误契约且不泄漏内部 cause。
-// - [✓] 本文件提供单一 `FuzzRespPublicContracts` 入口，可直接配合仓库规范中的 `-fuzz=Fuzz` 执行。
-
 import (
 	"bytes"
 	"context"

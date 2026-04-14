@@ -37,12 +37,6 @@ func (e *responseWriteError) Unwrap() error {
 	return e.cause
 }
 
-// writeJSONBytes 以 application/json 写出原始 JSON 字节切片。
-// 调用方需要自行保证 body 已经是合法 JSON。
-func writeJSONBytes(w http.ResponseWriter, status int, body []byte) error {
-	return writeJSONBytesWithContentType(w, status, jsonContentType, body)
-}
-
 // writeJSONBytesWithContentType 以指定 JSON 媒体类型写出原始 JSON 字节切片。
 // 调用方需要自行保证 body 已经是合法 JSON。
 func writeJSONBytesWithContentType(w http.ResponseWriter, status int, contentType string, body []byte) error {

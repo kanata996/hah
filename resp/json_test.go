@@ -8,18 +8,6 @@ import (
 	"testing"
 )
 
-// 测试清单：
-// [✓] Created / JSON / JSONBlob 按约定写出 JSON、状态码和 Content-Type
-// [✓] Created / JSON / OK 稳定输出紧凑 JSON；接口不依赖 request 上下文
-// [✓] JSON 拒绝 nil writer、非法状态码、无响应体状态和不可编码值；OK 拒绝 nil writer、nil data 和不可编码值
-// [✓] Created 拒绝 nil data、不可编码值和 nil writer
-// [✓] 导出的 success body writers 在底层 Write 失败时会返回稳定的包装错误
-// [✓] JSONBlob 直接原样透传 JSON 字节，不做合法性校验，并拒绝 nil writer、非法状态和无响应体状态
-// [✓] JSONBlob 在 nil body 和空 body 下的透传行为
-// [✓] NoContent 只写 204 状态，不写 body，也不设置 Content-Type；nil writer 会返回错误
-// [✓] writeJSON / writeSuccess 会把编码错误和状态校验错误直接向上返回
-// [✓] Created / OK 拒绝编码为 JSON null 的 typed nil 指针数据
-
 type payloadMap map[string]any
 
 // Created 会以 201 状态直接写出 JSON 对象。
@@ -507,68 +495,6 @@ func TestNoContentWithoutRequest(t *testing.T) {
 	}
 }
 
-// writeJSON 会把底层编码错误直接向上返回。
-func TestWriteJSONPropagatesEncodeError(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	err := writeJSON(rr, http.StatusOK, make(chan int))
-	if err == nil || err.Error() != "json: unsupported type: chan int" {
-		t.Fatalf("writeJSON() error = %v, want unsupported type error", err)
-	}
-	assertRecorderHasNoBodyOrContentType(t, rr)
-}
-
-// writeJSON 会把底层状态校验错误直接向上返回。
-func TestWriteJSONPropagatesStatusValidationError(t *testing.T) {
-	err := writeJSON(httptest.NewRecorder(), 1000, map[string]any{"id": "u_1"})
-	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
-		t.Fatalf("writeJSON() error = %v, want invalid HTTP status", err)
-	}
-}
-
-// writeJSON 应先校验响应边界，再进行编码，避免非法状态掩盖更根本的写回错误。
-func TestWriteJSONValidatesStatusBeforeEncoding(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	err := writeJSON(rr, http.StatusNoContent, panicSuccessJSONValue{})
-	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 204" {
-		t.Fatalf("writeJSON() error = %v, want bodyless status error", err)
-	}
-	assertRecorderHasNoBodyOrContentType(t, rr)
-}
-
-// writeSuccess 会拒绝非成功状态码。
-func TestWriteSuccessRejectsInvalidStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), http.StatusBadRequest, map[string]any{"id": "u_1"})
-	if err == nil || err.Error() != "resp: invalid success status 400" {
-		t.Fatalf("writeSuccess() error = %v, want invalid success status", err)
-	}
-}
-
-// writeSuccess 也会先拒绝非法的 HTTP 状态码数值。
-func TestWriteSuccessRejectsInvalidHTTPStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), 1000, map[string]any{"id": "u_1"})
-	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
-		t.Fatalf("writeSuccess() error = %v, want invalid HTTP status", err)
-	}
-}
-
-// writeSuccess 会拒绝无法携带响应体的状态码。
-func TestWriteSuccessRejectsBodylessStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), http.StatusNoContent, map[string]any{"id": "u_1"})
-	if err == nil || err.Error() != "resp: success writers with a body cannot use bodyless status 204" {
-		t.Fatalf("writeSuccess() error = %v, want bodyless status error", err)
-	}
-}
-
-// writeSuccess 会拒绝 1xx informational 状态。
-func TestWriteSuccessRejectsInformationalStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), http.StatusContinue, map[string]any{"id": "u_1"})
-	if err == nil || err.Error() != "resp: success writers with a body cannot use informational status 100" {
-		t.Fatalf("writeSuccess() error = %v, want informational status error", err)
-	}
-}
-
 func TestSuccessBodyWritersReturnWrappedWriteError(t *testing.T) {
 	testCases := []struct {
 		name       string
@@ -620,17 +546,6 @@ func TestSuccessBodyWritersReturnWrappedWriteError(t *testing.T) {
 				t.Fatalf("writes = %d, want 1", w.writes)
 			}
 		})
-	}
-}
-
-// 写响应体失败时会返回带 responseStarted 标记的包装错误。
-func TestWriteJSONBytesReturnsWrappedWriteError(t *testing.T) {
-	w := &failingWriter{}
-
-	err := writeJSONBytes(w, http.StatusOK, []byte(`{"id":"u_1"}`))
-	writeErr := assertWrappedResponseWriteError(t, err)
-	if !writeErr.responseStarted {
-		t.Fatal("responseStarted = false, want true")
 	}
 }
 

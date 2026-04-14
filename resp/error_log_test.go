@@ -14,11 +14,6 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-// 测试清单：
-// [✓] 5xx 公共入口会稳定记录不可比较 error 的诊断字段
-// [✓] typed-nil / 不安全 Error() 作为无法从公开入口稳定触达的边界，保留聚焦 helper 回归
-// [✓] 5xx 独立错误日志中的超长文本会按 UTF-8 rune 边界截断
-
 type nonComparableWrappedTestError struct {
 	op     string
 	frames []string
