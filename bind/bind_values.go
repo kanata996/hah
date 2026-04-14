@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/kanata996/hah/errx"
-	ireq "github.com/kanata996/hah/internal/req"
+	"github.com/kanata996/hah/internal/req"
 )
 
 // 本文件负责 path/query/header 这类字符串键值源的默认绑定逻辑和共享反射辅助。
@@ -32,7 +32,7 @@ type bindMultipleUnmarshaler interface {
 // bindPathValuesDefault 负责把 path 参数绑定到目标对象。
 func bindPathValuesDefault(r *http.Request, target any) error {
 	params := map[string][]string{}
-	for _, name := range ireq.PathWildcardNames(r.Pattern) {
+	for _, name := range req.PathWildcardNames(r.Pattern) {
 		params[name] = []string{r.PathValue(name)}
 	}
 	return bindStringSourceDefault(target, params, "param")
