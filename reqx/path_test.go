@@ -1,16 +1,12 @@
 package reqx
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
 )
-
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] Path 入口会为资源标识型 path 参数提供 source-aware required/invalid violation。
-// - [✓] Path 入口会对 nil request、空参数名和缺失 optional 参数维持稳定前置条件与零值契约。
-// - [✓] PathParam 只保留 path 允许的窄类型面：String、UUID、Int、Int64、Uint、Uint64。
 
 func TestPath_SuccessPaths(t *testing.T) {
 	t.Run("path uuid required", func(t *testing.T) {
@@ -58,6 +54,20 @@ func TestPath_SuccessPaths(t *testing.T) {
 		u64, err := Path(req, "u64").Uint64().Required().Get()
 		if err != nil || u64 != 13 {
 			t.Fatalf("Path().Uint64().Get() = (%d, %v), want (13, nil)", u64, err)
+		}
+	})
+
+	t.Run("declared empty wildcard counts as present", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/files", nil)
+		req.Pattern = "/files/{path...}"
+		req.SetPathValue("path", "")
+
+		got, err := Path(req, "path").String().Required().Get()
+		if err != nil {
+			t.Fatalf("Path().String().Required().Get() error = %v", err)
+		}
+		if got != "" {
+			t.Fatalf("path = %q, want empty string", got)
 		}
 	})
 }

@@ -8,12 +8,6 @@ import (
 	"time"
 )
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] UnixTime / UnixMilliTime builder 会覆盖公开成功路径、失败路径、default/check 约束与区间边界。
-// - [✓] Time / Duration builder 会覆盖 default、range、parse、present-empty 与 usage error 契约。
-// - [✓] Fuzz 评估：本文件当前只补 time/duration builder 规格回归，不新增 fuzz；原因是未引入新的时间解析逻辑或输入状态空间。
-
 func TestTimeParam_UnixBuilders(t *testing.T) {
 	t.Run("unix time success", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?sec=1712910600", nil)

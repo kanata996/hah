@@ -1,12 +1,5 @@
 package reqx
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `BindAndValidate` 与 `bind + Validate(Source*)` 组合会优先执行 bind，并暴露稳定的成功/失败语义。
-// - [✓] `Validate(Source*)` 在各来源下都会返回请求 tag 字段名、规范化 header 名与稳定的 violation 包络。
-// - [✓] 嵌套 struct 校验失败时 violation 字段路径会包含完整的嵌套层级。
-// - [✓] 仅实现 Normalizer 不实现 RequestValidator 的 DTO 在绑定校验时只执行 normalize 不触发请求级规则。
-
 import (
 	"io"
 	"net/http"
@@ -56,6 +49,35 @@ func TestBindAndValidateRejectsInvalidInputs(t *testing.T) {
 	if err := BindAndValidate(req, nil); err == nil || err.Error() != "reqx: destination must not be nil" {
 		t.Fatalf("BindAndValidate(nil target) error = %v", err)
 	}
+
+	t.Run("struct value target", func(t *testing.T) {
+		err := BindAndValidate(httptest.NewRequest(http.MethodGet, "/", nil), struct{}{})
+		if err == nil || err.Error() != "bind: destination must not be nil" {
+			t.Fatalf("BindAndValidate(struct value) error = %v", err)
+		}
+	})
+
+	t.Run("typed nil struct pointer", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		var dst *request
+		err := BindAndValidate(newJSONRequest(http.MethodPost, "/", `{}`), dst)
+		if err == nil || err.Error() != "bind: destination must not be nil" {
+			t.Fatalf("BindAndValidate(typed nil struct pointer) error = %v", err)
+		}
+	})
+
+	t.Run("pointer to non-struct", func(t *testing.T) {
+		dst := &[]string{}
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+		err := BindAndValidate(req, dst)
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+			t.Fatalf("BindAndValidate(pointer to non-struct) error = %v", err)
+		}
+	})
 }
 
 func TestValidateRejectsInvalidInputs(t *testing.T) {
@@ -72,6 +94,29 @@ func TestValidateRejectsInvalidInputs(t *testing.T) {
 	if err := Validate(req, &dst, Source("unsupported")); err == nil || err.Error() != `reqx: unsupported validation source "unsupported"` {
 		t.Fatalf("Validate(unsupported source) error = %v", err)
 	}
+
+	t.Run("struct value target", func(t *testing.T) {
+		err := Validate(req, struct{}{}, SourceBody)
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+			t.Fatalf("Validate(struct value) error = %v", err)
+		}
+	})
+
+	t.Run("typed nil struct pointer", func(t *testing.T) {
+		var dst *struct{}
+		err := Validate(req, dst, SourceBody)
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+			t.Fatalf("Validate(typed nil struct pointer) error = %v", err)
+		}
+	})
+
+	t.Run("pointer to non-struct", func(t *testing.T) {
+		dst := &[]string{}
+		err := Validate(req, dst, SourceBody)
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+			t.Fatalf("Validate(pointer to non-struct) error = %v", err)
+		}
+	})
 }
 
 func TestBindAndValidateCompositionsReturnBindingErrorsFromBindPackage(t *testing.T) {

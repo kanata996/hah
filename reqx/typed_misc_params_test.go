@@ -9,12 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] BoolParam 会覆盖 default、required、present-empty、custom Check 与 parse 失败契约。
-// - [✓] UUIDParam 会覆盖 default、custom Check 与 parse 失败契约。
-// - [✓] Fuzz 评估：本文件当前只补 bool/uuid builder 规格回归，不新增 fuzz；原因是未引入新的 query/path 解析逻辑或输入状态空间。
-
 func TestBoolParam_ValidationAndErrors(t *testing.T) {
 	t.Run("bool required and check success", func(t *testing.T) {
 		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?active=true", nil), "active").Bool().

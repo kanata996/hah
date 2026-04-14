@@ -7,11 +7,6 @@ import (
 	"testing"
 )
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] Numeric builder 会在 shared contract 下覆盖 present-empty、default、range、parse 与 usage error 契约。
-// - [✓] Fuzz 评估：本文件当前只补 numeric builder 规格回归，不新增 fuzz；原因是未引入新的 query/path 解析逻辑或输入状态空间。
-
 type numericBuilderOps[T comparable] struct {
 	requiredMinMaxCheckGet func(min, max T) (T, error)
 	defaultGet             func(def T) (T, error)

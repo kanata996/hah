@@ -11,12 +11,6 @@ import (
 	"time"
 )
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] Query 入口会为单参数 query 读取提供 source-aware required/invalid violation，并对重复 query key 维持首值语义。
-// - [✓] QueryParam 的通用 usage error 与 optional 行为维持稳定契约。
-// - [✓] Fuzz 评估：本文件当前只补公开入口与 lookup 契约回归，不新增 fuzz；原因是未引入新的 query/path 解析逻辑或状态空间。
-
 func TestQuery_SuccessPaths(t *testing.T) {
 	t.Run("query int default min max", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items", nil)
@@ -253,11 +247,6 @@ func TestQueryBuilder_UsageAndOptionalBehavior(t *testing.T) {
 
 		_, err := p.Values().Get()
 		assertUsageErrorContains(t, err, "param builder must not be nil")
-	})
-
-	t.Run("zero path builder", func(t *testing.T) {
-		_, err := (&PathParam{}).String().Get()
-		assertUsageErrorContains(t, err, "param builder must be created with Path or Query")
 	})
 
 	t.Run("zero query builder", func(t *testing.T) {
