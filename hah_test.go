@@ -206,7 +206,7 @@ func TestWriteError_DelegatesToResp(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
-	if err := WriteError(rr, req, context.DeadlineExceeded); err != nil {
+	if err := WriteError(rr, context.DeadlineExceeded); err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 	if rr.Code != http.StatusGatewayTimeout {
@@ -222,6 +222,20 @@ func TestWriteError_DelegatesToResp(t *testing.T) {
 	}
 }
 
+// AsHTTPError 会通过根包 facade 暴露 resp 的公开错误标准化 helper。
+func TestAsHTTPError_DelegatesToResp(t *testing.T) {
+	httpErr := AsHTTPError(context.DeadlineExceeded)
+	if httpErr == nil {
+		t.Fatal("AsHTTPError() = nil")
+	}
+	if got := httpErr.Status(); got != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, want %d", got, http.StatusGatewayTimeout)
+	}
+	if got := httpErr.Code(); got != "timeout" {
+		t.Fatalf("code = %q, want timeout", got)
+	}
+}
+
 // NewErrorResponder 会通过根包 facade 公开 resp 的可定制错误响应器。
 func TestNewErrorResponder_DelegatesToResp(t *testing.T) {
 	responder := NewErrorResponder()
@@ -232,7 +246,7 @@ func TestNewErrorResponder_DelegatesToResp(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
-	if err := responder.Respond(rr, req, errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")); err != nil {
+	if err := responder.Respond(rr, errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")); err != nil {
 		t.Fatalf("Respond() error = %v", err)
 	}
 	if rr.Code != http.StatusBadRequest {
@@ -381,7 +395,7 @@ func mustWriteRootError(t *testing.T, err error) []byte {
 
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	if writeErr := WriteError(rr, req, err); writeErr != nil {
+	if writeErr := WriteError(rr, err); writeErr != nil {
 		t.Fatalf("WriteError() error = %v", writeErr)
 	}
 	return rr.Body.Bytes()

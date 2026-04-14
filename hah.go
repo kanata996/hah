@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/kanata996/hah/bind"
+	"github.com/kanata996/hah/errx"
 	"github.com/kanata996/hah/reqx"
 	"github.com/kanata996/hah/resp"
 )
@@ -15,7 +16,7 @@ type (
 	PathParam = reqx.PathParam
 	// QueryParam 表示一个待解析的 query 单参数。
 	QueryParam = reqx.QueryParam
-	// ErrorResponder 协调错误收敛、错误响应写回与 5xx 独立错误日志。
+	// ErrorResponder 协调错误收敛与错误响应写回。
 	ErrorResponder = resp.ErrorResponder
 )
 
@@ -60,11 +61,16 @@ func RequireBody(r *http.Request) error {
 }
 
 // WriteError 按统一错误对象写回响应。
-func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
-	return resp.WriteError(w, r, err)
+func WriteError(w http.ResponseWriter, err error) error {
+	return resp.WriteError(w, err)
 }
 
-// NewErrorResponder 返回默认错误响应器，可按需定制错误归一化与日志策略。
+// AsHTTPError 把任意 error 标准化为稳定的 HTTPError。
+func AsHTTPError(err error) *errx.HTTPError {
+	return resp.AsHTTPError(err)
+}
+
+// NewErrorResponder 返回默认错误响应器，可按需定制错误归一化策略。
 func NewErrorResponder() *ErrorResponder {
 	return resp.NewErrorResponder()
 }

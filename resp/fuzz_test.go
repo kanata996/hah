@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -17,12 +15,6 @@ import (
 )
 
 func FuzzRespPublicContracts(f *testing.F) {
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	f.Cleanup(func() {
-		slog.SetDefault(previousDefault)
-	})
-
 	f.Add(uint8(0), uint8(0), http.StatusOK, "u_1", "  ", []byte(nil))
 	f.Add(uint8(0), uint8(1), http.StatusOK, "u_1", "\t", []byte(nil))
 	f.Add(uint8(0), uint8(2), http.StatusNoContent, "u_1", "  ", []byte(nil))
@@ -158,7 +150,6 @@ func fuzzJSONBlobContracts(t *testing.T, status int, body []byte) {
 func fuzzWriteErrorContracts(t *testing.T, variant uint8, status int, detail, field string) {
 	t.Helper()
 
-	req := fuzzWriteErrorRequest(variant)
 	rr := httptest.NewRecorder()
 
 	var input error
@@ -200,7 +191,7 @@ func fuzzWriteErrorContracts(t *testing.T, variant uint8, status int, detail, fi
 		wantDetail = jsonSafeString(httpErr.Detail())
 	}
 
-	if err := WriteError(rr, req, input); err != nil {
+	if err := WriteError(rr, input); err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 	if rr.Code != wantStatus {
@@ -238,17 +229,6 @@ func fuzzWriteErrorContracts(t *testing.T, variant uint8, status int, detail, fi
 
 	if hiddenCause != "" && bytes.Contains(rr.Body.Bytes(), []byte(hiddenCause)) {
 		t.Fatalf("body leaked internal cause: %q", rr.Body.String())
-	}
-}
-
-func fuzzWriteErrorRequest(variant uint8) *http.Request {
-	switch (variant / 4) % 3 {
-	case 0:
-		return nil
-	case 1:
-		return httptest.NewRequest(http.MethodGet, "/users/u_1", nil)
-	default:
-		return httptest.NewRequest(http.MethodHead, "/users/u_1", nil)
 	}
 }
 

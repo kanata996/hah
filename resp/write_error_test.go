@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -27,52 +26,10 @@ type stateTrackingWriter struct {
 	bytesWritten int
 }
 
-type rawTestError struct {
-	message string
-}
-
-func (e *rawTestError) Error() string {
-	return e.message
-}
-
-type wrappedTestError struct {
-	op  string
-	err error
-}
-
-type countingError struct {
-	calls *int
-}
-
 type panicJSONDetail struct{}
-
-type capturedRequestLog struct {
-	req   *http.Request
-	attrs []slog.Attr
-}
 
 func (panicJSONDetail) MarshalJSON() ([]byte, error) {
 	panic("panic during MarshalJSON")
-}
-
-func (c *capturedRequestLog) annotate(req *http.Request, attrs []slog.Attr) {
-	c.req = req
-	c.attrs = append([]slog.Attr(nil), attrs...)
-}
-
-func (e *wrappedTestError) Error() string {
-	return fmt.Sprintf("%s: %v", e.op, e.err)
-}
-
-func (e *wrappedTestError) Unwrap() error {
-	return e.err
-}
-
-func (e *countingError) Error() string {
-	if e != nil && e.calls != nil {
-		*e.calls = *e.calls + 1
-	}
-	return "counting error"
 }
 
 func (w *failingWriter) Header() http.Header {
@@ -162,10 +119,9 @@ func (w *unwrapOnlyWriter) Unwrap() http.ResponseWriter { return w.inner }
 
 // WriteError 会把 HTTPError 写成标准 problem JSON。
 func TestWriteErrorWritesEnvelope(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, errx.NewHTTPError(
+	err := WriteError(rr, errx.NewHTTPError(
 		http.StatusUnprocessableEntity,
 		"",
 		"",
@@ -207,10 +163,9 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 
 // 显式传入的公共 code/detail/errors 应原样进入 problem JSON，而不是被默认值覆盖。
 func TestWriteErrorPreservesExplicitPublicFields(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/users", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, errx.NewHTTPError(
+	err := WriteError(rr, errx.NewHTTPError(
 		http.StatusBadRequest,
 		"invalid_json",
 		"payload invalid",
@@ -242,10 +197,9 @@ func TestWriteErrorPreservesExplicitPublicFields(t *testing.T) {
 
 // 多个 details 对象应圆整进入 problem JSON 的 errors 数组。
 func TestWriteErrorMultipleDetails(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/users", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, errx.NewHTTPError(
+	err := WriteError(rr, errx.NewHTTPError(
 		http.StatusUnprocessableEntity,
 		"validation_failed",
 		"request validation failed",
@@ -279,7 +233,7 @@ func TestWriteErrorMultipleDetails(t *testing.T) {
 func TestWriteErrorNilErrorIsNoop(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	if err := WriteError(rr, httptest.NewRequest(http.MethodGet, "/", nil), nil); err != nil {
+	if err := WriteError(rr, nil); err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 	if rr.Code != http.StatusOK {
@@ -296,36 +250,6 @@ func TestWriteErrorNilErrorIsNoop(t *testing.T) {
 	}
 }
 
-// request 为空时，WriteError 也应写出稳定的公共错误响应而不是 panic。
-func TestWriteErrorNilRequestStillWritesErrorResponse(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			t.Fatalf("WriteError() panicked: %v", recovered)
-		}
-	}()
-
-	if err := WriteError(rr, nil, errors.New("db timeout")); err != nil {
-		t.Fatalf("WriteError() error = %v", err)
-	}
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
-	}
-
-	body := decodePayload(t, rr.Body.Bytes())
-	if got := body["code"]; got != "internal_error" {
-		t.Fatalf("code = %#v, want internal_error", got)
-	}
-	if got := body["title"]; got != "Internal Server Error" {
-		t.Fatalf("title = %#v, want Internal Server Error", got)
-	}
-	if got := body["detail"]; got != "Internal Server Error" {
-		t.Fatalf("detail = %#v, want Internal Server Error", got)
-	}
-}
-
 // ResponseWriter 为空时，WriteError 会把底层写回失败作为普通 error 返回。
 func TestWriteErrorRejectsNilWriter(t *testing.T) {
 	defer func() {
@@ -334,7 +258,7 @@ func TestWriteErrorRejectsNilWriter(t *testing.T) {
 		}
 	}()
 
-	err := WriteError(nil, httptest.NewRequest(http.MethodGet, "/", nil), errors.New("db timeout"))
+	err := WriteError(nil, errors.New("db timeout"))
 	if err == nil || !strings.Contains(err.Error(), "response writer is nil") {
 		t.Fatalf("WriteError() error = %v, want response writer is nil", err)
 	}
@@ -342,7 +266,6 @@ func TestWriteErrorRejectsNilWriter(t *testing.T) {
 
 // HEAD 请求写错误时仍走正常 Write 链路，但最终对外只保留状态和头语义。
 func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
-	req := httptest.NewRequest(http.MethodHead, "/", nil)
 	inner := &headLikeResponseWriter{}
 	w := &writeCallbackResponseWriter{ResponseWriter: inner}
 	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "", "detail")
@@ -351,7 +274,7 @@ func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 		t.Fatalf("marshalProblemPayload() error = %v", err)
 	}
 
-	err = WriteError(w, req, httpErr)
+	err = WriteError(w, httpErr)
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
@@ -371,10 +294,9 @@ func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 
 // 非法状态码会被标准化为 500，且内部 cause 不会泄漏到公开响应。
 func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, errx.NewHTTPErrorWithCause(99, "", "", errors.New("db timeout")))
+	err := WriteError(rr, errx.NewHTTPErrorWithCause(99, "", "", errors.New("db timeout")))
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
@@ -400,10 +322,9 @@ func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
 
 // context.Canceled 会映射为对外可见的 client closed request 错误。
 func TestWriteErrorMapsContextCanceled(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, context.Canceled)
+	err := WriteError(rr, context.Canceled)
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
@@ -422,10 +343,9 @@ func TestWriteErrorMapsContextCanceled(t *testing.T) {
 
 // context.DeadlineExceeded 会映射为对外可见的超时错误。
 func TestWriteErrorMapsContextDeadlineExceeded(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, context.DeadlineExceeded)
+	err := WriteError(rr, context.DeadlineExceeded)
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
@@ -447,10 +367,9 @@ func TestWriteErrorMapsContextDeadlineExceeded(t *testing.T) {
 
 // 未知普通错误会统一降级为 500 internal_error。
 func TestWriteErrorMapsUnknownErrorToInternalError(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, errors.New("db timeout"))
+	err := WriteError(rr, errors.New("db timeout"))
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
@@ -471,41 +390,24 @@ func TestWriteErrorMapsUnknownErrorToInternalError(t *testing.T) {
 	}
 }
 
-// 公开 details 不可编码时，会丢弃 details 并返回降级写回错误。
-func TestWriteErrorDropsUnencodableDetails(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+// 公开 details 不可编码时，WriteError 直接返回错误，不再尝试降级写回。
+func TestWriteErrorRejectsUnencodableDetails(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, req, errx.NewHTTPError(
+	err := WriteError(rr, errx.NewHTTPError(
 		http.StatusBadRequest,
 		"bad_request",
 		"bad request",
 		func() {},
 	))
-	if err == nil {
-		t.Fatal("expected degraded write error, got nil")
+	if err == nil || err.Error() != "json: unsupported type: func()" {
+		t.Fatalf("WriteError() error = %v, want unsupported type error", err)
 	}
-
-	var degraded *ErrorWriteDegraded
-	if !errors.As(err, &degraded) || degraded == nil {
-		t.Fatalf("WriteError() error = %T, want *ErrorWriteDegraded", err)
-	}
-	if !degraded.PreservedPublicResponse {
-		t.Fatal("degraded.PreservedPublicResponse = false, want true")
-	}
-
-	body := decodePayload(t, rr.Body.Bytes())
-	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
-		t.Fatalf("Content-Type = %q, want application/problem+json", got)
-	}
-	if _, exists := body["errors"]; exists {
-		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
-	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
-// details 的自定义 JSON 编码即使发生 panic，也应降级丢弃而不是把响应路径打崩。
-func TestWriteErrorDropsPanickingDetails(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+// details 的自定义 JSON 编码即使发生 panic，也应返回错误而不是把响应路径打崩。
+func TestWriteErrorRejectsPanickingDetails(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	defer func() {
@@ -514,59 +416,16 @@ func TestWriteErrorDropsPanickingDetails(t *testing.T) {
 		}
 	}()
 
-	err := WriteError(rr, req, errx.NewHTTPError(
+	err := WriteError(rr, errx.NewHTTPError(
 		http.StatusBadRequest,
 		"bad_request",
 		"bad request",
 		panicJSONDetail{},
 	))
-	if err == nil {
-		t.Fatal("expected degraded write error, got nil")
+	if err == nil || err.Error() != "resp: marshal problem payload panicked: panic during MarshalJSON" {
+		t.Fatalf("WriteError() error = %v, want panic recovery error", err)
 	}
-
-	var degraded *ErrorWriteDegraded
-	if !errors.As(err, &degraded) || degraded == nil {
-		t.Fatalf("WriteError() error = %T, want *ErrorWriteDegraded", err)
-	}
-	if !degraded.PreservedPublicResponse {
-		t.Fatal("degraded.PreservedPublicResponse = false, want true")
-	}
-
-	body := decodePayload(t, rr.Body.Bytes())
-	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
-		t.Fatalf("Content-Type = %q, want application/problem+json", got)
-	}
-	if _, exists := body["errors"]; exists {
-		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
-	}
-}
-
-// ErrorWriteDegraded 在 nil 接收者和普通错误场景下都应提供稳定的错误语义。
-func TestErrorWriteDegradedMethods(t *testing.T) {
-	var nilErr *ErrorWriteDegraded
-	if got := nilErr.Error(); got != "resp: error response errors were dropped" {
-		t.Fatalf("nil Error() = %q", got)
-	}
-	if got := nilErr.Unwrap(); got != nil {
-		t.Fatalf("nil Unwrap() = %v, want nil", got)
-	}
-
-	cause := errors.New("json: unsupported type: func()")
-	err := &ErrorWriteDegraded{Cause: cause}
-	if got := err.Error(); got != "resp: error response errors were dropped: "+cause.Error() {
-		t.Fatalf("Error() = %q", got)
-	}
-	if got := err.Unwrap(); !errors.Is(got, cause) {
-		t.Fatalf("Unwrap() = %v, want %v", got, cause)
-	}
-
-	if got := (&ErrorWriteDegraded{Cause: blankWriteCause{}}).Error(); got != "resp: error response errors were dropped" {
-		t.Fatalf("blank cause Error() = %q, want default message", got)
-	}
-
-	if got := (&ErrorWriteDegraded{Cause: panicWriteCause{}}).Error(); !strings.Contains(got, "resp: error response errors were dropped: panic calling Error()") {
-		t.Fatalf("panic cause Error() = %q, want panic fallback text", got)
-	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
 // 响应一旦已经开始写出，WriteError 不会再次重写响应。
@@ -588,23 +447,15 @@ func TestWriteErrorSkipsRewriteAfterResponseStarted(t *testing.T) {
 		t.Fatalf("writes = %d, want 1", w.writes)
 	}
 
-	writtenErr := WriteError(w, httptest.NewRequest(http.MethodGet, "/", nil), err)
+	writtenErr := WriteError(w, err)
 	if !errors.Is(writtenErr, err) {
 		t.Fatalf("WriteError() error = %v, want original error %v", writtenErr, err)
 	}
 	if w.writes != 1 {
 		t.Fatalf("writes = %d, want still 1", w.writes)
 	}
-	if defaultBuf.Len() == 0 {
-		t.Fatal("default logger did not capture output")
-	}
-
-	logEntry := decodePayload(t, defaultBuf.Bytes())
-	if got := logEntry["msg"]; got != "resp: request failed with server error" {
-		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
-	}
-	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
-		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
+	if defaultBuf.Len() != 0 {
+		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
 	}
 }
 
@@ -619,7 +470,7 @@ func TestWriteErrorSkipsRewriteAfterWrappedResponseStarted(t *testing.T) {
 	}
 
 	cause := errors.New("boom")
-	err := WriteError(w, httptest.NewRequest(http.MethodGet, "/", nil), cause)
+	err := WriteError(w, cause)
 	if !errors.Is(err, cause) {
 		t.Errorf("WriteError() error = %v, want original error %v", err, cause)
 	}
@@ -635,7 +486,6 @@ func TestWriteErrorSkipsRewriteAfterWrappedResponseStarted(t *testing.T) {
 }
 
 func TestWriteErrorTreatsExplicit200StatusAsStartedWhenNoWrittenMethodExists(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
 	// 初始化为 status=0 的标准代理 Writer，但由于业务逻辑调用了 WriteHeader(200) 导致状态变化为 200
@@ -643,7 +493,7 @@ func TestWriteErrorTreatsExplicit200StatusAsStartedWhenNoWrittenMethodExists(t *
 	w.WriteHeader(http.StatusOK)
 
 	cause := errors.New("boom after headers sent")
-	err := WriteError(w, req, cause)
+	err := WriteError(w, cause)
 
 	// 这里应当判断为已开始响应并原样抛出 cause
 	if !errors.Is(err, cause) {
@@ -656,7 +506,6 @@ func TestWriteErrorTreatsExplicit200StatusAsStartedWhenNoWrittenMethodExists(t *
 }
 
 func TestWriteErrorSkipsRewriteAfterDeepWrappedResponseStarted(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := httptest.NewRecorder()
 
 	var w http.ResponseWriter = &stateTrackingWriter{inner: rr}
@@ -671,7 +520,7 @@ func TestWriteErrorSkipsRewriteAfterDeepWrappedResponseStarted(t *testing.T) {
 	}
 
 	cause := errors.New("boom after deep wrappers")
-	err := WriteError(w, req, cause)
+	err := WriteError(w, cause)
 	if !errors.Is(err, cause) {
 		t.Fatalf("WriteError() error = %v, want %v", err, cause)
 	}
@@ -686,107 +535,41 @@ func TestWriteErrorSkipsRewriteAfterDeepWrappedResponseStarted(t *testing.T) {
 	}
 }
 
-// 4xx 不会为了独立错误日志去预先展开内部诊断错误链。
-func TestWriteErrorDoesNotBuildDiagnosticAttrsFor4xx(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/users/u_123", nil)
-	rr := httptest.NewRecorder()
-
-	calls := 0
-	err := WriteError(rr, req, errx.NewHTTPErrorWithCause(
-		http.StatusBadRequest,
-		"bad_request",
-		"bad request",
-		&countingError{calls: &calls},
-	))
-	if err != nil {
-		t.Fatalf("WriteError() error = %v", err)
-	}
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
-	}
-	if calls != 0 {
-		t.Fatalf("countingError.Error() calls = %d, want 0", calls)
-	}
-}
-
-// 5xx 会通过 slog.Default() 额外记录一条独立错误日志，便于脱离 access log 排查问题。
-func TestWriteErrorLogsServerErrorToDefaultLogger(t *testing.T) {
+func TestWriteErrorDoesNotWriteStandaloneLogForServerError(t *testing.T) {
 	var defaultBuf bytes.Buffer
 	previousDefault := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
 	defer slog.SetDefault(previousDefault)
 
-	req := httptest.NewRequest(http.MethodGet, "/failure", nil)
 	rr := httptest.NewRecorder()
-	if err := WriteError(rr, req, errors.New("db timeout")); err != nil {
+	if err := WriteError(rr, errors.New("db timeout")); err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
 	}
-	if defaultBuf.Len() == 0 {
-		t.Fatal("default logger did not capture output")
-	}
-
-	logEntry := decodePayload(t, defaultBuf.Bytes())
-	if got := logEntry["msg"]; got != "resp: request failed with server error" {
-		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
-	}
-	if got := logEntry["error.code"]; got != "internal_error" {
-		t.Fatalf("error.code = %#v, want internal_error", got)
-	}
-	if got := logEntry["error.message"]; got != "db timeout" {
-		t.Fatalf("error.message = %#v, want db timeout", got)
-	}
-	if got := logEntry["http.request.method"]; got != http.MethodGet {
-		t.Fatalf("http.request.method = %#v, want %q", got, http.MethodGet)
-	}
-	if got := logEntry["url.path"]; got != "/failure" {
-		t.Fatalf("url.path = %#v, want /failure", got)
-	}
-	if _, exists := logEntry["request.id"]; exists {
-		t.Fatalf("request.id unexpectedly present: %#v", logEntry["request.id"])
-	}
-	if _, exists := logEntry["traceId"]; exists {
-		t.Fatalf("traceId unexpectedly present: %#v", logEntry["traceId"])
-	}
-	if got := logEntry["http.response.status_code"]; got != float64(http.StatusInternalServerError) {
-		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusInternalServerError)
+	if defaultBuf.Len() != 0 {
+		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
 	}
 }
 
-// request 为空且错误响应写出失败时，独立错误日志仍会回退到默认 logger。
-func TestWriteErrorWithNilRequestLogsWriteFailureToDefaultLogger(t *testing.T) {
+func TestWriteErrorWriteFailureDoesNotWriteStandaloneLog(t *testing.T) {
 	var defaultBuf bytes.Buffer
 	previousDefault := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
 	defer slog.SetDefault(previousDefault)
 
 	w := &failingWriter{}
-	err := WriteError(w, nil, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"))
+	err := WriteError(w, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"))
 	if err == nil {
 		t.Fatal("expected write error, got nil")
 	}
 	if w.status != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.status, http.StatusInternalServerError)
 	}
-
-	if defaultBuf.Len() == 0 {
-		t.Fatal("default logger did not capture output")
-	}
-
-	lines := bytes.Split(bytes.TrimSpace(defaultBuf.Bytes()), []byte{'\n'})
-	if len(lines) != 2 {
-		t.Fatalf("default logger lines = %d, want 2", len(lines))
-	}
-
-	serverLog := decodePayload(t, lines[0])
-	if got := serverLog["msg"]; got != "resp: request failed with server error" {
-		t.Fatalf("msg = %#v, want resp: request failed with server error", got)
-	}
-	if got := serverLog["error.code"]; got != "internal_error" {
-		t.Fatalf("error.code = %#v, want internal_error", got)
+	if defaultBuf.Len() != 0 {
+		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
 	}
 }
 
