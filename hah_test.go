@@ -19,7 +19,7 @@ import (
 // 测试清单：
 // [✓] 根包 facade 会把 bind / reqx / resp 的核心能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
-// [✓] 根包 facade 公开常用绑定入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
+// [✓] 根包 facade 公开常用绑定入口：BindBody、BindQuery
 // [✓] 根包 facade 继续暴露 body-required helper 与统一错误响应写回
 
 type rootPayloadMap map[string]any
@@ -45,24 +45,6 @@ func (r *partialReadErrorCloser) Close() error {
 	return nil
 }
 
-// Bind 会通过根包 facade 复用 bind 包的默认绑定顺序。
-func TestBind_DelegatesToBind(t *testing.T) {
-	type request struct {
-		ID   string `param:"id" query:"id" json:"id"`
-		Name string `json:"name"`
-	}
-
-	req := newRouteRequest(http.MethodGet, "/accounts?id=query-id", "id", "route-id")
-
-	var dst request
-	if err := Bind(req, &dst); err != nil {
-		t.Fatalf("Bind() error = %v", err)
-	}
-	if dst.ID != "query-id" {
-		t.Fatalf("id = %q, want query-id", dst.ID)
-	}
-}
-
 // BindBody 只从 JSON body 绑定数据。
 func TestBindBody_DelegatesToBind(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/accounts", `{"name":"kanata"}`)
@@ -79,52 +61,19 @@ func TestBindBody_DelegatesToBind(t *testing.T) {
 	}
 }
 
-// BindQueryParams 只从 query 参数绑定数据。
-func TestBindQueryParams_DelegatesToBind(t *testing.T) {
+// BindQuery 只从 query 参数绑定数据。
+func TestBindQuery_DelegatesToBind(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts?cursor=next", nil)
 
 	var dst struct {
 		Cursor string `query:"cursor"`
 	}
 
-	if err := BindQueryParams(req, &dst); err != nil {
-		t.Fatalf("BindQueryParams() error = %v", err)
+	if err := BindQuery(req, &dst); err != nil {
+		t.Fatalf("BindQuery() error = %v", err)
 	}
 	if dst.Cursor != "next" {
 		t.Fatalf("cursor = %q, want next", dst.Cursor)
-	}
-}
-
-// BindPathValues 只从 path 参数绑定数据。
-func TestBindPathValues_DelegatesToBind(t *testing.T) {
-	req := newRouteRequest(http.MethodGet, "/accounts/acct_123", "account_id", "acct_123")
-
-	var dst struct {
-		AccountID string `param:"account_id"`
-	}
-
-	if err := BindPathValues(req, &dst); err != nil {
-		t.Fatalf("BindPathValues() error = %v", err)
-	}
-	if dst.AccountID != "acct_123" {
-		t.Fatalf("account_id = %q, want acct_123", dst.AccountID)
-	}
-}
-
-// BindHeaders 只从 header 绑定数据。
-func TestBindHeaders_DelegatesToBind(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
-	req.Header.Set("X-Actor", "kanata")
-
-	var dst struct {
-		Actor string `header:"X-Actor"`
-	}
-
-	if err := BindHeaders(req, &dst); err != nil {
-		t.Fatalf("BindHeaders() error = %v", err)
-	}
-	if dst.Actor != "kanata" {
-		t.Fatalf("actor = %q, want kanata", dst.Actor)
 	}
 }
 
@@ -203,7 +152,6 @@ func TestRequireBodyThenBindBody_PreservesShortReadError(t *testing.T) {
 
 // WriteError 会通过根包 facade 写出统一的公开错误包络。
 func TestWriteError_DelegatesToResp(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
 	if err := WriteError(rr, context.DeadlineExceeded); err != nil {
@@ -243,7 +191,6 @@ func TestNewErrorResponder_DelegatesToResp(t *testing.T) {
 		t.Fatal("NewErrorResponder() = nil")
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/accounts", nil)
 	rr := httptest.NewRecorder()
 
 	if err := responder.Respond(rr, errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")); err != nil {
@@ -394,7 +341,6 @@ func mustWriteRootError(t *testing.T, err error) []byte {
 	t.Helper()
 
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	if writeErr := WriteError(rr, err); writeErr != nil {
 		t.Fatalf("WriteError() error = %v", writeErr)
 	}

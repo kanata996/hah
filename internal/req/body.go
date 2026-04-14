@@ -1,4 +1,4 @@
-package bind
+package req
 
 import (
 	"bytes"
@@ -7,9 +7,9 @@ import (
 	"net/http"
 )
 
-type bodyPresenceKey struct{}
+type key struct{}
 
-type bodyPresenceState struct {
+type state struct {
 	has bool
 	err error
 }
@@ -19,9 +19,9 @@ type replayReadCloser struct {
 	io.Closer
 }
 
-// hasBody reports whether the request body contains at least one byte.
+// HasBody reports whether the request body contains at least one byte.
 // It preserves the body stream for later consumers and caches the result on the request.
-func hasBody(r *http.Request) (bool, error) {
+func HasBody(r *http.Request) (bool, error) {
 	if r == nil {
 		return false, nil
 	}
@@ -29,12 +29,12 @@ func hasBody(r *http.Request) (bool, error) {
 		return false, nil
 	}
 
-	if state, ok := r.Context().Value(bodyPresenceKey{}).(bodyPresenceState); ok {
-		return state.has, state.err
+	if cached, ok := r.Context().Value(key{}).(state); ok {
+		return cached.has, cached.err
 	}
 
 	has, err := detectBody(r)
-	*r = *r.WithContext(context.WithValue(r.Context(), bodyPresenceKey{}, bodyPresenceState{
+	*r = *r.WithContext(context.WithValue(r.Context(), key{}, state{
 		has: has,
 		err: err,
 	}))

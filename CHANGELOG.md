@@ -15,20 +15,27 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ### Breaking
 
+- Narrowed `bind` to two explicit public entry points: `BindQuery(...)` and `BindBody(...)`. Removed `bind.Bind(...)`, `bind.BindPathValues(...)`, and `bind.BindHeaders(...)`, and renamed `bind.BindQueryParams(...)` to `bind.BindQuery(...)`.
+- Narrowed the root `hah` facade accordingly: removed `hah.Bind(...)`, `hah.BindPathValues(...)`, and `hah.BindHeaders(...)`, and renamed `hah.BindQueryParams(...)` to `hah.BindQuery(...)`.
 - Removed the built-in `validator/v10` integration from the core `hah` module.
 - Removed `hah.BindAndValidate(...)` and `reqx.Validate(...)`; request binding now stops at `Bind*`, and post-bind validation is fully caller-defined.
 - Removed the `reqx.Normalizer` and `reqx.RequestValidator` DTO lifecycle hooks from the public API.
 - Removed `reqx.ViolationInRequest`; public invalid-request helpers now expose only concrete input locations (`body`, `query`, `path`, `header`).
+- Removed `resp` built-in standalone error logging and request-log callbacks. `resp.ErrorResponder` now only customizes error normalization, and callers should use the new `resp.AsHTTPError(...)` / `hah.AsHTTPError(...)` helper when they need explicit logging before `WriteError(...)`.
+- Removed the request parameter from `resp.WriteError(...)`, `hah.WriteError(...)`, and `ErrorResponder.Respond(...)`; the response writer alone now carries the write semantics.
+- Removed the public `resp.ErrorWriteDegraded` type. If a public error payload cannot be JSON-encoded, `WriteError(...)` now returns that encoding error directly instead of attempting a degraded fallback response.
 
 ### Changed
 
 - Repositioned `reqx` around request helpers and explicit invalid-request helpers such as `RequireBody(...)` and `InvalidRequest(...)`.
-- Reworked the bundled `net/http` and `chi` examples to demonstrate explicit `Bind(...) -> validate` flows instead of framework-owned validation.
+- Reworked the bundled `net/http` and `chi` examples to demonstrate explicit `Path/Query` helpers plus `BindQuery(...)` / `BindBody(...)` flows instead of mixed-source binding.
 - Clarified `reqx.Path(...)` / `reqx.Query(...)` as request-side core APIs and tightened their contract-focused documentation/testing.
+- Repositioned `resp` as a pure response-boundary package: it now standardizes errors and writes responses without choosing an application logging policy.
 
 ### Documentation
 
 - Rewrote `README.md`, `REQUESTS.md`, package docs, and testing guidance around binding-first request handling with user-chosen validation.
+- Updated response-side docs and examples to show explicit caller-owned `5xx` logging via `AsHTTPError(...)` before `WriteError(...)`.
 
 ## [v0.4.4] - 2026-04-14
 

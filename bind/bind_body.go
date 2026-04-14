@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/req"
 )
 
 // 本文件负责 body 绑定相关逻辑，包括 body 读取、Content-Type 判定、JSON 解码和 body 侧错误收敛。
@@ -46,7 +47,7 @@ func BindBody(r *http.Request, target any) error {
 // bindBody 假定 request 和 target 已完成前置校验，只执行默认 body 绑定本身。
 func bindBody(r *http.Request, target any) error {
 	// 先探测是否真的存在 body，这样零字节请求可以在 Content-Type 校验前直接 no-op。
-	hasBody, err := hasBody(r)
+	hasBody, err := req.HasBody(r)
 	if err != nil {
 		return err
 	}

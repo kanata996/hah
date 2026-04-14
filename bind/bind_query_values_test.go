@@ -2,7 +2,6 @@ package bind
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -56,18 +55,6 @@ func (v *customTextValue) UnmarshalText(text []byte) error {
 	}
 	*v = customTextValue(text)
 	return nil
-}
-
-type queryState string
-
-func (s *queryState) UnmarshalText(text []byte) error {
-	switch string(text) {
-	case "open", "closed":
-		*s = queryState(text)
-		return nil
-	default:
-		return fmt.Errorf("invalid state %q", string(text))
-	}
 }
 
 func TestBindQuery_BindsSupportedTypes(t *testing.T) {

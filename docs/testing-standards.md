@@ -168,12 +168,12 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 至少覆盖：
 
-- path/query/header/body 的独立绑定
-- `Bind(...)` 的绑定顺序与覆盖规则
+- query/body 的独立绑定
+- `BindQuery(...)` / `BindBody(...)` 的公开入口契约
 - 空 body、错误 `Content-Type`、超大 body、未知字段
 - DTO 已有值时的保留语义
 - 绑定失败时的已写入值保留规则
-- 单源 API 与综合 API 的一致性
+- query 字符串解码的多值、自定义解码和复杂类型契约
 
 ### 7.3 `reqx`
 

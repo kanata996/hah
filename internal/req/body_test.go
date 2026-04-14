@@ -1,4 +1,4 @@
-package bind
+package req
 
 import (
 	"errors"
@@ -63,8 +63,8 @@ func (r probeErrorReadCloser) Close() error {
 
 func TestHasBody(t *testing.T) {
 	t.Run("nil request", func(t *testing.T) {
-		if got, err := hasBody(nil); err != nil || got {
-			t.Fatalf("hasBody(nil) = (%v, %v), want (false, nil)", got, err)
+		if got, err := HasBody(nil); err != nil || got {
+			t.Fatalf("HasBody(nil) = (%v, %v), want (false, nil)", got, err)
 		}
 	})
 
@@ -72,8 +72,8 @@ func TestHasBody(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.Body = nil
 
-		if got, err := hasBody(req); err != nil || got {
-			t.Fatalf("hasBody(nil body) = (%v, %v), want (false, nil)", got, err)
+		if got, err := HasBody(req); err != nil || got {
+			t.Fatalf("HasBody(nil body) = (%v, %v), want (false, nil)", got, err)
 		}
 	})
 
@@ -81,8 +81,8 @@ func TestHasBody(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.Body = &probeStaticReadCloser{data: []byte(`{"name":"kanata"}`)}
 
-		if got, err := hasBody(req); err != nil || !got {
-			t.Fatalf("hasBody(non-empty) = (%v, %v), want (true, nil)", got, err)
+		if got, err := HasBody(req); err != nil || !got {
+			t.Fatalf("HasBody(non-empty) = (%v, %v), want (true, nil)", got, err)
 		}
 
 		body, err := io.ReadAll(req.Body)
@@ -93,8 +93,8 @@ func TestHasBody(t *testing.T) {
 			t.Fatalf("replayed body = %q, want original body", body)
 		}
 
-		if got, err := hasBody(req); err != nil || !got {
-			t.Fatalf("hasBody(second call after read) = (%v, %v), want (true, nil)", got, err)
+		if got, err := HasBody(req); err != nil || !got {
+			t.Fatalf("HasBody(second call after read) = (%v, %v), want (true, nil)", got, err)
 		}
 	})
 
@@ -102,8 +102,8 @@ func TestHasBody(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.Body = &probeStaticReadCloser{}
 
-		if got, err := hasBody(req); err != nil || got {
-			t.Fatalf("hasBody(empty) = (%v, %v), want (false, nil)", got, err)
+		if got, err := HasBody(req); err != nil || got {
+			t.Fatalf("HasBody(empty) = (%v, %v), want (false, nil)", got, err)
 		}
 
 		body, err := io.ReadAll(req.Body)
@@ -114,8 +114,8 @@ func TestHasBody(t *testing.T) {
 			t.Fatalf("empty replayed body = %q, want empty", body)
 		}
 
-		if got, err := hasBody(req); err != nil || got {
-			t.Fatalf("hasBody(second call after empty read) = (%v, %v), want (false, nil)", got, err)
+		if got, err := HasBody(req); err != nil || got {
+			t.Fatalf("HasBody(second call after empty read) = (%v, %v), want (false, nil)", got, err)
 		}
 	})
 
@@ -124,8 +124,8 @@ func TestHasBody(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.Body = &probeByteThenErrorReadCloser{err: wantErr}
 
-		if got, err := hasBody(req); !errors.Is(err, wantErr) || got {
-			t.Fatalf("hasBody(byte+error) = (%v, %v), want (false, %v)", got, err, wantErr)
+		if got, err := HasBody(req); !errors.Is(err, wantErr) || got {
+			t.Fatalf("HasBody(byte+error) = (%v, %v), want (false, %v)", got, err, wantErr)
 		}
 
 		body, err := io.ReadAll(req.Body)
@@ -142,16 +142,16 @@ func TestHasBody(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.Body = probeErrorReadCloser{err: wantErr}
 
-		if got, err := hasBody(req); !errors.Is(err, wantErr) || got {
-			t.Fatalf("hasBody(read error) = (%v, %v), want (false, %v)", got, err, wantErr)
+		if got, err := HasBody(req); !errors.Is(err, wantErr) || got {
+			t.Fatalf("HasBody(read error) = (%v, %v), want (false, %v)", got, err, wantErr)
 		}
 
 		if _, err := io.ReadAll(req.Body); !errors.Is(err, wantErr) {
 			t.Fatalf("ReadAll(error body) error = %v, want %v", err, wantErr)
 		}
 
-		if got, err := hasBody(req); !errors.Is(err, wantErr) || got {
-			t.Fatalf("hasBody(second read error) = (%v, %v), want (false, %v)", got, err, wantErr)
+		if got, err := HasBody(req); !errors.Is(err, wantErr) || got {
+			t.Fatalf("HasBody(second read error) = (%v, %v), want (false, %v)", got, err, wantErr)
 		}
 	})
 }

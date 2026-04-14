@@ -121,9 +121,21 @@ type app struct {
 	store *accountStore
 }
 
+func writeError(w http.ResponseWriter, r *http.Request, err error) {
+	if err == nil {
+		return
+	}
+
+	if httpErr := hah.AsHTTPError(err); httpErr != nil && httpErr.Status() >= http.StatusInternalServerError {
+		log.Printf("request failed: status=%d code=%s err=%v", httpErr.Status(), httpErr.Code(), err)
+	}
+	if writeErr := hah.WriteError(w, err); writeErr != nil {
+		log.Printf("write error response failed: %v", writeErr)
+	}
+}
+
 type listAccountsRequest struct {
-	OrgID string `param:"org_id"`
-	Name  string `query:"name"`
+	Name string `query:"name"`
 }
 
 func (r *listAccountsRequest) normalize() {
@@ -131,17 +143,11 @@ func (r *listAccountsRequest) normalize() {
 }
 
 type createAccountRequest struct {
-	OrgID string `param:"org_id"`
-	Name  string `json:"name"`
+	Name string `json:"name"`
 }
 
 func (r *createAccountRequest) normalize() {
 	r.Name = strings.TrimSpace(r.Name)
-}
-
-type accountPathRequest struct {
-	OrgID     string `param:"org_id"`
-	AccountID string `param:"account_id"`
 }
 
 func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) error {
@@ -189,82 +195,106 @@ func newServer(store *accountStore) http.Handler {
 
 func (a *app) healthz(w http.ResponseWriter, r *http.Request) {
 	if err := hah.OK(w, map[string]string{"status": "ok"}); err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
 	}
 }
 
 func (a *app) listAccounts(w http.ResponseWriter, r *http.Request) {
+	orgID, err := hah.Path(r, "org_id").String().Required().Get()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
 	var req listAccountsRequest
-	if err := hah.Bind(r, &req); err != nil {
-		_ = hah.WriteError(w, r, err)
+	if err := hah.BindQuery(r, &req); err != nil {
+		writeError(w, r, err)
 		return
 	}
 	req.normalize()
 
-	items := a.store.list(req.OrgID, req.Name)
+	items := a.store.list(orgID, req.Name)
 	if err := hah.OK(w, map[string]any{
-		"org_id": req.OrgID,
+		"org_id": orgID,
 		"count":  len(items),
 		"items":  items,
 	}); err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
 	}
 }
 
 func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
-	var req createAccountRequest
-	if err := hah.Bind(r, &req); err != nil {
-		_ = hah.WriteError(w, r, err)
-		return
-	}
-	if err := validateCreateAccountRequest(r, &req); err != nil {
-		_ = hah.WriteError(w, r, err)
+	orgID, err := hah.Path(r, "org_id").String().Required().Get()
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 
-	acct, err := a.store.create(req.OrgID, req.Name)
+	var req createAccountRequest
+	if err := hah.BindBody(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := validateCreateAccountRequest(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	acct, err := a.store.create(orgID, req.Name)
 	if err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
 		return
 	}
 
 	if err := hah.Created(w, acct); err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
 	}
 }
 
 func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
-	var req accountPathRequest
-	if err := hah.Bind(r, &req); err != nil {
-		_ = hah.WriteError(w, r, err)
+	orgID, err := hah.Path(r, "org_id").String().Required().Get()
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 
-	acct, err := a.store.get(req.OrgID, req.AccountID)
+	accountID, err := hah.Path(r, "account_id").String().Required().Get()
 	if err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
+		return
+	}
+
+	acct, err := a.store.get(orgID, accountID)
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 
 	if err := hah.OK(w, acct); err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
 	}
 }
 
 func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
-	var req accountPathRequest
-	if err := hah.Bind(r, &req); err != nil {
-		_ = hah.WriteError(w, r, err)
+	orgID, err := hah.Path(r, "org_id").String().Required().Get()
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 
-	if err := a.store.delete(req.OrgID, req.AccountID); err != nil {
-		_ = hah.WriteError(w, r, err)
+	accountID, err := hah.Path(r, "account_id").String().Required().Get()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	if err := a.store.delete(orgID, accountID); err != nil {
+		writeError(w, r, err)
 		return
 	}
 
 	if err := hah.NoContent(w); err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
 	}
 }
 

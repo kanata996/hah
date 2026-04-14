@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"sort"
 	"strings"
 	"testing"
 
@@ -27,38 +26,6 @@ func setRequestBody(req *http.Request, contentType, body string) {
 	req.Header.Set("Content-Type", contentType)
 	req.Body = io.NopCloser(strings.NewReader(body))
 	req.ContentLength = int64(len(body))
-}
-
-func requestWithPathParams(params map[string][]string) *http.Request {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	for name, values := range params {
-		value := ""
-		if len(values) > 0 {
-			value = values[0]
-		}
-		req.SetPathValue(name, value)
-	}
-	req.Pattern = syntheticPatternFromPathParams(params)
-	return req
-}
-
-func syntheticPatternFromPathParams(params map[string][]string) string {
-	if len(params) == 0 {
-		return "/"
-	}
-
-	names := make([]string, 0, len(params))
-	for name := range params {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	parts := make([]string, 0, len(names)+1)
-	parts = append(parts, "")
-	for _, name := range names {
-		parts = append(parts, "{"+name+"}")
-	}
-	return strings.Join(parts, "/")
 }
 
 func assertHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantDetail string) *errx.HTTPError {

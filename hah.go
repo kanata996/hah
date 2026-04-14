@@ -20,29 +20,14 @@ type (
 	ErrorResponder = resp.ErrorResponder
 )
 
-// Bind 按默认顺序绑定请求数据：path -> query(GET/DELETE/HEAD) -> body。
-func Bind(r *http.Request, target any) error {
-	return bind.Bind(r, target)
-}
-
 // BindBody 只从请求 body 绑定数据。
 func BindBody(r *http.Request, target any) error {
 	return bind.BindBody(r, target)
 }
 
-// BindQueryParams 只从 query 参数绑定数据。
-func BindQueryParams(r *http.Request, target any) error {
-	return bind.BindQueryParams(r, target)
-}
-
-// BindPathValues 只从 path 参数绑定数据。
-func BindPathValues(r *http.Request, target any) error {
-	return bind.BindPathValues(r, target)
-}
-
-// BindHeaders 只从 header 绑定数据。
-func BindHeaders(r *http.Request, target any) error {
-	return bind.BindHeaders(r, target)
+// BindQuery 只从 query 参数绑定数据。
+func BindQuery(r *http.Request, target any) error {
+	return bind.BindQuery(r, target)
 }
 
 // Path 创建 path 单参数读取与校验 builder。
