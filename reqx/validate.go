@@ -130,7 +130,10 @@ func validateTarget(target any) error {
 }
 
 func validateStruct(target any, source Source) ([]Violation, error) {
-	err := validatorFor(source).Struct(target)
+	return validationResultFromError(source, validatorFor(source).Struct(target))
+}
+
+func validationResultFromError(source Source, err error) ([]Violation, error) {
 	if err == nil {
 		return nil, nil
 	}
@@ -140,10 +143,12 @@ func validateStruct(target any, source Source) ([]Violation, error) {
 		return nil, err
 	}
 
-	// validator/v10's Struct contract returns only nil,
-	// InvalidValidationError, or ValidationErrors.
-	validationErrs := err.(validator.ValidationErrors)
-	return violationsFromValidation(source, validationErrs), nil
+	var validationErrs validator.ValidationErrors
+	if errors.As(err, &validationErrs) {
+		return violationsFromValidation(source, validationErrs), nil
+	}
+
+	return nil, err
 }
 
 func validatorFor(source Source) *validator.Validate {

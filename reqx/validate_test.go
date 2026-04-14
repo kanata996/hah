@@ -1,6 +1,7 @@
 package reqx
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	ut "github.com/go-playground/universal-translator"
+	"github.com/go-playground/validator/v10"
 	"github.com/kanata996/hah/bind"
 )
 
@@ -37,6 +40,60 @@ func bindAndValidateHeaders(r *http.Request, target any) error {
 		return err
 	}
 	return Validate(r, target, SourceHeader)
+}
+
+type fakeFieldError struct {
+	namespace string
+	field     string
+	tag       string
+}
+
+func (e fakeFieldError) Tag() string {
+	return e.tag
+}
+
+func (e fakeFieldError) ActualTag() string {
+	return e.tag
+}
+
+func (e fakeFieldError) Namespace() string {
+	return e.namespace
+}
+
+func (e fakeFieldError) StructNamespace() string {
+	return e.namespace
+}
+
+func (e fakeFieldError) Field() string {
+	return e.field
+}
+
+func (e fakeFieldError) StructField() string {
+	return e.field
+}
+
+func (e fakeFieldError) Value() interface{} {
+	return nil
+}
+
+func (e fakeFieldError) Param() string {
+	return ""
+}
+
+func (e fakeFieldError) Kind() reflect.Kind {
+	return reflect.String
+}
+
+func (e fakeFieldError) Type() reflect.Type {
+	return reflect.TypeOf("")
+}
+
+func (e fakeFieldError) Translate(ut.Translator) string {
+	return e.Error()
+}
+
+func (e fakeFieldError) Error() string {
+	return e.tag
 }
 
 func TestBindAndValidateRejectsInvalidInputs(t *testing.T) {
@@ -117,6 +174,80 @@ func TestValidateRejectsInvalidInputs(t *testing.T) {
 			t.Fatalf("Validate(pointer to non-struct) error = %v", err)
 		}
 	})
+}
+
+func TestValidationResultFromError(t *testing.T) {
+	t.Run("validation errors are sorted and deduplicated by field", func(t *testing.T) {
+		errs := validator.ValidationErrors{
+			fakeFieldError{namespace: "request.z", field: "z", tag: "required"},
+			fakeFieldError{namespace: "request.a", field: "a", tag: "required"},
+			fakeFieldError{namespace: "request.a", field: "a", tag: "min"},
+		}
+
+		got, err := validationResultFromError(SourceQuery, errs)
+		if err != nil {
+			t.Fatalf("validationResultFromError() error = %v", err)
+		}
+
+		want := []Violation{
+			{Field: "a", In: ViolationInQuery, Code: ViolationCodeRequired, Detail: "is required"},
+			{Field: "z", In: ViolationInQuery, Code: ViolationCodeRequired, Detail: "is required"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("violations = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("invalid validation error is returned as is", func(t *testing.T) {
+		wantErr := &validator.InvalidValidationError{Type: reflect.TypeOf(0)}
+
+		got, err := validationResultFromError(SourceBody, wantErr)
+		if err != wantErr {
+			t.Fatalf("error = %v, want %v", err, wantErr)
+		}
+		if got != nil {
+			t.Fatalf("violations = %#v, want nil", got)
+		}
+	})
+
+	t.Run("unexpected validator error is returned as is", func(t *testing.T) {
+		wantErr := errors.New("validator boom")
+
+		got, err := validationResultFromError(SourceBody, wantErr)
+		if err != wantErr {
+			t.Fatalf("error = %v, want %v", err, wantErr)
+		}
+		if got != nil {
+			t.Fatalf("violations = %#v, want nil", got)
+		}
+	})
+}
+
+func TestFieldAlias_UsesSourceTagPriority(t *testing.T) {
+	type request struct {
+		Value string `json:"json_name,omitempty" query:"query_name" param:"param_name" header:"x-trace-id"`
+	}
+
+	field := reflect.TypeOf(request{}).Field(0)
+	testCases := []struct {
+		name   string
+		source Source
+		want   string
+	}{
+		{name: "body", source: SourceBody, want: "json_name"},
+		{name: "query", source: SourceQuery, want: "query_name"},
+		{name: "path", source: SourcePath, want: "param_name"},
+		{name: "header", source: SourceHeader, want: "X-Trace-Id"},
+		{name: "request", source: SourceRequest, want: "param_name"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fieldAlias(field, tc.source); got != tc.want {
+				t.Fatalf("fieldAlias(%q) = %q, want %q", tc.source, got, tc.want)
+			}
+		})
+	}
 }
 
 func TestBindAndValidateCompositionsReturnBindingErrorsFromBindPackage(t *testing.T) {
