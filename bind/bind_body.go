@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/kanata996/hah/errx"
-	"github.com/kanata996/hah/internal/req"
 )
 
 // 本文件负责 body 绑定相关逻辑，包括 body 读取、Content-Type 判定、JSON 解码和 body 侧错误收敛。
@@ -22,12 +21,32 @@ import (
 //   - 非法 JSON 返回 400 invalid_json
 //   - 不支持的 Content-Type 返回 415 unsupported_media_type
 
+const defaultMaxBodyBytes int64 = 1 << 20
+
+const (
+	// CodeInvalidJSON 表示请求 body 不是合法 JSON。
+	CodeInvalidJSON = "invalid_json"
+	// CodeUnsupportedMediaType 表示请求 body 的 Content-Type 不受支持。
+	CodeUnsupportedMediaType = "unsupported_media_type"
+	// CodeRequestTooLarge 表示请求 body 超出默认大小限制。
+	CodeRequestTooLarge = "request_too_large"
+)
+
 const mimeApplicationJSON = "application/json"
+
+// BindBody 只从请求 body 绑定数据。
+func BindBody(r *http.Request, target any) error {
+	if err := validateBindInputs(r, target); err != nil {
+		return err
+	}
+
+	return bindBody(r, target)
+}
 
 // bindBody 假定 request 和 target 已完成前置校验，只执行默认 body 绑定本身。
 func bindBody(r *http.Request, target any) error {
 	// 先探测是否真的存在 body，这样零字节请求可以在 Content-Type 校验前直接 no-op。
-	hasBody, err := req.HasBody(r)
+	hasBody, err := hasBody(r)
 	if err != nil {
 		return err
 	}

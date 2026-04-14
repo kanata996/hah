@@ -4,94 +4,54 @@ import (
 	"encoding"
 	"errors"
 	"net/http"
-	"net/textproto"
 	"reflect"
-	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/kanata996/hah/errx"
-	"github.com/kanata996/hah/internal/req"
 )
 
-// 本文件负责 path/query/header 这类字符串键值源的默认绑定逻辑和共享反射辅助。
+// 本文件负责 query 绑定的公开入口、共享前置校验，以及默认 query binder 本身。
 //
-// 这里承载的能力包括：
-//   - path/query/header 单源 binder 的默认实现
+// 这里集中放：
+//   - 对外公开的 query 入口：BindQuery
+//   - 绑定目标的公共前置校验
+//   - query 单源 binder 的默认实现
 //   - 结构体字段、map 目标、slice 目标的反射写入逻辑
 //   - 单值 / 多值自定义解码接口适配
-//   - 标量类型转换、重复值处理、缺失值保留、header key 规范化
-//   - path pattern 中 wildcard 名称提取
+//   - 标量类型转换、重复值处理、缺失值保留
+
+// BindUnmarshaler 允许字段从单个字符串输入值自定义解码。
+type BindUnmarshaler interface {
+	UnmarshalParam(param string) error
+}
+
+// BindQuery 只从 query 参数绑定数据。
+func BindQuery(r *http.Request, target any) error {
+	if err := validateBindInputs(r, target); err != nil {
+		return err
+	}
+
+	return bindQueryDefault(r, target)
+}
 
 // bindMultipleUnmarshaler 允许字段一次性接收同名输入的全部值。
 type bindMultipleUnmarshaler interface {
 	UnmarshalParams(params []string) error
 }
 
-// bindPathValuesDefault 负责把 path 参数绑定到目标对象。
-func bindPathValuesDefault(r *http.Request, target any) error {
-	params := map[string][]string{}
-	for _, name := range req.PathWildcardNames(r.Pattern) {
-		params[name] = []string{r.PathValue(name)}
-	}
-	return bindStringSourceDefault(target, params, "param")
-}
-
-// bindQueryParamsDefault 负责把 query 参数绑定到目标对象。
-func bindQueryParamsDefault(r *http.Request, target any) error {
+// bindQueryDefault 负责把 query 参数绑定到目标对象。
+func bindQueryDefault(r *http.Request, target any) error {
 	params := map[string][]string{}
 	if r.URL != nil {
 		params = r.URL.Query()
 	}
-	return bindStringSourceDefault(target, params, "query")
+	return bindStringSourceDefault(target, params)
 }
 
-// bindHeadersDefault 负责把 header 参数绑定到目标对象。
-func bindHeadersDefault(r *http.Request, target any) error {
-	params := map[string][]string{}
-	type headerEntry struct {
-		trimmed   string
-		canonical string
-		values    []string
-	}
-
-	grouped := map[string][]headerEntry{}
-	for key, values := range r.Header {
-		trimmed := strings.TrimSpace(key)
-		if trimmed == "" {
-			continue
-		}
-		canonical := textproto.CanonicalMIMEHeaderKey(trimmed)
-		grouped[canonical] = append(grouped[canonical], headerEntry{
-			trimmed:   trimmed,
-			canonical: canonical,
-			values:    values,
-		})
-	}
-
-	for canonical, entries := range grouped {
-		sort.Slice(entries, func(i, j int) bool {
-			iCanonical := entries[i].trimmed == entries[i].canonical
-			jCanonical := entries[j].trimmed == entries[j].canonical
-			if iCanonical != jCanonical {
-				return iCanonical
-			}
-			return entries[i].trimmed < entries[j].trimmed
-		})
-
-		merged := make([]string, 0)
-		for _, entry := range entries {
-			merged = append(merged, entry.values...)
-		}
-		params[canonical] = merged
-	}
-	return bindStringSourceDefault(target, params, "header")
-}
-
-// bindStringSourceDefault 为 path/query/header 这类字符串源复用同一套错误边界。
-func bindStringSourceDefault(target any, data map[string][]string, tag string) error {
-	err := bindDataDefault(target, data, tag)
+// bindStringSourceDefault 为 query 字符串源复用同一套错误边界。
+func bindStringSourceDefault(target any, data map[string][]string) error {
+	err := bindDataDefault(target, data)
 	if err == nil {
 		return nil
 	}
@@ -104,9 +64,9 @@ func bindStringSourceDefault(target any, data map[string][]string, tag string) e
 	return errx.NewHTTPErrorWithCause(http.StatusBadRequest, "", "", err)
 }
 
-// bindDataDefault 按 tag 和字段类型把字符串输入写入目标对象。
+// bindDataDefault 按字段类型把 query 字符串输入写入目标对象。
 // 调用方保证 destination 已通过公开入口校验，是非 nil 指针。
-func bindDataDefault(destination any, data map[string][]string, tag string) error {
+func bindDataDefault(destination any, data map[string][]string) error {
 	if len(data) == 0 {
 		return nil
 	}
@@ -151,14 +111,14 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 
 	for i := 0; i < typ.NumField(); i++ {
 		typeField := typ.Field(i)
-		inputFieldName := typeField.Tag.Get(tag)
+		inputFieldName := typeField.Tag.Get("query")
 		if typeField.Anonymous {
 			embeddedType := typeField.Type
 			if embeddedType.Kind() == reflect.Pointer {
 				embeddedType = embeddedType.Elem()
 			}
 			if embeddedType.Kind() == reflect.Struct && inputFieldName != "" {
-				return errors.New("query/param/header tags are not allowed with anonymous struct field")
+				return errors.New("query tags are not allowed with anonymous struct field")
 			}
 		}
 
@@ -178,14 +138,11 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 		if inputFieldName == "" {
 			// 未显式标注输入名时，仅递归进入普通嵌套 struct；自定义解码字段保持自行接管。
 			if _, ok := structField.Addr().Interface().(BindUnmarshaler); !ok && structFieldKind == reflect.Struct {
-				if err := bindDataDefault(structField.Addr().Interface(), data, tag); err != nil {
+				if err := bindDataDefault(structField.Addr().Interface(), data); err != nil {
 					return err
 				}
 			}
 			continue
-		}
-		if tag == "header" {
-			inputFieldName = textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(inputFieldName))
 		}
 
 		inputValue, exists := data[inputFieldName]
