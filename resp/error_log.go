@@ -159,10 +159,6 @@ func (r *ErrorResponder) logServerError(req *http.Request, httpErr *errx.HTTPErr
 }
 
 func (r *ErrorResponder) logServerErrorAttrs(req *http.Request, httpErr *errx.HTTPError, diagnosticAttrs []slog.Attr) {
-	if httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
-		return
-	}
-
 	ctx := context.Background()
 	if req != nil {
 		ctx = req.Context()

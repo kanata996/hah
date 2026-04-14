@@ -27,6 +27,8 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
+const maxResponseWriterUnwrapDepth = 64
+
 // problemPayload 是最终写入响应体的公共错误字段。
 // 这里不包含内部原始 error，避免把服务端细节泄露给客户端。
 type problemPayload struct {
@@ -72,7 +74,7 @@ func responseAlreadyStarted(w http.ResponseWriter) bool {
 		Unwrap() http.ResponseWriter
 	}
 
-	for depth := 0; w != nil && depth < 8; depth++ {
+	for depth := 0; w != nil && depth < maxResponseWriterUnwrapDepth; depth++ {
 		if state, ok := w.(responseStateWriter); ok && (state.Status() != 0 || state.BytesWritten() > 0) {
 			return true
 		}
@@ -139,6 +141,7 @@ func (e *ErrorWriteDegraded) Unwrap() error {
 func writeErrorPayload(w http.ResponseWriter, httpErr *errx.HTTPError) error {
 	body, err := marshalProblemPayload(httpErr)
 	if err != nil {
+		// fallback payload 丢弃 errors 后只剩稳定标量字段，这里不会再出现 JSON 编码失败。
 		fallbackBody, _ := json.Marshal(problemPayloadFromHTTPError(httpErr, false))
 		if writeErr := writeJSONBytesWithContentType(w, httpErr.Status(), problemJSONContentType, fallbackBody); writeErr != nil {
 			return errors.Join(&ErrorWriteDegraded{Cause: err}, writeErr)

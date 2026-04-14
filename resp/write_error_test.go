@@ -127,6 +127,10 @@ type explicitStatusWriter struct {
 	bytesWritten int
 }
 
+type unwrapOnlyWriter struct {
+	inner http.ResponseWriter
+}
+
 func (w *explicitStatusWriter) Header() http.Header { return w.inner.Header() }
 func (w *explicitStatusWriter) WriteHeader(status int) {
 	w.status = status
@@ -143,6 +147,18 @@ func (w *explicitStatusWriter) Write(p []byte) (int, error) {
 func (w *explicitStatusWriter) Status() int                 { return w.status }
 func (w *explicitStatusWriter) BytesWritten() int           { return w.bytesWritten }
 func (w *explicitStatusWriter) Unwrap() http.ResponseWriter { return w.inner }
+
+func (w *unwrapOnlyWriter) Header() http.Header { return w.inner.Header() }
+
+func (w *unwrapOnlyWriter) WriteHeader(status int) {
+	w.inner.WriteHeader(status)
+}
+
+func (w *unwrapOnlyWriter) Write(p []byte) (int, error) {
+	return w.inner.Write(p)
+}
+
+func (w *unwrapOnlyWriter) Unwrap() http.ResponseWriter { return w.inner }
 
 // WriteError 会把 HTTPError 写成标准 problem JSON。
 func TestWriteErrorWritesEnvelope(t *testing.T) {
@@ -636,6 +652,37 @@ func TestWriteErrorTreatsExplicit200StatusAsStartedWhenNoWrittenMethodExists(t *
 	// 不应重写成 500 status 导致 superfluous 写出
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+}
+
+func TestWriteErrorSkipsRewriteAfterDeepWrappedResponseStarted(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rr := httptest.NewRecorder()
+
+	var w http.ResponseWriter = &stateTrackingWriter{inner: rr}
+	for range 9 {
+		w = &unwrapOnlyWriter{inner: w}
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusAccepted)
+	if _, err := w.Write([]byte("partial")); err != nil {
+		t.Fatalf("w.Write() error = %v", err)
+	}
+
+	cause := errors.New("boom after deep wrappers")
+	err := WriteError(w, req, cause)
+	if !errors.Is(err, cause) {
+		t.Fatalf("WriteError() error = %v, want %v", err, cause)
+	}
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "text/plain" {
+		t.Fatalf("Content-Type = %q, want text/plain", got)
+	}
+	if got := rr.Body.String(); got != "partial" {
+		t.Fatalf("body = %q, want partial", got)
 	}
 }
 
