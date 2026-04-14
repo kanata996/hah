@@ -6,25 +6,11 @@ import (
 	"github.com/kanata996/hah/internal/req"
 )
 
-// 本文件负责请求级规则扩展点和通用 helper。
+// 本文件负责请求输入辅助错误与 body-required helper。
 //
 // 这里承载的能力包括：
-//   - RequestValidator 扩展点及其执行适配
 //   - InvalidRequest helper，用于生成统一的 invalid_request 错误
-//   - RequireBody helper，用于在组合流程中声明 body-required 契约
-
-// RequestValidator 允许 DTO 在 binding 之后、字段校验之前声明请求级规则。
-type RequestValidator interface {
-	ValidateRequest(r *http.Request) error
-}
-
-func applyRequestValidation(r *http.Request, target any) error {
-	validator, ok := target.(RequestValidator)
-	if !ok {
-		return nil
-	}
-	return validator.ValidateRequest(r)
-}
+//   - RequireBody helper，用于显式声明 body-required 契约
 
 // InvalidRequest 生成统一的 invalid_request 错误包络。
 func InvalidRequest(violations ...Violation) error {

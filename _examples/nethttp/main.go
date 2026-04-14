@@ -7,9 +7,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/kanata996/hah"
 	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/reqx"
 )
 
 type account struct {
@@ -120,26 +122,56 @@ type app struct {
 }
 
 type listAccountsRequest struct {
-	OrgID string `param:"org_id" validate:"required"`
+	OrgID string `param:"org_id"`
 	Name  string `query:"name"`
 }
 
-func (r *listAccountsRequest) Normalize() {
+func (r *listAccountsRequest) normalize() {
 	r.Name = strings.TrimSpace(r.Name)
 }
 
 type createAccountRequest struct {
-	OrgID string `param:"org_id" validate:"required"`
-	Name  string `json:"name" validate:"required,min=3,max=64"`
+	OrgID string `param:"org_id"`
+	Name  string `json:"name"`
 }
 
-func (r *createAccountRequest) Normalize() {
+func (r *createAccountRequest) normalize() {
 	r.Name = strings.TrimSpace(r.Name)
 }
 
 type accountPathRequest struct {
-	OrgID     string `param:"org_id" validate:"required"`
-	AccountID string `param:"account_id" validate:"required"`
+	OrgID     string `param:"org_id"`
+	AccountID string `param:"account_id"`
+}
+
+func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) error {
+	if err := hah.RequireBody(r); err != nil {
+		return err
+	}
+
+	req.normalize()
+	switch nameLen := utf8.RuneCountInString(req.Name); {
+	case req.Name == "":
+		return reqx.InvalidRequest(reqx.Violation{
+			Field: "name",
+			In:    reqx.ViolationInBody,
+			Code:  reqx.ViolationCodeRequired,
+		})
+	case nameLen < 3:
+		return reqx.InvalidRequest(reqx.Violation{
+			Field:  "name",
+			In:     reqx.ViolationInBody,
+			Detail: "must be at least 3 characters",
+		})
+	case nameLen > 64:
+		return reqx.InvalidRequest(reqx.Violation{
+			Field:  "name",
+			In:     reqx.ViolationInBody,
+			Detail: "must be at most 64 characters",
+		})
+	default:
+		return nil
+	}
 }
 
 func newServer(store *accountStore) http.Handler {
@@ -163,10 +195,11 @@ func (a *app) healthz(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) listAccounts(w http.ResponseWriter, r *http.Request) {
 	var req listAccountsRequest
-	if err := hah.BindAndValidate(r, &req); err != nil {
+	if err := hah.Bind(r, &req); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}
+	req.normalize()
 
 	items := a.store.list(req.OrgID, req.Name)
 	if err := hah.OK(w, map[string]any{
@@ -180,7 +213,11 @@ func (a *app) listAccounts(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
 	var req createAccountRequest
-	if err := hah.BindAndValidate(r, &req); err != nil {
+	if err := hah.Bind(r, &req); err != nil {
+		_ = hah.WriteError(w, r, err)
+		return
+	}
+	if err := validateCreateAccountRequest(r, &req); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}
@@ -198,7 +235,7 @@ func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
 	var req accountPathRequest
-	if err := hah.BindAndValidate(r, &req); err != nil {
+	if err := hah.Bind(r, &req); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}
@@ -216,7 +253,7 @@ func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	var req accountPathRequest
-	if err := hah.BindAndValidate(r, &req); err != nil {
+	if err := hah.Bind(r, &req); err != nil {
 		_ = hah.WriteError(w, r, err)
 		return
 	}

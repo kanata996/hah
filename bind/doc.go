@@ -1,9 +1,7 @@
 // Package bind 为基于 net/http 的 JSON API 提供请求绑定能力。
 //
-// 它只负责把 HTTP 输入映射到目标值，不处理 Normalize、请求级规则或字段校验。
-// 如果需要“绑定 + 请求级规则 + 结构校验”的组合方式，请先调用 bind.Bind*
-// 完成来源绑定，再调用 reqx.Validate(...)；默认 mixed-source 场景可直接使用
-// 根包 hah 的 BindAndValidate(...)。
+// 它只负责把 HTTP 输入映射到目标值，不内建 Normalize、请求级规则或字段校验。
+// 如果调用方需要 DTO 标准化、结构校验或更高层规则，应在 Bind* 返回后自行显式执行。
 //
 // 当前支持的数据源：
 //   - query：query 参数

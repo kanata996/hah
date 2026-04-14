@@ -11,10 +11,6 @@ import (
 type (
 	// BindUnmarshaler 允许字段从单个字符串输入值自定义解码。
 	BindUnmarshaler = bind.BindUnmarshaler
-	// RequestValidator 允许 DTO 在 binding 之后声明请求级规则。
-	RequestValidator = reqx.RequestValidator
-	// Normalizer 允许 DTO 在校验前做标准化处理。
-	Normalizer = reqx.Normalizer
 	// PathParam 表示一个待解析的 path 单参数。
 	PathParam = reqx.PathParam
 	// QueryParam 表示一个待解析的 query 单参数。
@@ -56,11 +52,6 @@ func Path(r *http.Request, name string) *PathParam {
 // Query 创建 query 单参数读取与校验 builder。
 func Query(r *http.Request, name string) *QueryParam {
 	return reqx.Query(r, name)
-}
-
-// BindAndValidate 绑定后执行 Normalize、请求级规则和字段校验。
-func BindAndValidate(r *http.Request, target any) error {
-	return reqx.BindAndValidate(r, target)
 }
 
 // RequireBody 按默认 binder 契约要求请求必须显式提交 body。

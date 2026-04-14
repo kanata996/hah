@@ -20,7 +20,7 @@ import (
 // [✓] 根包 facade 会把 bind / reqx / resp 的核心能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
 // [✓] 根包 facade 公开常用绑定入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
-// [✓] README 中承诺的 create account handler 主路径有根包级端到端测试支撑
+// [✓] 根包 facade 继续暴露 body-required helper 与统一错误响应写回
 
 type rootPayloadMap map[string]any
 
@@ -165,27 +165,6 @@ func TestQuery_ValuesDelegatesToReqx(t *testing.T) {
 	}
 	if got := strings.Join(tags, ","); got != "a,b" {
 		t.Fatalf("tags = %q, want a,b", got)
-	}
-}
-
-// BindAndValidate 会在根包 facade 中同时复用绑定和校验能力。
-func TestBindAndValidate_DelegatesToReqx(t *testing.T) {
-	type request struct {
-		OrgID string `param:"org_id" validate:"required"`
-		Name  string `json:"name" validate:"required"`
-	}
-
-	req := newRouteJSONRequest(http.MethodPost, "/orgs/o_1/accounts", `{"name":"kanata"}`, "org_id", "o_1")
-
-	var dst request
-	if err := BindAndValidate(req, &dst); err != nil {
-		t.Fatalf("BindAndValidate() error = %v", err)
-	}
-	if dst.OrgID != "o_1" {
-		t.Fatalf("org_id = %q, want o_1", dst.OrgID)
-	}
-	if dst.Name != "kanata" {
-		t.Fatalf("name = %q, want kanata", dst.Name)
 	}
 }
 

@@ -2,49 +2,9 @@ package reqx
 
 import (
 	"errors"
-	"io"
 	"net/http"
-	"reflect"
-	"strings"
 	"testing"
 )
-
-type requestRuleNormalizedRequest struct {
-	Name   string    `json:"name" validate:"required,nospace"`
-	events *[]string `json:"-"`
-}
-
-func (r *requestRuleNormalizedRequest) Normalize() {
-	*r.events = append(*r.events, "normalize")
-	r.Name = strings.TrimSpace(r.Name)
-}
-
-func (r *requestRuleNormalizedRequest) ValidateRequest(*http.Request) error {
-	*r.events = append(*r.events, "request")
-	if r.Name != "kanata" {
-		return errors.New("request validator saw unnormalized name")
-	}
-	return nil
-}
-
-type requestRuleFailureRequest struct {
-	Name string `json:"name" validate:"required"`
-}
-
-func (*requestRuleFailureRequest) ValidateRequest(*http.Request) error {
-	return errRequestRuleFailed
-}
-
-type requestRuleRequireBodyRequest struct {
-	OrgID string  `param:"org_id" validate:"required"`
-	Name  *string `json:"name"`
-}
-
-func (*requestRuleRequireBodyRequest) ValidateRequest(r *http.Request) error {
-	return RequireBody(r)
-}
-
-var errRequestRuleFailed = errors.New("request rule failed")
 
 type errorReadCloser struct {
 	err error
@@ -138,92 +98,5 @@ func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
 				t.Fatalf("violation = %#v, want %#v", violation, tc.want)
 			}
 		})
-	}
-}
-
-func TestBindAndValidate_RequestValidatorReadsNormalizedDTO(t *testing.T) {
-	var events []string
-	dst := requestRuleNormalizedRequest{events: &events}
-	req := newJSONRequest(http.MethodPost, "/", `{"name":"  kanata  "}`)
-
-	if err := bindAndValidateBody(req, &dst); err != nil {
-		t.Fatalf("bindAndValidateBody() error = %v", err)
-	}
-	if dst.Name != "kanata" {
-		t.Fatalf("name = %q, want kanata", dst.Name)
-	}
-	if !reflect.DeepEqual(events, []string{"normalize", "request"}) {
-		t.Fatalf("events = %#v, want normalize -> request", events)
-	}
-}
-
-func TestBindAndValidate_RequestValidatorRunsBeforeFieldValidation(t *testing.T) {
-	req := newJSONRequest(http.MethodPost, "/", `{}`)
-	var dst requestRuleFailureRequest
-
-	err := bindAndValidateBody(req, &dst)
-	if !errors.Is(err, errRequestRuleFailed) {
-		t.Fatalf("error = %v, want %v", err, errRequestRuleFailed)
-	}
-}
-
-func TestBindAndValidate_RequestValidatorCanRequireBodyForMixedSourceRoute(t *testing.T) {
-	req := requestWithPathParams(map[string][]string{
-		"org_id": {"org_1"},
-	})
-	req.Method = http.MethodPost
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = io.NopCloser(strings.NewReader(""))
-	req.ContentLength = -1
-
-	var dst requestRuleRequireBodyRequest
-	err := BindAndValidate(req, &dst)
-	violation := assertSingleViolation(t, err)
-	if violation.Field != "body" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
-		t.Fatalf("violation = %#v", violation)
-	}
-	if dst.OrgID != "org_1" {
-		t.Fatalf("org_id = %q, want org_1", dst.OrgID)
-	}
-}
-
-type requestRuleSkippedOnBindFailureRequest struct {
-	ID     string    `param:"id" validate:"required"`
-	Cursor string    `query:"cursor" validate:"required"`
-	Name   string    `json:"name" validate:"required"`
-	events *[]string `json:"-"`
-}
-
-func (r *requestRuleSkippedOnBindFailureRequest) Normalize() {
-	*r.events = append(*r.events, "normalize")
-}
-
-func (r *requestRuleSkippedOnBindFailureRequest) ValidateRequest(*http.Request) error {
-	*r.events = append(*r.events, "request")
-	return nil
-}
-
-func TestBindAndValidate_BindFailureSkipsPostBindHooksButKeepsEarlierWrites(t *testing.T) {
-	var events []string
-	dst := requestRuleSkippedOnBindFailureRequest{events: &events}
-
-	req := requestWithPathParams(map[string][]string{
-		"id": {"route-id"},
-	})
-	req.Method = http.MethodGet
-	req.URL.RawQuery = "cursor=abc"
-	req.Header.Set("Content-Type", "application/json")
-	req.Body = io.NopCloser(strings.NewReader(`{"name":`))
-	req.ContentLength = int64(len(`{"name":`))
-
-	err := BindAndValidate(req, &dst)
-	if err == nil {
-		t.Fatal("BindAndValidate(bind error) = nil")
-	}
-	if !reflect.DeepEqual(events, []string(nil)) {
-		t.Fatalf("events = %#v, want no post-bind hooks", events)
-	}
-	if dst.ID != "route-id" || dst.Cursor != "abc" || dst.Name != "" {
-		t.Fatalf("dst = %#v, want earlier bind writes preserved before body failure", dst)
 	}
 }

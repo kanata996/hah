@@ -179,16 +179,13 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 至少覆盖：
 
-- `Normalize()` 在字段校验前执行
-- `RequestValidator` 在字段校验前执行
-- 校验错误字段名映射到请求 tag，而不是 Go 字段名
 - `InvalidRequest` / `Violation` 的公开错误语义
-- `RequireBody` 与组合入口的 body-required 契约
+- `RequireBody` 的 body-required 契约
 - 公开 builder 的稳定契约
 
 说明：
 
-- 优先测试 `Path` / `Query` / `BindAndValidate` / `Validate` 的公开行为
+- 优先测试 `Path` / `Query` / `RequireBody` / `InvalidRequest` 的公开行为
 - 不要求为私有 helper 单独补“分支覆盖测试”
 
 ### 7.4 `errx`
