@@ -131,6 +131,14 @@ var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
 		wantDetail: http.StatusText(http.StatusTeapot),
 	},
 	{
+		name:       "unknown client error without status text falls back to client error public message",
+		status:     430,
+		wantStatus: 430,
+		wantCode:   "client_error",
+		wantTitle:  "Client Error",
+		wantDetail: "Client Error",
+	},
+	{
 		name:       "invalid status falls back to internal server error",
 		status:     http.StatusOK,
 		wantStatus: http.StatusInternalServerError,
