@@ -1,4 +1,4 @@
-package req
+package reqx
 
 import (
 	"slices"
@@ -25,8 +25,8 @@ func TestPathWildcardNames(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := PathWildcardNames(tc.pattern); !slices.Equal(got, tc.want) {
-				t.Fatalf("PathWildcardNames(%q) = %#v, want %#v", tc.pattern, got, tc.want)
+			if got := pathWildcardNames(tc.pattern); !slices.Equal(got, tc.want) {
+				t.Fatalf("pathWildcardNames(%q) = %#v, want %#v", tc.pattern, got, tc.want)
 			}
 		})
 	}
@@ -52,8 +52,8 @@ func TestPathHasWildcard(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := PathHasWildcard(tc.pattern, tc.target); got != tc.want {
-				t.Fatalf("PathHasWildcard(%q, %q) = %v, want %v", tc.pattern, tc.target, got, tc.want)
+			if got := pathHasWildcard(tc.pattern, tc.target); got != tc.want {
+				t.Fatalf("pathHasWildcard(%q, %q) = %v, want %v", tc.pattern, tc.target, got, tc.want)
 			}
 		})
 	}

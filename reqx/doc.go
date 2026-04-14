@@ -6,13 +6,13 @@
 //   - 提供 body-required 等显式 helper，供调用方在绑定后自行组合规则
 //
 // 当前项目里，reqx.Path(...) / reqx.Query(...) 是请求侧的核心公开 API 之一。
-// 它们负责“不定义 DTO 也能安全读取输入”的主路径；bind 包则补足 DTO 场景下的
-// source-to-struct 映射。调整 Path / Query 的形状、链式能力或错误语义时，
-// 应按核心 public API 变更看待。
+// 它们负责“不定义 DTO 也能安全读取输入”的主路径；bind 包则补足 query/body
+// DTO 场景下的 source-to-struct 映射。调整 Path / Query 的形状、链式能力或
+// 错误语义时，应按核心 public API 变更看待。
 //
 // 典型用法：
 //   - 读取单个 path/query 参数时，优先使用 Path(...) / Query(...)
-//   - 绑定 DTO 时，使用 bind.Bind* 或根包 hah 的 Bind*
+//   - 绑定 query/body DTO 时，使用 bind.BindQuery / bind.BindBody 或根包 hah 的对应 facade
 //   - 需要返回统一 invalid_request 错误时，使用 InvalidRequest(...)
 //   - 需要显式要求 body 必填时，使用 RequireBody(...)
 //
@@ -35,8 +35,8 @@
 // 新增、移除、重命名以上导出符号，或改变其公开语义时，应同步更新本注释与 CHANGELOG。
 //
 // body-required 契约：
-//   - RequireBody 沿用默认 binder 的 empty-body 判定：实际读取到零字节 body 视为“没有 body”。
-//   - 综合绑定入口对空 body 不主动报错；是否必填由调用方显式决定。
+//   - RequireBody 沿用 BindBody 的 empty-body 判定：实际读取到零字节 body 视为“没有 body”。
+//   - BindBody 对空 body 不主动报错；是否必填由调用方显式决定。
 //
 // path 输入只依赖 net/http 暴露的 PathValue / Pattern 命名 wildcard 语义，
 // 不依赖 chi.RouteContext，也不承诺 chi 专有 `*` catch-all 的兼容行为。

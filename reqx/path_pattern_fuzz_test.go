@@ -1,4 +1,4 @@
-package req
+package reqx
 
 import (
 	"slices"
@@ -26,25 +26,25 @@ func FuzzPathPatternHelpers(f *testing.F) {
 	}
 
 	f.Fuzz(func(t *testing.T, pattern, name string) {
-		names := PathWildcardNames(pattern)
-		if !slices.Equal(names, PathWildcardNames(pattern)) {
-			t.Fatalf("PathWildcardNames(%q) is not deterministic", pattern)
+		names := pathWildcardNames(pattern)
+		if !slices.Equal(names, pathWildcardNames(pattern)) {
+			t.Fatalf("pathWildcardNames(%q) is not deterministic", pattern)
 		}
 
 		for _, wildcard := range names {
 			if wildcard == "" {
-				t.Fatalf("PathWildcardNames(%q) returned an empty wildcard", pattern)
+				t.Fatalf("pathWildcardNames(%q) returned an empty wildcard", pattern)
 			}
 			if wildcard != strings.TrimSpace(wildcard) {
-				t.Fatalf("PathWildcardNames(%q) returned untrimmed wildcard %q", pattern, wildcard)
+				t.Fatalf("pathWildcardNames(%q) returned untrimmed wildcard %q", pattern, wildcard)
 			}
-			if !PathHasWildcard(pattern, wildcard) {
-				t.Fatalf("PathHasWildcard(%q, %q) = false, want true", pattern, wildcard)
+			if !pathHasWildcard(pattern, wildcard) {
+				t.Fatalf("pathHasWildcard(%q, %q) = false, want true", pattern, wildcard)
 			}
 		}
 
-		if strings.TrimSpace(name) == "" && PathHasWildcard(pattern, name) {
-			t.Fatalf("PathHasWildcard(%q, %q) = true, want false for blank target", pattern, name)
+		if strings.TrimSpace(name) == "" && pathHasWildcard(pattern, name) {
+			t.Fatalf("pathHasWildcard(%q, %q) = true, want false for blank target", pattern, name)
 		}
 	})
 }

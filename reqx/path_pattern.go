@@ -1,9 +1,8 @@
-package req
+package reqx
 
 import "strings"
 
-// PathWildcardNames extracts wildcard names from net/http style route patterns.
-func PathWildcardNames(pattern string) []string {
+func pathWildcardNames(pattern string) []string {
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
 		return nil
@@ -31,8 +30,7 @@ func PathWildcardNames(pattern string) []string {
 	return names
 }
 
-// PathHasWildcard reports whether pattern declares the named wildcard.
-func PathHasWildcard(pattern, name string) bool {
+func pathHasWildcard(pattern, name string) bool {
 	pattern = strings.TrimSpace(pattern)
 	name = strings.TrimSpace(name)
 	if pattern == "" || name == "" {

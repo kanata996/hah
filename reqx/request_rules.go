@@ -2,8 +2,6 @@ package reqx
 
 import (
 	"net/http"
-
-	"github.com/kanata996/hah/internal/req"
 )
 
 // 本文件负责请求输入辅助错误与 body-required helper。
@@ -26,7 +24,7 @@ func RequireBody(r *http.Request) error {
 		return errorsf("request must not be nil")
 	}
 
-	hasBody, err := req.HasBody(r)
+	hasBody, err := hasBody(r)
 	if err != nil {
 		return err
 	}
