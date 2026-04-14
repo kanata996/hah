@@ -92,7 +92,7 @@ func postBindValidate(r *http.Request, target any, source Source) error {
 }
 
 func validateSource(source Source) error {
-	if _, ok := sourceTagPriorities[source]; ok {
+	if _, ok := sourceSpecFor(source); ok {
 		return nil
 	}
 	return errorsf("unsupported validation source %q", source)
@@ -148,12 +148,9 @@ func validateStruct(target any, source Source) ([]Violation, error) {
 
 func validatorFor(source Source) *validator.Validate {
 	validatorOnce.Do(func() {
-		validators = map[Source]*validator.Validate{
-			SourceBody:    newValidator(SourceBody),
-			SourceQuery:   newValidator(SourceQuery),
-			SourcePath:    newValidator(SourcePath),
-			SourceHeader:  newValidator(SourceHeader),
-			SourceRequest: newValidator(SourceRequest),
+		validators = make(map[Source]*validator.Validate, len(sourceSpecs))
+		for source := range sourceSpecs {
+			validators[source] = newValidator(source)
 		}
 	})
 
@@ -191,6 +188,7 @@ func violationsFromValidation(source Source, errs validator.ValidationErrors) []
 	if len(errs) == 0 {
 		return nil
 	}
+	spec := mustSourceSpec(source)
 
 	seen := make(map[string]struct{}, len(errs))
 	type entry struct {
@@ -208,7 +206,7 @@ func violationsFromValidation(source Source, errs validator.ValidationErrors) []
 		seen[field] = struct{}{}
 		entries = append(entries, entry{
 			field: field,
-			in:    violationInForSource(source),
+			in:    spec.violationIn,
 			code:  validationCode(validationErr.Tag()),
 		})
 	}
@@ -258,15 +256,8 @@ func validationCode(tag string) string {
 	}
 }
 
-func violationInForSource(source Source) string {
-	if input, ok := violationInputsBySource[source]; ok {
-		return input
-	}
-	return ViolationInRequest
-}
-
 func fieldAlias(field reflect.StructField, source Source) string {
-	for _, tagName := range sourceTagPriority(source) {
+	for _, tagName := range mustSourceSpec(source).tagPriority {
 		if name := tagValue(field, tagName); name != "" {
 			if tagName == "header" {
 				return textproto.CanonicalMIMEHeaderKey(name)
@@ -275,13 +266,6 @@ func fieldAlias(field reflect.StructField, source Source) string {
 		}
 	}
 	return field.Name
-}
-
-func sourceTagPriority(source Source) []string {
-	if priority, ok := sourceTagPriorities[source]; ok {
-		return priority
-	}
-	panic(fmt.Sprintf("reqx: unsupported tag source %q", source))
 }
 
 func tagValue(field reflect.StructField, tagName string) string {
@@ -297,20 +281,46 @@ func tagValue(field reflect.StructField, tagName string) string {
 	return value
 }
 
-var (
-	sourceTagPriorities = map[Source][]string{
-		SourceBody:    {"json", "query", "param", "header"},
-		SourceQuery:   {"query", "json", "param", "header"},
-		SourcePath:    {"param", "json", "query", "header"},
-		SourceHeader:  {"header", "json", "query", "param"},
-		SourceRequest: {"param", "query", "json", "header"},
+type sourceSpec struct {
+	tagPriority []string
+	violationIn string
+}
+
+func sourceSpecFor(source Source) (sourceSpec, bool) {
+	spec, ok := sourceSpecs[source]
+	return spec, ok
+}
+
+func mustSourceSpec(source Source) sourceSpec {
+	spec, ok := sourceSpecFor(source)
+	if !ok {
+		panic(fmt.Sprintf("reqx: unsupported validation source %q", source))
 	}
-	violationInputsBySource = map[Source]string{
-		SourceBody:    ViolationInBody,
-		SourceQuery:   ViolationInQuery,
-		SourcePath:    ViolationInPath,
-		SourceHeader:  ViolationInHeader,
-		SourceRequest: ViolationInRequest,
+	return spec
+}
+
+var (
+	sourceSpecs = map[Source]sourceSpec{
+		SourceBody: {
+			tagPriority: []string{"json", "query", "param", "header"},
+			violationIn: ViolationInBody,
+		},
+		SourceQuery: {
+			tagPriority: []string{"query", "json", "param", "header"},
+			violationIn: ViolationInQuery,
+		},
+		SourcePath: {
+			tagPriority: []string{"param", "json", "query", "header"},
+			violationIn: ViolationInPath,
+		},
+		SourceHeader: {
+			tagPriority: []string{"header", "json", "query", "param"},
+			violationIn: ViolationInHeader,
+		},
+		SourceRequest: {
+			tagPriority: []string{"param", "query", "json", "header"},
+			violationIn: ViolationInRequest,
+		},
 	}
 )
 
