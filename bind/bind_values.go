@@ -184,17 +184,11 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 			}
 			continue
 		}
+		if tag == "header" {
+			inputFieldName = textproto.CanonicalMIMEHeaderKey(strings.TrimSpace(inputFieldName))
+		}
 
 		inputValue, exists := data[inputFieldName]
-		if !exists && tag == "header" {
-			for key, values := range data {
-				if strings.EqualFold(key, inputFieldName) {
-					inputValue = values
-					exists = true
-					break
-				}
-			}
-		}
 		if !exists {
 			continue
 		}

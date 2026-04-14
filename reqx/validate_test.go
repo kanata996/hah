@@ -70,7 +70,7 @@ func TestBindAndValidateRejectsInvalidInputs(t *testing.T) {
 
 	t.Run("struct value target", func(t *testing.T) {
 		err := BindAndValidate(httptest.NewRequest(http.MethodGet, "/", nil), struct{}{})
-		if err == nil || err.Error() != "bind: destination must not be nil" {
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
 			t.Fatalf("BindAndValidate(struct value) error = %v", err)
 		}
 	})
@@ -82,7 +82,7 @@ func TestBindAndValidateRejectsInvalidInputs(t *testing.T) {
 
 		var dst *request
 		err := BindAndValidate(newJSONRequest(http.MethodPost, "/", `{}`), dst)
-		if err == nil || err.Error() != "bind: destination must not be nil" {
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
 			t.Fatalf("BindAndValidate(typed nil struct pointer) error = %v", err)
 		}
 	})
@@ -96,6 +96,27 @@ func TestBindAndValidateRejectsInvalidInputs(t *testing.T) {
 			t.Fatalf("BindAndValidate(pointer to non-struct) error = %v", err)
 		}
 	})
+}
+
+func TestBindAndValidate_RejectsNonStructTargetBeforeBinding(t *testing.T) {
+	dst := []string{"existing"}
+	req := newJSONRequest(http.MethodPost, "/", `["changed"]`)
+
+	err := BindAndValidate(req, &dst)
+	if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+		t.Fatalf("BindAndValidate(pointer to slice) error = %v", err)
+	}
+	if !reflect.DeepEqual(dst, []string{"existing"}) {
+		t.Fatalf("dst = %#v, want existing values preserved", dst)
+	}
+
+	body, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("ReadAll(req.Body) error = %v", readErr)
+	}
+	if string(body) != `["changed"]` {
+		t.Fatalf("remaining body = %q, want original unread body", body)
+	}
 }
 
 func TestValidateRejectsInvalidInputs(t *testing.T) {
@@ -207,7 +228,7 @@ func TestFieldAlias_UsesSourceTagPriority(t *testing.T) {
 		{name: "query", source: SourceQuery, want: "query_name"},
 		{name: "path", source: SourcePath, want: "param_name"},
 		{name: "header", source: SourceHeader, want: "X-Trace-Id"},
-		{name: "request", source: SourceRequest, want: "param_name"},
+		{name: "request conflicting tags fall back to struct field", source: SourceRequest, want: "Value"},
 	}
 
 	for _, tc := range testCases {
@@ -216,6 +237,17 @@ func TestFieldAlias_UsesSourceTagPriority(t *testing.T) {
 				t.Fatalf("fieldAlias(%q) = %q, want %q", tc.source, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestFieldAlias_SourceRequestUsesSharedInputNameWhenTagsAgree(t *testing.T) {
+	type request struct {
+		AccountID string `json:"account_id" query:"account_id" param:"account_id" validate:"required"`
+	}
+
+	field := reflect.TypeOf(request{}).Field(0)
+	if got := fieldAlias(field, SourceRequest); got != "account_id" {
+		t.Fatalf("fieldAlias(SourceRequest) = %q, want account_id", got)
 	}
 }
 
@@ -569,6 +601,34 @@ func TestBindAndValidate_UsesRequestFieldAliases(t *testing.T) {
 		if violation.In != wantIn || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
 			t.Fatalf("violation[%q] = %#v", field, violation)
 		}
+	}
+}
+
+func TestBindAndValidate_RequestAliasFallsBackToStructFieldOnConflictingSourceNames(t *testing.T) {
+	var dst struct {
+		AccountID string `param:"account_id" json:"id" validate:"required,nospace"`
+	}
+
+	req := requestWithPathParams(map[string][]string{
+		"account_id": {"acct_1"},
+	})
+	req.Method = http.MethodPost
+	req.Body = io.NopCloser(strings.NewReader(`{"id":"bad value"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = int64(len(`{"id":"bad value"}`))
+
+	violation := assertSingleViolation(t, BindAndValidate(req, &dst))
+	want := Violation{
+		Field:  "AccountID",
+		In:     ViolationInRequest,
+		Code:   ViolationCodeInvalid,
+		Detail: "is invalid",
+	}
+	if violation != want {
+		t.Fatalf("violation = %#v, want %#v", violation, want)
+	}
+	if dst.AccountID != "bad value" {
+		t.Fatalf("dst = %#v, want bound body value preserved", dst)
 	}
 }
 

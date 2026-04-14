@@ -54,6 +54,9 @@ func BindAndValidate(r *http.Request, target any) error {
 	if target == nil {
 		return errorsf("destination must not be nil")
 	}
+	if err := validateTarget(target); err != nil {
+		return err
+	}
 	if err := bind.Bind(r, target); err != nil {
 		return err
 	}
@@ -262,6 +265,12 @@ func validationCode(tag string) string {
 }
 
 func fieldAlias(field reflect.StructField, source Source) string {
+	if source == SourceRequest {
+		if alias, ok := requestFieldAlias(field); ok {
+			return alias
+		}
+	}
+
 	for _, tagName := range mustSourceSpec(source).tagPriority {
 		if name := tagValue(field, tagName); name != "" {
 			if tagName == "header" {
@@ -271,6 +280,33 @@ func fieldAlias(field reflect.StructField, source Source) string {
 		}
 	}
 	return field.Name
+}
+
+func requestFieldAlias(field reflect.StructField) (string, bool) {
+	var alias string
+	for _, tagName := range mustSourceSpec(SourceRequest).tagPriority {
+		name := tagValue(field, tagName)
+		if name == "" {
+			continue
+		}
+		if tagName == "header" {
+			name = textproto.CanonicalMIMEHeaderKey(name)
+		}
+		if alias == "" {
+			alias = name
+			continue
+		}
+		if alias != name {
+			// Mixed-source validation needs one stable public field name. When a field
+			// declares different names across sources, prefer the struct field name
+			// instead of misreporting one source-specific alias.
+			return field.Name, true
+		}
+	}
+	if alias == "" {
+		return "", false
+	}
+	return alias, true
 }
 
 func tagValue(field reflect.StructField, tagName string) string {

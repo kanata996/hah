@@ -36,6 +36,12 @@
 //   - 组合入口最终会执行结构校验，因此目标必须是非 nil 的 *struct
 //   - 这与 bind.BindBody(...) 可绑定到 slice、map 等 JSON 目标的能力不同
 //
+// SourceRequest 的字段别名契约：
+//   - 若同一字段在多个来源 tag（param/query/json/header）上声明了相同输入名，
+//     violation 会继续使用该共享输入名
+//   - 若声明了不同输入名，请求级 violation 会回退为 struct 字段名，以避免把
+//     某个来源名误报成最终的公开字段名
+//
 // 新增、移除、重命名以上导出符号，或改变其公开语义时，应同步更新本注释与 CHANGELOG。
 //
 // body-required 契约：
