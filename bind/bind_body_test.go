@@ -388,3 +388,29 @@ func TestBindBody_NilBodyIsNoop(t *testing.T) {
 		t.Fatalf("name = %q, want existing value preserved", dst.Name)
 	}
 }
+
+func TestBindBody_NilBodyAfterCachedPresenceProbeIsNoop(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+
+	var first request
+	if err := BindBody(req, &first); err != nil {
+		t.Fatalf("first BindBody() error = %v", err)
+	}
+	if first.Name != "kanata" {
+		t.Fatalf("first name = %q, want kanata", first.Name)
+	}
+
+	req.Body = nil
+
+	dst := request{Name: "existing"}
+	if err := BindBody(req, &dst); err != nil {
+		t.Fatalf("second BindBody(nil body after cached probe) error = %v", err)
+	}
+	if dst.Name != "existing" {
+		t.Fatalf("name = %q, want existing value preserved", dst.Name)
+	}
+}

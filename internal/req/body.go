@@ -25,6 +25,9 @@ func HasBody(r *http.Request) (bool, error) {
 	if r == nil {
 		return false, nil
 	}
+	if r.Body == nil {
+		return false, nil
+	}
 
 	if state, ok := r.Context().Value(presenceKey{}).(presenceState); ok {
 		return state.has, state.err
