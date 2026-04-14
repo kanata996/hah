@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -52,19 +53,41 @@ func bindQueryParamsDefault(r *http.Request, target any) error {
 func bindHeadersDefault(r *http.Request, target any) error {
 	params := map[string][]string{}
 	if r != nil {
+		type headerEntry struct {
+			trimmed   string
+			canonical string
+			values    []string
+		}
+
+		grouped := map[string][]headerEntry{}
 		for key, values := range r.Header {
 			trimmed := strings.TrimSpace(key)
 			if trimmed == "" {
 				continue
 			}
 			canonical := textproto.CanonicalMIMEHeaderKey(trimmed)
-			if trimmed == canonical {
-				params[canonical] = values
-				continue
+			grouped[canonical] = append(grouped[canonical], headerEntry{
+				trimmed:   trimmed,
+				canonical: canonical,
+				values:    values,
+			})
+		}
+
+		for canonical, entries := range grouped {
+			sort.Slice(entries, func(i, j int) bool {
+				iCanonical := entries[i].trimmed == entries[i].canonical
+				jCanonical := entries[j].trimmed == entries[j].canonical
+				if iCanonical != jCanonical {
+					return iCanonical
+				}
+				return entries[i].trimmed < entries[j].trimmed
+			})
+
+			merged := make([]string, 0)
+			for _, entry := range entries {
+				merged = append(merged, entry.values...)
 			}
-			if _, exists := params[canonical]; !exists {
-				params[canonical] = values
-			}
+			params[canonical] = merged
 		}
 	}
 	return bindStringSourceDefault(target, params, "header")
@@ -137,10 +160,9 @@ func bindDataDefault(destination any, data map[string][]string, tag string) erro
 	}
 
 	if typ.Kind() != reflect.Struct {
-		if tag == "param" || tag == "query" || tag == "header" {
-			return nil
-		}
-		return errors.New("binding element must be a struct")
+		// 当前字符串源 binder 只支持 struct 和约定的 map 目标；
+		// 其它目标按公开契约保持 no-op。
+		return nil
 	}
 
 	for i := 0; i < typ.NumField(); i++ {

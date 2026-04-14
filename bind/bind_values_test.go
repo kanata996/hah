@@ -361,6 +361,32 @@ func TestBindHeaders_TrimmedNonCanonicalKeysStillBind(t *testing.T) {
 	}
 }
 
+func TestBindHeaders_DuplicateCaseVariantsMergeDeterministically(t *testing.T) {
+	type request struct {
+		TraceID string   `header:"x-trace-id"`
+		Tags    []string `header:"x-tags"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header = http.Header{
+		"x-trace-id": {"lower-trace"},
+		"X-TRACE-ID": {"upper-trace"},
+		"x-tags":     {"lower-tag"},
+		"X-TAGS":     {"upper-tag-1", "upper-tag-2"},
+	}
+
+	var dst request
+	if err := BindHeaders(req, &dst); err != nil {
+		t.Fatalf("BindHeaders() error = %v", err)
+	}
+	if dst.TraceID != "upper-trace" {
+		t.Fatalf("trace_id = %q, want upper-trace from deterministic normalized order", dst.TraceID)
+	}
+	if !reflect.DeepEqual(dst.Tags, []string{"upper-tag-1", "upper-tag-2", "lower-tag"}) {
+		t.Fatalf("tags = %#v, want merged deterministic order", dst.Tags)
+	}
+}
+
 func TestBindHeaders_BindingErrorsAreBadRequest(t *testing.T) {
 	type request struct {
 		Retry int `header:"x-retry"`
