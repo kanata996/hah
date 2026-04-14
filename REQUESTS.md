@@ -2,10 +2,12 @@
 
 这份文档聚焦 `hah` 的输入侧能力，覆盖两个核心包：
 
-- `bind`：负责把 path / query / header / body 绑定到 Go 目标值
 - `reqx`：负责 request helper、`RequireBody`、`InvalidRequest` 和公开 violations
+- `bind`：负责把 path / query / header / body 绑定到 Go 目标值
 
 `hah` 是 `net/http`-first 的设计，不提供额外的请求上下文抽象，也不内建 validation engine。它围绕标准库 `*http.Request`、显式 binding 和显式 post-bind validation 组织 API。
+
+当前设计里，`reqx.Path(...)` / `reqx.Query(...)` 是请求侧核心 API；`bind.Bind*` / `hah.Bind*` 是 DTO 场景下的补充能力。
 
 ## 先看选型
 
@@ -77,6 +79,12 @@ tags, err := hah.Query(r, "tag").Values().Get()
 - `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` violation
 - `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
 - `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
+
+这套 `Path / Query` 分工是当前请求侧核心设计：
+
+- `Path` 代表资源标识型输入，保持窄而清晰
+- `Query` 代表更宽的参数语义，允许 richer scalar helpers 与重复值读取
+- 调整它们的类型面、链式方法或错误语义时，应按核心 public API 变更对待
 
 ## 用 `bind` 绑定 DTO
 

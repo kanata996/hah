@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -119,28 +118,4 @@ func assertSingleViolation(t *testing.T, err error) Violation {
 		t.Fatalf("details len = %d, want 1", len(violations))
 	}
 	return violations[0]
-}
-
-func assertSameHTTPError(t *testing.T, gotErr, wantErr error) *errx.HTTPError {
-	t.Helper()
-
-	got := assertHTTPErrorLike(t, gotErr)
-	want := assertHTTPErrorLike(t, wantErr)
-
-	if got.Status() != want.Status() || got.Code() != want.Code() || got.Detail() != want.Detail() {
-		t.Fatalf(
-			"got error = (%d, %q, %q), want (%d, %q, %q)",
-			got.Status(),
-			got.Code(),
-			got.Detail(),
-			want.Status(),
-			want.Code(),
-			want.Detail(),
-		)
-	}
-	if !reflect.DeepEqual(got.Errors(), want.Errors()) {
-		t.Fatalf("got error details = %#v, want %#v", got.Errors(), want.Errors())
-	}
-
-	return got
 }

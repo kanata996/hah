@@ -179,6 +179,7 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 至少覆盖：
 
+- `Path` / `Query` 作为请求侧核心 API 的稳定语义
 - `InvalidRequest` / `Violation` 的公开错误语义
 - `RequireBody` 的 body-required 契约
 - 公开 builder 的稳定契约
@@ -186,6 +187,7 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 说明：
 
 - 优先测试 `Path` / `Query` / `RequireBody` / `InvalidRequest` 的公开行为
+- `Path` / `Query` 的类型面、链式方法和 source-aware 错误语义变化，应视为核心 public API 变化
 - 不要求为私有 helper 单独补“分支覆盖测试”
 
 ### 7.4 `errx`

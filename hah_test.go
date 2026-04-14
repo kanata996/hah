@@ -338,11 +338,6 @@ func newRouteRequest(method, target, name, value string) *http.Request {
 	return withRouteParam(req, name, value)
 }
 
-func newRouteJSONRequest(method, target, body, name, value string) *http.Request {
-	req := newJSONRequest(method, target, body)
-	return withRouteParam(req, name, value)
-}
-
 func withRouteParam(req *http.Request, name, value string) *http.Request {
 	req.Pattern = "/{" + name + "}"
 	req.SetPathValue(name, value)

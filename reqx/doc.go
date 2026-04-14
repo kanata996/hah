@@ -5,8 +5,13 @@
 //   - 将常见请求违规统一收敛为稳定的 HTTP 错误
 //   - 提供 body-required 等显式 helper，供调用方在绑定后自行组合规则
 //
+// 当前项目里，reqx.Path(...) / reqx.Query(...) 是请求侧的核心公开 API 之一。
+// 它们负责“不定义 DTO 也能安全读取输入”的主路径；bind 包则补足 DTO 场景下的
+// source-to-struct 映射。调整 Path / Query 的形状、链式能力或错误语义时，
+// 应按核心 public API 变更看待。
+//
 // 典型用法：
-//   - 读取单个 path/query 参数时，使用 Path(...) / Query(...)
+//   - 读取单个 path/query 参数时，优先使用 Path(...) / Query(...)
 //   - 绑定 DTO 时，使用 bind.Bind* 或根包 hah 的 Bind*
 //   - 需要返回统一 invalid_request 错误时，使用 InvalidRequest(...)
 //   - 需要显式要求 body 必填时，使用 RequireBody(...)
@@ -25,7 +30,7 @@
 //   - 公开 violation code 常量：ViolationCodeInvalid、ViolationCodeRequired、
 //     ViolationCodeUnknown、ViolationCodeType、ViolationCodeMultiple
 //   - 公开 violation in 常量：ViolationInBody、ViolationInQuery、
-//     ViolationInPath、ViolationInHeader、ViolationInRequest
+//     ViolationInPath、ViolationInHeader
 //
 // 新增、移除、重命名以上导出符号，或改变其公开语义时，应同步更新本注释与 CHANGELOG。
 //

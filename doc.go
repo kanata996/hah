@@ -1,10 +1,14 @@
 // Package hah 提供根包常用的请求/响应边界入口，聚合 bind、reqx 与 resp 中最常用的一组能力。
 //
 // 适合在大多数 handler 中直接使用：
+//   - 核心 request helper：Path、Query
 //   - 默认请求绑定入口
 //   - 常用 JSON 成功响应辅助
 //   - 统一错误响应写回
 //   - 可定制错误响应器 ErrorResponder
+//
+// 当前项目里，reqx.Path / reqx.Query 与 resp 写回 helper 共同构成最核心的
+// 请求/响应边界表面；bind 则补足 DTO 绑定场景。
 //
 // 公开 API：
 //   - request helper：Path、Query

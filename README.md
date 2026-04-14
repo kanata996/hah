@@ -11,7 +11,7 @@
 ## 特性
 
 - 面向 `net/http` 设计，保留标准 handler 和 router 控制权
-- 支持通过根包 facade 直接读取 path/query 参数
+- 以 `reqx.Path(...)` / `reqx.Query(...)` 作为请求侧核心 API，直接读取 path/query 参数
 - 支持把 path、query、header、body `Bind` 到 DTO
 - 聚焦 HTTP 输入绑定与边界错误，不内建 validation engine
 - 把常见请求违规收敛为稳定的公开 HTTP 错误
@@ -53,11 +53,21 @@ import (
 
 仓库分成五个包：
 
-- `hah`：根包 facade，聚合常用的绑定与响应写回入口
-- `bind`：请求绑定层，负责 path/query/header/body 到目标值的映射
-- `reqx`：request helper 与输入辅助错误层，负责 `Path` / `Query`、`RequireBody`、`InvalidRequest` 和公开 violations
+- `hah`：根包 facade，聚合常用的 request helper、绑定与响应写回入口
+- `reqx`：请求侧核心 helper，负责 `Path` / `Query`、`RequireBody`、`InvalidRequest` 和公开 violations
+- `bind`：DTO 绑定补充层，负责 path/query/header/body 到目标值的映射
 - `errx`：共享公共 HTTP 错误模型
 - `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
+
+## 核心形状
+
+当前设计里，最核心的边界表面是两条线：
+
+- 请求侧：`reqx.Path(...)` / `reqx.Query(...)`
+- 响应侧：`resp.WriteError(...)` / `resp.OK(...)` / `resp.Created(...)` / `resp.NoContent(...)`
+
+其中 `bind.Bind*` / `hah.Bind*` 是 DTO 场景下的补充能力，而不是请求侧主心智。  
+后续如果继续演进，默认应优先稳定这两条核心表面的语义和用法。
 
 ## 适用范围
 
@@ -190,6 +200,8 @@ func main() {
 accountID, err := hah.Path(r, "account_id").UUID().Required().Get()
 tags, err := hah.Query(r, "tag").Values().Get()
 ```
+
+这组 `Path / Query` API 是当前请求侧主设计，行为变化应视为核心 public API 变化。
 
 ## 请求输入文档
 

@@ -18,11 +18,13 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 - Removed the built-in `validator/v10` integration from the core `hah` module.
 - Removed `hah.BindAndValidate(...)` and `reqx.Validate(...)`; request binding now stops at `Bind*`, and post-bind validation is fully caller-defined.
 - Removed the `reqx.Normalizer` and `reqx.RequestValidator` DTO lifecycle hooks from the public API.
+- Removed `reqx.ViolationInRequest`; public invalid-request helpers now expose only concrete input locations (`body`, `query`, `path`, `header`).
 
 ### Changed
 
 - Repositioned `reqx` around request helpers and explicit invalid-request helpers such as `RequireBody(...)` and `InvalidRequest(...)`.
 - Reworked the bundled `net/http` and `chi` examples to demonstrate explicit `Bind(...) -> validate` flows instead of framework-owned validation.
+- Clarified `reqx.Path(...)` / `reqx.Query(...)` as request-side core APIs and tightened their contract-focused documentation/testing.
 
 ### Documentation
 
