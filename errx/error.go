@@ -223,7 +223,10 @@ func normalizeErrorTitle(status int) string {
 	if text := http.StatusText(status); text != "" {
 		return text
 	}
-	return http.StatusText(http.StatusInternalServerError)
+	if status >= 500 {
+		return http.StatusText(http.StatusInternalServerError)
+	}
+	return "Client Error"
 }
 
 // normalizeErrorDetail 根据状态码补齐默认公共错误详情。

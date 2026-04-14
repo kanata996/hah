@@ -289,6 +289,12 @@ if err := reqx.Validate(r, &headers, reqx.SourceHeader); err != nil {
 - validator 字段别名优先读取哪些 tag
 - violation 的 `in` 字段写成 `body` / `query` / `path` / `header` / `request`
 
+其中 `reqx.SourceRequest` 还有一个额外约束：
+
+- 如果同一字段在多个来源 tag 上用了同一个输入名，violation 会继续使用这个共享输入名
+- 如果同一字段在多个来源 tag 上用了不同输入名，violation 会回退为 struct 字段名，避免把某个来源名误报为 request 级字段名
+- 对默认 `BindAndValidate` 路径，推荐多来源复用字段保持同名；如果来源名本来就不同，优先拆成不同 DTO 字段再自行归并
+
 当前可用值：
 
 - `reqx.SourceBody`

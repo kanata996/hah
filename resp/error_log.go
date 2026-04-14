@@ -10,7 +10,7 @@ package resp
 // 职责：
 //   - 从 error / HTTPError 提取更适合排障的结构化字段。
 //   - request log 只补低噪音诊断字段；独立 error log 保留完整诊断摘要。
-//   - 在不泄露不可控内部对象的前提下，尽量保留原始错误文本、类型以及首层/根因摘要。
+//   - 在不泄露不可控内部对象的前提下，尽量保留原始错误文本、类型以及首层/尾部摘要。
 //   - 仅在“错误响应自身写出失败”这类基础设施异常时，额外输出一条独立 error 日志。
 //
 // 要点：
@@ -36,7 +36,7 @@ const (
 	maxLoggedErrorStringBytes = 1024
 )
 
-type errorChainInfo struct {
+type diagnosticErrorSummary struct {
 	message     string
 	errorType   string
 	rootMessage string
@@ -80,21 +80,21 @@ func diagnosticErrorLogAttrsWithSource(err error, httpErr *errx.HTTPError, prefe
 	if preferHTTPErrorCause {
 		diagnosticSource = errorForDiagnostics(err, httpErr)
 	}
-	chain := buildErrorChainInfo(diagnosticSource)
+	summary := summarizeDiagnosticError(diagnosticSource)
 	attrs := make([]slog.Attr, 0, 7)
 	attrs = append(attrs, slog.String("error.code", httpErr.Code()))
-	if chain.message != "" {
-		attrs = append(attrs, slog.String("error.message", chain.message))
+	if summary.message != "" {
+		attrs = append(attrs, slog.String("error.message", summary.message))
 	}
-	if chain.errorType != "" {
-		attrs = append(attrs, slog.String("error.type", chain.errorType))
+	if summary.errorType != "" {
+		attrs = append(attrs, slog.String("error.type", summary.errorType))
 	}
 
-	if chain.rootMessage != "" {
-		attrs = append(attrs, slog.String("error.root_message", chain.rootMessage))
+	if summary.rootMessage != "" {
+		attrs = append(attrs, slog.String("error.root_message", summary.rootMessage))
 	}
-	if chain.rootType != "" {
-		attrs = append(attrs, slog.String("error.root_type", chain.rootType))
+	if summary.rootType != "" {
+		attrs = append(attrs, slog.String("error.root_type", summary.rootType))
 	}
 	if errors.Is(err, context.Canceled) {
 		attrs = append(attrs, slog.Bool("error.canceled", true))
@@ -107,7 +107,7 @@ func diagnosticErrorLogAttrsWithSource(err error, httpErr *errx.HTTPError, prefe
 }
 
 // errorForDiagnostics 返回用于日志诊断的起始 error。
-// 如果 HTTPError 已包住原始 cause，则优先从 cause 开始展开错误链，
+// 如果 HTTPError 已包住原始 cause，则优先从 cause 开始构建单链诊断摘要，
 // 避免把 *HTTPError 本身误当成主要错误类型。
 func errorForDiagnostics(err error, httpErr *errx.HTTPError) error {
 	if httpErr != nil {
@@ -159,10 +159,6 @@ func (r *ErrorResponder) logServerError(req *http.Request, httpErr *errx.HTTPErr
 }
 
 func (r *ErrorResponder) logServerErrorAttrs(req *http.Request, httpErr *errx.HTTPError, diagnosticAttrs []slog.Attr) {
-	if httpErr == nil || httpErr.Status() < http.StatusInternalServerError {
-		return
-	}
-
 	ctx := context.Background()
 	if req != nil {
 		ctx = req.Context()
@@ -178,121 +174,45 @@ func (r *ErrorResponder) logServerErrorAttrs(req *http.Request, httpErr *errx.HT
 	r.logger().LogAttrs(ctx, slog.LevelError, "resp: request failed with server error", attrs...)
 }
 
-// buildErrorChainInfo 把错误链整理成适合日志输出的摘要结构。
-// 它只保留请求日志会消费的首层/根因 message 与 type 摘要。
-func buildErrorChainInfo(err error) errorChainInfo {
-	chain := flattenErrorChain(err, maxLoggedErrorChainDepth)
-	if len(chain) == 0 {
-		return errorChainInfo{}
-	}
-
-	var info errorChainInfo
-	for _, item := range chain {
-		// 某些异常 error 实现（例如 typed-nil 或不安全的 Error()）可能在这里 panic。
-		// 日志诊断路径不能反向把主错误处理打崩，因此统一做恢复并降级为说明性文本。
-		message := safeErrorString(item)
-		errType := errorTypeName(item)
+// summarizeDiagnosticError 只沿单链 Unwrap 语义提取错误摘要。
+// 这足以覆盖 Go 常见包装错误场景，同时避免在 resp 内部维护整套错误图分析逻辑。
+func summarizeDiagnosticError(err error) diagnosticErrorSummary {
+	var summary diagnosticErrorSummary
+	current := err
+	for depth := 0; current != nil && depth < maxLoggedErrorChainDepth; depth++ {
+		message := safeErrorString(current)
+		errType := errorTypeName(current)
 		if message != "" {
-			if info.message == "" {
-				info.message = message
+			if summary.message == "" {
+				summary.message = message
 			}
-			info.rootMessage = message
+			summary.rootMessage = message
 		}
 		if errType != "" {
-			if info.errorType == "" {
-				info.errorType = errType
+			if summary.errorType == "" {
+				summary.errorType = errType
 			}
-			info.rootType = errType
+			summary.rootType = errType
 		}
+
+		current = unwrapError(current)
 	}
 
-	return info
+	return summary
 }
 
-// flattenErrorChain 按 Unwrap 语义展开错误链，并限制深度、防止循环。
-// 这样可以兼容标准单链 unwrap，也兼容 errors.Join 形成的多分支链路。
-func flattenErrorChain(err error, limit int) []error {
-	if err == nil || limit <= 0 {
-		return nil
-	}
-
-	initialCap := limit
-	if initialCap > 4 {
-		initialCap = 4
-	}
-	seen := make(map[error]struct{}, initialCap)
-	chain := make([]error, 0, initialCap)
-	stack := make([]error, 1, initialCap)
-	stack[0] = err
-
-	for len(stack) > 0 && len(chain) < limit {
-		last := len(stack) - 1
-		current := stack[last]
-		stack = stack[:last]
-		if current == nil {
-			continue
-		}
-		// error 接口底层可能承载“不可比较类型”（例如包含 slice/map 的 struct）。
-		// 这类值一旦作为 map key 会直接 panic，所以只能在可比较时参与去重；
-		// 对不可比较 error 则退化为仅依赖深度上限来防止无限展开。
-		if isComparableError(current) {
-			if _, ok := seen[current]; ok {
-				continue
-			}
-			seen[current] = struct{}{}
-		}
-		chain = append(chain, current)
-
-		unwrapped := unwrapErrors(current)
-		remaining := limit - len(chain) - len(stack)
-		if remaining <= 0 {
-			continue
-		}
-
-		// 预算不足时优先保留更靠前的分支，避免 errors.Join(...) 在截断后
-		// 偏向后面的子错误；同时也确保 stack 不会因宽 join 无界增长。
-		if len(unwrapped) > remaining {
-			unwrapped = unwrapped[:remaining]
-		}
-		for i := len(unwrapped) - 1; i >= 0; i-- {
-			stack = append(stack, unwrapped[i])
-		}
-	}
-
-	return chain
-}
-
-// isComparableError 判断当前 error 是否可安全作为 map key 使用。
-func isComparableError(err error) bool {
+// unwrapError 只兼容单个 Unwrap() error。
+// 如果 Unwrap() 本身不安全，则降级为停止下钻，不反向影响错误响应主流程。
+func unwrapError(err error) (next error) {
 	if err == nil {
-		return false
-	}
-	errType := reflect.TypeOf(err)
-	return errType != nil && errType.Comparable()
-}
-
-// unwrapErrors 统一兼容单个 Unwrap() error 和多个 Unwrap() []error 的错误类型。
-func unwrapErrors(err error) (errs []error) {
-	type multiUnwrapper interface {
-		Unwrap() []error
+		return nil
 	}
 	defer func() {
 		if recover() != nil {
-			// 某些第三方 error 的 Unwrap() 可能在 nil receiver 或坏状态下 panic。
-			// 日志注解只做诊断，不应该因为展开失败而影响主流程，因此这里直接降级停止下钻。
-			errs = nil
+			next = nil
 		}
 	}()
-
-	switch current := err.(type) {
-	case multiUnwrapper:
-		return current.Unwrap()
-	default:
-		if next := errors.Unwrap(err); next != nil {
-			return []error{next}
-		}
-		return nil
-	}
+	return errors.Unwrap(err)
 }
 
 // errorTypeName 返回 error 的 Go 运行时类型名，便于按类型聚合和检索。

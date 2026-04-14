@@ -9,14 +9,6 @@ import (
 	"testing"
 )
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `RequireBody` 会沿用默认 binder 的 empty-body 判定并返回统一 invalid_request。
-// - [✓] `InvalidRequest` 会维持公开 invalid_request 包络与常见 violation code 的稳定契约。
-// - [✓] `applyRequestValidation` 会维持请求级规则 helper 的稳定契约。
-// - [✓] `BindAndValidate` 与 `bind + Validate(Source*)` 会在字段校验之前执行请求级规则，并允许规则读取 Normalize 后的 DTO。
-// - [✓] mixed-source DTO 可通过 `ValidateRequest` 为可选字段 body 显式声明 body-required 契约。
-
 type requestRuleNormalizedRequest struct {
 	Name   string    `json:"name" validate:"required,nospace"`
 	events *[]string `json:"-"`
@@ -146,12 +138,6 @@ func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
 				t.Fatalf("violation = %#v, want %#v", violation, tc.want)
 			}
 		})
-	}
-}
-
-func TestApplyRequestValidationNoValidator(t *testing.T) {
-	if err := applyRequestValidation(newJSONRequest(http.MethodGet, "/", ""), struct{}{}); err != nil {
-		t.Fatalf("applyRequestValidation(no validator) error = %v", err)
 	}
 }
 

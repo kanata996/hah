@@ -8,17 +8,6 @@ import (
 	"testing"
 )
 
-// 测试清单：
-// [✓] Created / JSON / JSONBlob 按约定写出 JSON、状态码和 Content-Type
-// [✓] Created / JSON / OK 稳定输出紧凑 JSON；接口不依赖 request 上下文
-// [✓] JSON 拒绝 nil writer、非法状态码、无响应体状态和不可编码值；OK 拒绝 nil writer、nil data 和不可编码值
-// [✓] Created 拒绝 nil data、不可编码值和 nil writer
-// [✓] JSONBlob 直接原样透传 JSON 字节，不做合法性校验，并拒绝 nil writer、非法状态和无响应体状态
-// [✓] JSONBlob 在 nil body 和空 body 下的透传行为
-// [✓] NoContent 只写 204 状态，不写 body，也不设置 Content-Type；nil writer 会返回错误
-// [✓] writeJSON / writeSuccess 会把编码错误和状态校验错误直接向上返回
-// [✓] Created / OK 拒绝编码为 JSON null 的 typed nil 指针数据
-
 type payloadMap map[string]any
 
 // Created 会以 201 状态直接写出 JSON 对象。
@@ -129,16 +118,6 @@ func TestJSONWriterCanCooperateWithHeadLikeWriter(t *testing.T) {
 	}
 }
 
-func TestJSONWithoutRequestContextStillValidatesPayload(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	err := JSON(rr, http.StatusOK, make(chan int))
-	if err == nil || err.Error() != "json: unsupported type: chan int" {
-		t.Fatalf("JSON() error = %v, want unsupported type error", err)
-	}
-	assertRecorderHasNoBodyOrContentType(t, rr)
-}
-
 // Created 会拒绝空的 ResponseWriter。
 func TestCreatedRejectsNilWriter(t *testing.T) {
 	err := Created(nil, map[string]any{"id": "u_1"})
@@ -215,33 +194,6 @@ func TestJSONBlobCanCooperateWithHeadLikeWriter(t *testing.T) {
 	}
 }
 
-func TestJSONBlobRejectsNilWriterWithoutRequest(t *testing.T) {
-	err := JSONBlob(nil, http.StatusOK, []byte(`{"id":"u_1"}`))
-	if err == nil || err.Error() != "resp: response writer is nil" {
-		t.Fatalf("JSONBlob() error = %v, want response writer is nil", err)
-	}
-}
-
-func TestJSONBlobRejectsInvalidStatusWithoutRequest(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	err := JSONBlob(rr, 1000, []byte(`{"id":"u_1"}`))
-	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
-		t.Fatalf("JSONBlob() error = %v, want invalid HTTP status", err)
-	}
-	assertRecorderHasNoBodyOrContentType(t, rr)
-}
-
-func TestJSONBlobRejectsBodylessStatusWithoutRequest(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	err := JSONBlob(rr, http.StatusNoContent, []byte(`{"id":"u_1"}`))
-	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 204" {
-		t.Fatalf("JSONBlob() error = %v, want bodyless status error", err)
-	}
-	assertRecorderHasNoBodyOrContentType(t, rr)
-}
-
 // JSONBlob 直接透传字节，不负责校验其是否是合法 JSON。
 func TestJSONBlobPassesThroughInvalidJSONBytes(t *testing.T) {
 	rr := httptest.NewRecorder()
@@ -290,37 +242,46 @@ func TestJSONBlobWritesEmptyBody(t *testing.T) {
 	}
 }
 
-// JSONBlob 也会拒绝空的 ResponseWriter。
-func TestJSONBlobRejectsNilWriter(t *testing.T) {
-	err := JSONBlob(nil, http.StatusOK, []byte(`{"id":"u_1"}`))
-	if err == nil || err.Error() != "resp: response writer is nil" {
-		t.Fatalf("JSONBlob() error = %v, want response writer is nil", err)
+func TestJSONBlobRejectsInvalidInputs(t *testing.T) {
+	testCases := []struct {
+		name      string
+		status    int
+		newWriter func() http.ResponseWriter
+		wantErr   string
+	}{
+		{
+			name:      "nil writer",
+			status:    http.StatusOK,
+			newWriter: func() http.ResponseWriter { return nil },
+			wantErr:   "resp: response writer is nil",
+		},
+		{
+			name:      "invalid status",
+			status:    1000,
+			newWriter: func() http.ResponseWriter { return httptest.NewRecorder() },
+			wantErr:   "resp: invalid HTTP status 1000",
+		},
+		{
+			name:      "bodyless status",
+			status:    http.StatusNoContent,
+			newWriter: func() http.ResponseWriter { return httptest.NewRecorder() },
+			wantErr:   "resp: JSON body writers cannot use bodyless status 204",
+		},
 	}
-}
 
-// JSONBlob 也必须拒绝不允许响应体的状态码。
-func TestJSONBlobRejectsBodylessStatus(t *testing.T) {
-	rr := httptest.NewRecorder()
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := tc.newWriter()
+			err := JSONBlob(w, tc.status, []byte(`{"id":"u_1"}`))
+			if err == nil || err.Error() != tc.wantErr {
+				t.Fatalf("JSONBlob() error = %v, want %q", err, tc.wantErr)
+			}
 
-	err := JSONBlob(rr, http.StatusNoContent, []byte(`{"id":"u_1"}`))
-	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 204" {
-		t.Fatalf("JSONBlob() error = %v, want bodyless status error", err)
-	}
-	if rr.Body.Len() != 0 {
-		t.Fatalf("body = %q, want empty", rr.Body.String())
-	}
-	if got := rr.Header().Get("Content-Type"); got != "" {
-		t.Fatalf("Content-Type = %q, want empty", got)
-	}
-}
-
-// JSONBlob 也会拒绝非法的 HTTP 状态码。
-func TestJSONBlobRejectsInvalidStatus(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	err := JSONBlob(rr, 1000, []byte(`{"id":"u_1"}`))
-	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
-		t.Fatalf("JSONBlob() error = %v, want invalid HTTP status", err)
+			rr, ok := w.(*httptest.ResponseRecorder)
+			if ok {
+				assertRecorderHasNoBodyOrContentType(t, rr)
+			}
+		})
 	}
 }
 
@@ -534,73 +495,63 @@ func TestNoContentWithoutRequest(t *testing.T) {
 	}
 }
 
-// writeJSON 会把底层编码错误直接向上返回。
-func TestWriteJSONPropagatesEncodeError(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	err := writeJSON(rr, http.StatusOK, make(chan int))
-	if err == nil || err.Error() != "json: unsupported type: chan int" {
-		t.Fatalf("writeJSON() error = %v, want unsupported type error", err)
+func TestSuccessBodyWritersReturnWrappedWriteError(t *testing.T) {
+	testCases := []struct {
+		name       string
+		wantStatus int
+		write      func(http.ResponseWriter) error
+	}{
+		{
+			name:       "JSON",
+			wantStatus: http.StatusAccepted,
+			write: func(w http.ResponseWriter) error {
+				return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"})
+			},
+		},
+		{
+			name:       "OK",
+			wantStatus: http.StatusOK,
+			write: func(w http.ResponseWriter) error {
+				return OK(w, map[string]any{"id": "u_1"})
+			},
+		},
+		{
+			name:       "Created",
+			wantStatus: http.StatusCreated,
+			write: func(w http.ResponseWriter) error {
+				return Created(w, map[string]any{"id": "u_1"})
+			},
+		},
+		{
+			name:       "JSONBlob",
+			wantStatus: http.StatusAccepted,
+			write: func(w http.ResponseWriter) error {
+				return JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`))
+			},
+		},
 	}
-	assertRecorderHasNoBodyOrContentType(t, rr)
-}
 
-// writeJSON 会把底层状态校验错误直接向上返回。
-func TestWriteJSONPropagatesStatusValidationError(t *testing.T) {
-	err := writeJSON(httptest.NewRecorder(), 1000, map[string]any{"id": "u_1"})
-	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
-		t.Fatalf("writeJSON() error = %v, want invalid HTTP status", err)
-	}
-}
-
-// writeJSON 应先校验响应边界，再进行编码，避免非法状态掩盖更根本的写回错误。
-func TestWriteJSONValidatesStatusBeforeEncoding(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	err := writeJSON(rr, http.StatusNoContent, panicSuccessJSONValue{})
-	if err == nil || err.Error() != "resp: JSON body writers cannot use bodyless status 204" {
-		t.Fatalf("writeJSON() error = %v, want bodyless status error", err)
-	}
-	assertRecorderHasNoBodyOrContentType(t, rr)
-}
-
-// writeSuccess 会拒绝非成功状态码。
-func TestWriteSuccessRejectsInvalidStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), http.StatusBadRequest, map[string]any{"id": "u_1"})
-	if err == nil || err.Error() != "resp: invalid success status 400" {
-		t.Fatalf("writeSuccess() error = %v, want invalid success status", err)
-	}
-}
-
-// writeSuccess 也会先拒绝非法的 HTTP 状态码数值。
-func TestWriteSuccessRejectsInvalidHTTPStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), 1000, map[string]any{"id": "u_1"})
-	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
-		t.Fatalf("writeSuccess() error = %v, want invalid HTTP status", err)
-	}
-}
-
-// writeSuccess 会拒绝无法携带响应体的状态码。
-func TestWriteSuccessRejectsBodylessStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), http.StatusNoContent, map[string]any{"id": "u_1"})
-	if err == nil || err.Error() != "resp: success writers with a body cannot use bodyless status 204" {
-		t.Fatalf("writeSuccess() error = %v, want bodyless status error", err)
-	}
-}
-
-// writeSuccess 会拒绝 1xx informational 状态。
-func TestWriteSuccessRejectsInformationalStatus(t *testing.T) {
-	err := writeSuccess(httptest.NewRecorder(), http.StatusContinue, map[string]any{"id": "u_1"})
-	if err == nil || err.Error() != "resp: success writers with a body cannot use informational status 100" {
-		t.Fatalf("writeSuccess() error = %v, want informational status error", err)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			w := &failingWriter{}
+			err := tc.write(w)
+			writeErr := assertWrappedResponseWriteError(t, err)
+			if !writeErr.responseStarted {
+				t.Fatal("responseStarted = false, want true")
+			}
+			if w.status != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", w.status, tc.wantStatus)
+			}
+			if w.writes != 1 {
+				t.Fatalf("writes = %d, want 1", w.writes)
+			}
+		})
 	}
 }
 
-// 写响应体失败时会返回带 responseStarted 标记的包装错误。
-func TestWriteJSONBytesReturnsWrappedWriteError(t *testing.T) {
-	w := &failingWriter{}
+func assertWrappedResponseWriteError(t *testing.T, err error) *responseWriteError {
+	t.Helper()
 
-	err := writeJSONBytes(w, http.StatusOK, []byte(`{"id":"u_1"}`))
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -609,9 +560,7 @@ func TestWriteJSONBytesReturnsWrappedWriteError(t *testing.T) {
 	if !errors.As(err, &writeErr) {
 		t.Fatalf("error = %T, want *responseWriteError", err)
 	}
-	if !writeErr.responseStarted {
-		t.Fatal("responseStarted = false, want true")
-	}
+	return writeErr
 }
 
 func decodePayload(t *testing.T, body []byte) payloadMap {

@@ -1,12 +1,5 @@
 package resp
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `JSON` / `OK` / `Created` 在任意字符串 payload 输入下维持稳定写回契约。
-// - [✓] `JSONBlob` 在任意原始字节与状态码输入下维持 raw bytes 透传与拒绝契约。
-// - [✓] `WriteError` 在任意公开 detail、状态码和常见 error 变体下维持稳定的公共错误契约且不泄漏内部 cause。
-// - [✓] 本文件提供单一 `FuzzRespPublicContracts` 入口，可直接配合仓库规范中的 `-fuzz=Fuzz` 执行。
-
 import (
 	"bytes"
 	"context"
@@ -65,8 +58,8 @@ func fuzzSuccessWriterContracts(t *testing.T, variant uint8, status int, value, 
 		err := JSON(rr, status, payload)
 		assertJSONWriterResult(t, rr, err, status, payload)
 	case 1:
-		err := JSON(rr, status, payload)
-		assertJSONWriterResult(t, rr, err, status, payload)
+		err := JSON(rr, status, nil)
+		assertJSONNullWriterResult(t, rr, err, status)
 	case 2:
 		err := OK(rr, payload)
 		assertRecorderJSONSuccess(t, rr, err, http.StatusOK, payload)
@@ -88,6 +81,31 @@ func assertJSONWriterResult(t *testing.T, rr *httptest.ResponseRecorder, err err
 	}
 
 	assertRecorderJSONSuccess(t, rr, err, status, payload)
+}
+
+func assertJSONNullWriterResult(t *testing.T, rr *httptest.ResponseRecorder, err error, status int) {
+	t.Helper()
+
+	if wantErr := wantBodyWriterError("JSON body writers", status); wantErr != "" {
+		if err == nil || err.Error() != wantErr {
+			t.Fatalf("writer error = %v, want %q", err, wantErr)
+		}
+		assertRecorderHasNoBodyOrContentType(t, rr)
+		return
+	}
+
+	if err != nil {
+		t.Fatalf("writer error = %v", err)
+	}
+	if rr.Code != status {
+		t.Fatalf("status = %d, want %d", rr.Code, status)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	if got := rr.Body.String(); got != "null\n" {
+		t.Fatalf("body = %q, want %q", got, "null\n")
+	}
 }
 
 func assertRecorderJSONSuccess(t *testing.T, rr *httptest.ResponseRecorder, err error, status int, payload map[string]string) {

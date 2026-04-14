@@ -14,13 +14,6 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `NewErrorResponder` 与零值 `ErrorResponder` 的默认 fallback 契约。
-// - [✓] `ErrorResponder` 的自定义 `Logger` / `AsHTTPError` / `ContextAttrs` / `RequestLogAttrs` / `AnnotateRequestLog` 会通过 `Respond` 生效。
-// - [✓] `ErrorResponder` 仅在 5xx 请求日志补低噪音 `error.*` 字段，并对 canceled / timeout 保持稳定标记；4xx 不补这些字段也不额外打独立错误日志。
-// - [✓] `Respond` 对 nil error / nil request / nil writer 的边界安全退化。
-
 func TestNewErrorResponderRespondUsesDefaultFallbacks(t *testing.T) {
 	responder := NewErrorResponder()
 	if responder == nil {

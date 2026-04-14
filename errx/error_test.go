@@ -18,15 +18,195 @@ func (blankWriteCause) Error() string {
 	return "   "
 }
 
-// 测试清单：
-// [✓] nil 接收者返回安全默认值
-// [✓] cause、Error、Unwrap、Detail、Errors 的公开语义稳定
-// [✓] Detail 和 Errors 对外暴露标准化后的字段，并在构造时与读取时都做防御性切片拷贝
-// [✓] 常用错误构造器输出稳定的状态码、错误码和公开消息
-// [✓] 状态码、错误码、标题、详情标准化包含 499 特例
-// [✓] errors.Is / errors.As 标准 error 链互操作
-// [✓] 快捷构造器自定义 code/detail 透传
-// [✓] 构造时不传 errors 时 Errors() 返回 nil
+type standardHTTPErrorConstructorCase struct {
+	name       string
+	build      func(string, string, ...any) *HTTPError
+	wantStatus int
+	wantCode   string
+}
+
+type normalizedHTTPErrorPublicFieldCase struct {
+	name       string
+	status     int
+	code       string
+	detail     string
+	wantStatus int
+	wantCode   string
+	wantTitle  string
+	wantDetail string
+}
+
+var standardHTTPErrorConstructors = []standardHTTPErrorConstructorCase{
+	{
+		name:       "bad request",
+		build:      BadRequest,
+		wantStatus: http.StatusBadRequest,
+		wantCode:   "bad_request",
+	},
+	{
+		name:       "unauthorized",
+		build:      Unauthorized,
+		wantStatus: http.StatusUnauthorized,
+		wantCode:   "unauthorized",
+	},
+	{
+		name:       "forbidden",
+		build:      Forbidden,
+		wantStatus: http.StatusForbidden,
+		wantCode:   "forbidden",
+	},
+	{
+		name:       "not found",
+		build:      NotFound,
+		wantStatus: http.StatusNotFound,
+		wantCode:   "not_found",
+	},
+	{
+		name:       "method not allowed",
+		build:      MethodNotAllowed,
+		wantStatus: http.StatusMethodNotAllowed,
+		wantCode:   "method_not_allowed",
+	},
+	{
+		name:       "conflict",
+		build:      Conflict,
+		wantStatus: http.StatusConflict,
+		wantCode:   "conflict",
+	},
+	{
+		name:       "unprocessable entity",
+		build:      UnprocessableEntity,
+		wantStatus: http.StatusUnprocessableEntity,
+		wantCode:   "unprocessable_entity",
+	},
+	{
+		name:       "too many requests",
+		build:      TooManyRequests,
+		wantStatus: http.StatusTooManyRequests,
+		wantCode:   "too_many_requests",
+	},
+}
+
+var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
+	{
+		name:       "explicit code and detail are trimmed",
+		status:     http.StatusBadRequest,
+		code:       " invalid_json ",
+		detail:     " invalid payload ",
+		wantStatus: http.StatusBadRequest,
+		wantCode:   "invalid_json",
+		wantTitle:  http.StatusText(http.StatusBadRequest),
+		wantDetail: "invalid payload",
+	},
+	{
+		name:       "gateway timeout uses timeout code",
+		status:     http.StatusGatewayTimeout,
+		wantStatus: http.StatusGatewayTimeout,
+		wantCode:   "timeout",
+		wantTitle:  http.StatusText(http.StatusGatewayTimeout),
+		wantDetail: http.StatusText(http.StatusGatewayTimeout),
+	},
+	{
+		name:       "service unavailable uses service unavailable code",
+		status:     http.StatusServiceUnavailable,
+		wantStatus: http.StatusServiceUnavailable,
+		wantCode:   "service_unavailable",
+		wantTitle:  http.StatusText(http.StatusServiceUnavailable),
+		wantDetail: http.StatusText(http.StatusServiceUnavailable),
+	},
+	{
+		name:       "client closed request supports 499",
+		status:     499,
+		wantStatus: 499,
+		wantCode:   "client_closed_request",
+		wantTitle:  "Client Closed Request",
+		wantDetail: "Client Closed Request",
+	},
+	{
+		name:       "other client error falls back to client error code",
+		status:     http.StatusTeapot,
+		wantStatus: http.StatusTeapot,
+		wantCode:   "client_error",
+		wantTitle:  http.StatusText(http.StatusTeapot),
+		wantDetail: http.StatusText(http.StatusTeapot),
+	},
+	{
+		name:       "unknown client error without status text falls back to client error public message",
+		status:     430,
+		wantStatus: 430,
+		wantCode:   "client_error",
+		wantTitle:  "Client Error",
+		wantDetail: "Client Error",
+	},
+	{
+		name:       "invalid status falls back to internal server error",
+		status:     http.StatusOK,
+		wantStatus: http.StatusInternalServerError,
+		wantCode:   "internal_error",
+		wantTitle:  http.StatusText(http.StatusInternalServerError),
+		wantDetail: http.StatusText(http.StatusInternalServerError),
+	},
+	{
+		name:       "unknown 5xx preserves status and falls back to internal error public message",
+		status:     509,
+		wantStatus: 509,
+		wantCode:   "internal_error",
+		wantTitle:  http.StatusText(http.StatusInternalServerError),
+		wantDetail: http.StatusText(http.StatusInternalServerError),
+	},
+}
+
+func assertHTTPErrorStatusAndCode(t *testing.T, err *HTTPError, wantStatus int, wantCode string) {
+	t.Helper()
+
+	if got := err.Status(); got != wantStatus {
+		t.Fatalf("Status() = %d, want %d", got, wantStatus)
+	}
+	if got := err.Code(); got != wantCode {
+		t.Fatalf("Code() = %q, want %q", got, wantCode)
+	}
+}
+
+func assertHTTPErrorPublicFields(t *testing.T, err *HTTPError, wantStatus int, wantCode, wantTitle, wantDetail string) {
+	t.Helper()
+
+	assertHTTPErrorStatusAndCode(t, err, wantStatus, wantCode)
+	if got := err.Title(); got != wantTitle {
+		t.Fatalf("Title() = %q, want %q", got, wantTitle)
+	}
+	if got := err.Detail(); got != wantDetail {
+		t.Fatalf("Detail() = %q, want %q", got, wantDetail)
+	}
+}
+
+func assertHTTPErrorUsesStatusTextPublicMessage(t *testing.T, err *HTTPError, wantStatus int) {
+	t.Helper()
+
+	want := http.StatusText(wantStatus)
+	if got := err.Title(); got != want {
+		t.Fatalf("Title() = %q, want %q", got, want)
+	}
+	if got := err.Detail(); got != want {
+		t.Fatalf("Detail() = %q, want %q", got, want)
+	}
+	if got := err.Error(); got != want {
+		t.Fatalf("Error() = %q, want %q", got, want)
+	}
+}
+
+func assertHTTPErrorErrors(t *testing.T, err *HTTPError, want ...string) {
+	t.Helper()
+
+	got := err.Errors()
+	if len(got) != len(want) {
+		t.Fatalf("Errors() = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Errors() = %#v, want %#v", got, want)
+		}
+	}
+}
 
 // nil 的 HTTPError 接收者应返回一组安全默认值，避免调用方二次判空。
 func TestHTTPErrorNilReceiverUsesSafeDefaults(t *testing.T) {
@@ -52,6 +232,61 @@ func TestHTTPErrorNilReceiverUsesSafeDefaults(t *testing.T) {
 	}
 	if got := err.Errors(); got != nil {
 		t.Fatalf("Errors() = %#v, want nil", got)
+	}
+}
+
+// 零值和内部脏值的 HTTPError 也应通过 getter 收敛到稳定公开契约。
+func TestHTTPErrorGettersNormalizeZeroAndDirtyValues(t *testing.T) {
+	testCases := []struct {
+		name       string
+		err        HTTPError
+		wantStatus int
+		wantCode   string
+		wantTitle  string
+		wantDetail string
+		wantError  string
+	}{
+		{
+			name:       "zero value falls back to internal server error contract",
+			err:        HTTPError{},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "internal_error",
+			wantTitle:  http.StatusText(http.StatusInternalServerError),
+			wantDetail: http.StatusText(http.StatusInternalServerError),
+			wantError:  http.StatusText(http.StatusInternalServerError),
+		},
+		{
+			name:       "invalid internal fields are normalized again",
+			err:        HTTPError{status: http.StatusOK, code: "   ", detail: "   "},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "internal_error",
+			wantTitle:  http.StatusText(http.StatusInternalServerError),
+			wantDetail: http.StatusText(http.StatusInternalServerError),
+			wantError:  http.StatusText(http.StatusInternalServerError),
+		},
+		{
+			name:       "499 internal state keeps non standard public contract",
+			err:        HTTPError{status: 499, code: "   ", detail: "   "},
+			wantStatus: 499,
+			wantCode:   "client_closed_request",
+			wantTitle:  "Client Closed Request",
+			wantDetail: "Client Closed Request",
+			wantError:  "Client Closed Request",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.err
+
+			assertHTTPErrorPublicFields(t, &err, tc.wantStatus, tc.wantCode, tc.wantTitle, tc.wantDetail)
+			if got := err.Error(); got != tc.wantError {
+				t.Fatalf("Error() = %q, want %q", got, tc.wantError)
+			}
+			if got := err.Errors(); got != nil {
+				t.Fatalf("Errors() = %#v, want nil", got)
+			}
+		})
 	}
 }
 
@@ -141,6 +376,23 @@ func TestNewHTTPErrorClonesInputErrorsSlice(t *testing.T) {
 	}
 }
 
+// NewHTTPErrorWithCause 也应在构造时拷贝 errors 入参，不能因保留 cause 而泄漏调用方后续修改。
+func TestNewHTTPErrorWithCauseClonesInputErrorsSlice(t *testing.T) {
+	input := []any{"detail"}
+	cause := errors.New("db timeout")
+	err := NewHTTPErrorWithCause(http.StatusConflict, "conflict", "conflict detail", cause, input...)
+
+	input[0] = "changed"
+
+	gotErrors := err.Errors()
+	if len(gotErrors) != 1 || gotErrors[0] != "detail" {
+		t.Fatalf("Errors() = %#v, want original [detail]", gotErrors)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("errors.Is(%v, %v) = false, want true", err, cause)
+	}
+}
+
 // 没有 cause 时，HTTPError.Error 会回退为公开消息本身。
 func TestHTTPErrorErrorReturnsMessageWithoutCause(t *testing.T) {
 	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")
@@ -159,186 +411,68 @@ func TestHTTPErrorErrorFallsBackToNormalizedDetail(t *testing.T) {
 	}
 }
 
-// 各个常用错误构造器都会生成稳定的状态码、错误码和公开消息。
-func TestHTTPErrorConstructors(t *testing.T) {
-	testCases := []struct {
-		name       string
-		build      func() *HTTPError
-		wantStatus int
-		wantCode   string
-		wantTitle  string
-		wantDetail string
-	}{
-		{
-			name:       "bad request",
-			build:      func() *HTTPError { return BadRequest("", "", "detail") },
-			wantStatus: http.StatusBadRequest,
-			wantCode:   "bad_request",
-			wantTitle:  http.StatusText(http.StatusBadRequest),
-			wantDetail: http.StatusText(http.StatusBadRequest),
-		},
-		{
-			name:       "unauthorized",
-			build:      func() *HTTPError { return Unauthorized("", "", "detail") },
-			wantStatus: http.StatusUnauthorized,
-			wantCode:   "unauthorized",
-			wantTitle:  http.StatusText(http.StatusUnauthorized),
-			wantDetail: http.StatusText(http.StatusUnauthorized),
-		},
-		{
-			name:       "forbidden",
-			build:      func() *HTTPError { return Forbidden("", "", "detail") },
-			wantStatus: http.StatusForbidden,
-			wantCode:   "forbidden",
-			wantTitle:  http.StatusText(http.StatusForbidden),
-			wantDetail: http.StatusText(http.StatusForbidden),
-		},
-		{
-			name:       "not found",
-			build:      func() *HTTPError { return NotFound("", "", "detail") },
-			wantStatus: http.StatusNotFound,
-			wantCode:   "not_found",
-			wantTitle:  http.StatusText(http.StatusNotFound),
-			wantDetail: http.StatusText(http.StatusNotFound),
-		},
-		{
-			name:       "method not allowed",
-			build:      func() *HTTPError { return MethodNotAllowed("", "", "detail") },
-			wantStatus: http.StatusMethodNotAllowed,
-			wantCode:   "method_not_allowed",
-			wantTitle:  http.StatusText(http.StatusMethodNotAllowed),
-			wantDetail: http.StatusText(http.StatusMethodNotAllowed),
-		},
-		{
-			name:       "conflict",
-			build:      func() *HTTPError { return Conflict("", "", "detail") },
-			wantStatus: http.StatusConflict,
-			wantCode:   "conflict",
-			wantTitle:  http.StatusText(http.StatusConflict),
-			wantDetail: http.StatusText(http.StatusConflict),
-		},
-		{
-			name:       "unprocessable entity",
-			build:      func() *HTTPError { return UnprocessableEntity("", "", "detail") },
-			wantStatus: http.StatusUnprocessableEntity,
-			wantCode:   "unprocessable_entity",
-			wantTitle:  http.StatusText(http.StatusUnprocessableEntity),
-			wantDetail: http.StatusText(http.StatusUnprocessableEntity),
-		},
-		{
-			name:       "too many requests",
-			build:      func() *HTTPError { return TooManyRequests("", "", "detail") },
-			wantStatus: http.StatusTooManyRequests,
-			wantCode:   "too_many_requests",
-			wantTitle:  http.StatusText(http.StatusTooManyRequests),
-			wantDetail: http.StatusText(http.StatusTooManyRequests),
-		},
-	}
-
-	for _, tc := range testCases {
+// 各个常用错误构造器都会生成稳定的公开契约，并透传显式 code/detail。
+func TestHTTPErrorConstructorsExposeExpectedPublicContract(t *testing.T) {
+	for _, tc := range standardHTTPErrorConstructors {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.build()
-			if got := err.Status(); got != tc.wantStatus {
-				t.Fatalf("Status() = %d, want %d", got, tc.wantStatus)
+			t.Run("defaults", func(t *testing.T) {
+				err := tc.build("", "", "detail")
+				assertHTTPErrorStatusAndCode(t, err, tc.wantStatus, tc.wantCode)
+				assertHTTPErrorUsesStatusTextPublicMessage(t, err, tc.wantStatus)
+				assertHTTPErrorErrors(t, err, "detail")
+			})
+
+			t.Run("custom code and detail", func(t *testing.T) {
+				err := tc.build("custom_code", "custom detail", "detail")
+				assertHTTPErrorStatusAndCode(t, err, tc.wantStatus, "custom_code")
+				if got := err.Title(); got != http.StatusText(tc.wantStatus) {
+					t.Fatalf("Title() = %q, want %q", got, http.StatusText(tc.wantStatus))
+				}
+				if got := err.Detail(); got != "custom detail" {
+					t.Fatalf("Detail() = %q, want %q", got, "custom detail")
+				}
+				if got := err.Error(); got != "custom detail" {
+					t.Fatalf("Error() = %q, want %q", got, "custom detail")
+				}
+				assertHTTPErrorErrors(t, err, "detail")
+			})
+		})
+	}
+}
+
+// NewHTTPErrorWithCause 在携带 cause 时也要保持与 NewHTTPError 相同的公开字段标准化。
+func TestNewHTTPErrorWithCauseNormalizesPublicFields(t *testing.T) {
+	cause := errors.New("db timeout")
+
+	for _, tc := range normalizedHTTPErrorPublicFieldCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := NewHTTPErrorWithCause(tc.status, tc.code, tc.detail, cause)
+
+			assertHTTPErrorPublicFields(t, err, tc.wantStatus, tc.wantCode, tc.wantTitle, tc.wantDetail)
+			if got := err.Error(); got != cause.Error() {
+				t.Fatalf("Error() = %q, want %q", got, cause.Error())
 			}
-			if got := err.Code(); got != tc.wantCode {
-				t.Fatalf("Code() = %q, want %q", got, tc.wantCode)
+			if !errors.Is(err, cause) {
+				t.Fatalf("errors.Is(%v, %v) = false, want true", err, cause)
 			}
-			if got := err.Title(); got != tc.wantTitle {
-				t.Fatalf("Title() = %q, want %q", got, tc.wantTitle)
-			}
-			if got := err.Detail(); got != tc.wantDetail {
-				t.Fatalf("Detail() = %q, want %q", got, tc.wantDetail)
-			}
-			if got := err.Error(); got != tc.wantDetail {
-				t.Fatalf("Error() = %q, want %q", got, tc.wantDetail)
-			}
-			if got := err.Errors(); len(got) != 1 || got[0] != "detail" {
-				t.Fatalf("Errors() = %#v, want [detail]", got)
+			if got := err.Errors(); got != nil {
+				t.Fatalf("Errors() = %#v, want nil", got)
 			}
 		})
 	}
 }
 
-// 错误码标准化会裁剪显式值，并按状态码回退到约定错误码。
-func TestNormalizeErrorCode(t *testing.T) {
-	testCases := []struct {
-		name   string
-		status int
-		code   string
-		want   string
-	}{
-		{name: "explicit", status: http.StatusBadRequest, code: " invalid_json ", want: "invalid_json"},
-		{name: "bad request", status: http.StatusBadRequest, want: "bad_request"},
-		{name: "unauthorized", status: http.StatusUnauthorized, want: "unauthorized"},
-		{name: "forbidden", status: http.StatusForbidden, want: "forbidden"},
-		{name: "not found", status: http.StatusNotFound, want: "not_found"},
-		{name: "method not allowed", status: http.StatusMethodNotAllowed, want: "method_not_allowed"},
-		{name: "conflict", status: http.StatusConflict, want: "conflict"},
-		{name: "unprocessable entity", status: http.StatusUnprocessableEntity, want: "unprocessable_entity"},
-		{name: "too many requests", status: http.StatusTooManyRequests, want: "too_many_requests"},
-		{name: "service unavailable", status: http.StatusServiceUnavailable, want: "service_unavailable"},
-		{name: "gateway timeout", status: http.StatusGatewayTimeout, want: "timeout"},
-		{name: "client closed request", status: 499, want: "client_closed_request"},
-		{name: "internal error", status: http.StatusInternalServerError, want: "internal_error"},
-		{name: "other client error", status: http.StatusTeapot, want: "client_error"},
-		{name: "invalid status normalized to internal", status: 200, want: "internal_error"},
-	}
-
-	for _, tc := range testCases {
+// NewHTTPError 会对外暴露稳定、标准化后的状态码/错误码/标题/详情。
+func TestNewHTTPErrorNormalizesPublicFields(t *testing.T) {
+	for _, tc := range normalizedHTTPErrorPublicFieldCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := normalizeErrorCode(tc.status, tc.code); got != tc.want {
-				t.Fatalf("normalizeErrorCode(%d, %q) = %q, want %q", tc.status, tc.code, got, tc.want)
+			err := NewHTTPError(tc.status, tc.code, tc.detail)
+
+			assertHTTPErrorPublicFields(t, err, tc.wantStatus, tc.wantCode, tc.wantTitle, tc.wantDetail)
+			if got := err.Errors(); got != nil {
+				t.Fatalf("Errors() = %#v, want nil", got)
 			}
 		})
-	}
-}
-
-func TestNormalizeErrorTitleSupports499(t *testing.T) {
-	if got := normalizeErrorTitle(499); got != "Client Closed Request" {
-		t.Fatalf("normalizeErrorTitle(499) = %q, want Client Closed Request", got)
-	}
-	if got := normalizeErrorTitle(509); got != http.StatusText(http.StatusInternalServerError) {
-		t.Fatalf("normalizeErrorTitle(509) = %q, want %q", got, http.StatusText(http.StatusInternalServerError))
-	}
-}
-
-func TestNormalizeErrorDetail(t *testing.T) {
-	testCases := []struct {
-		name   string
-		status int
-		detail string
-		want   string
-	}{
-		{name: "explicit", status: http.StatusBadRequest, detail: " invalid payload ", want: "invalid payload"},
-		{name: "status text fallback", status: http.StatusBadRequest, want: http.StatusText(http.StatusBadRequest)},
-		{name: "client closed request", status: 499, want: "Client Closed Request"},
-		{name: "invalid status fallback", status: 777, want: http.StatusText(http.StatusInternalServerError)},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := normalizeErrorDetail(tc.status, tc.detail); got != tc.want {
-				t.Fatalf("normalizeErrorDetail(%d, %q) = %q, want %q", tc.status, tc.detail, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestNewHTTPErrorSupports499Defaults(t *testing.T) {
-	err := NewHTTPError(499, "", "")
-
-	if got := err.Status(); got != 499 {
-		t.Fatalf("Status() = %d, want 499", got)
-	}
-	if got := err.Code(); got != "client_closed_request" {
-		t.Fatalf("Code() = %q, want client_closed_request", got)
-	}
-	if got := err.Title(); got != "Client Closed Request" {
-		t.Fatalf("Title() = %q, want Client Closed Request", got)
-	}
-	if got := err.Detail(); got != "Client Closed Request" {
-		t.Fatalf("Detail() = %q, want Client Closed Request", got)
 	}
 }
 
@@ -357,18 +491,6 @@ func TestHTTPErrorWorksWithErrorsIsAndAs(t *testing.T) {
 	}
 	if target.Status() != http.StatusConflict {
 		t.Fatalf("matched HTTPError Status() = %d, want %d", target.Status(), http.StatusConflict)
-	}
-}
-
-// 快捷构造器传入自定义 code/detail 时，应透传而非丢弃。
-func TestHTTPErrorConstructorWithCustomCodeAndDetail(t *testing.T) {
-	err := BadRequest("custom_code", "custom detail", "field error")
-
-	if got := err.Code(); got != "custom_code" {
-		t.Fatalf("Code() = %q, want custom_code", got)
-	}
-	if got := err.Detail(); got != "custom detail" {
-		t.Fatalf("Detail() = %q, want %q", got, "custom detail")
 	}
 }
 

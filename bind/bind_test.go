@@ -1,12 +1,5 @@
 package bind
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] 公开 Bind* 入口在 nil request 或 nil destination 下返回稳定错误。
-// - [✓] 默认配置和 Bind 编排辅助维持稳定内部契约。
-// - [✓] Bind 的默认顺序、方法规则和 header 排除语义。
-// - [✓] Bind 在 empty body no-op 和阶段失败时保留前序已写入值。
-
 import (
 	"net/http"
 	"net/http/httptest"
@@ -15,37 +8,42 @@ import (
 
 func TestBind_PublicEntryPointsRejectInvalidInputs(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	var dst struct{}
 
-	if err := Bind(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("Bind(nil) error = %v", err)
+	type destination struct{}
+
+	var typedNil *destination
+
+	entryPoints := []struct {
+		name string
+		call func(*http.Request, any) error
+	}{
+		{name: "Bind", call: Bind},
+		{name: "BindBody", call: BindBody},
+		{name: "BindQueryParams", call: BindQueryParams},
+		{name: "BindPathValues", call: BindPathValues},
+		{name: "BindHeaders", call: BindHeaders},
 	}
-	if err := Bind(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("Bind(nil target) error = %v", err)
+
+	invalidInputs := []struct {
+		name   string
+		req    *http.Request
+		target any
+		want   string
+	}{
+		{name: "rejects nil request", req: nil, target: &destination{}, want: wantNilRequestErr},
+		{name: "rejects nil destination", req: req, target: nil, want: wantNilDestinationErr},
+		{name: "rejects non-pointer destination", req: req, target: destination{}, want: wantNilDestinationErr},
+		{name: "rejects typed nil destination", req: req, target: typedNil, want: wantNilDestinationErr},
 	}
-	if err := BindBody(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("BindBody(nil) error = %v", err)
-	}
-	if err := BindBody(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("BindBody(nil target) error = %v", err)
-	}
-	if err := BindQueryParams(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("BindQueryParams(nil) error = %v", err)
-	}
-	if err := BindQueryParams(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("BindQueryParams(nil target) error = %v", err)
-	}
-	if err := BindPathValues(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("BindPathValues(nil) error = %v", err)
-	}
-	if err := BindPathValues(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("BindPathValues(nil target) error = %v", err)
-	}
-	if err := BindHeaders(nil, &dst); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("BindHeaders(nil) error = %v", err)
-	}
-	if err := BindHeaders(req, nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("BindHeaders(nil target) error = %v", err)
+
+	for _, entryPoint := range entryPoints {
+		t.Run(entryPoint.name, func(t *testing.T) {
+			for _, tc := range invalidInputs {
+				t.Run(tc.name, func(t *testing.T) {
+					assertUsageError(t, entryPoint.call(tc.req, tc.target), tc.want)
+				})
+			}
+		})
 	}
 }
 
@@ -78,45 +76,6 @@ func TestBind_SingleSourcePublicAPIsMatchBindNoopSemanticsForUnsupportedTargets(
 	}
 	if unsupportedMap != nil {
 		t.Fatalf("unsupportedMap = %#v, want nil no-op", unsupportedMap)
-	}
-}
-
-func TestDefaultBindConfig(t *testing.T) {
-	cfg := defaultBindConfig()
-
-	if cfg.body.maxBodyBytes != defaultMaxBodyBytes {
-		t.Fatalf("maxBodyBytes = %d, want %d", cfg.body.maxBodyBytes, defaultMaxBodyBytes)
-	}
-	if !cfg.body.allowUnknownFields {
-		t.Fatal("body.allowUnknownFields = false, want true")
-	}
-}
-
-func TestBind_InternalBranches(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-
-	if err := validateBindingDestination(1); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("validateBindingDestination(non-pointer) error = %v", err)
-	}
-	if err := validateBindingDestination(nil); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("validateBindingDestination(nil) error = %v", err)
-	}
-	if err := errorsf("boom %d", 1); err == nil || err.Error() != "bind: boom 1" {
-		t.Fatalf("errorsf() = %v", err)
-	}
-
-	type request struct {
-		ID int `param:"id"`
-	}
-	pathReq := requestWithPathParams(map[string][]string{"id": {"oops"}})
-	if err := bindWithConfig(nil, &request{}, defaultBindConfig()); err == nil || err.Error() != "bind: request must not be nil" {
-		t.Fatalf("bindWithConfig(nil) error = %v", err)
-	}
-	if err := bindWithConfig(req, request{}, defaultBindConfig()); err == nil || err.Error() != "bind: destination must not be nil" {
-		t.Fatalf("bindWithConfig(non-pointer) error = %v", err)
-	}
-	if err := bindWithConfig(pathReq, &request{}, defaultBindConfig()); err == nil {
-		t.Fatal("bindWithConfig(path error) = nil, want error")
 	}
 }
 
@@ -224,7 +183,7 @@ func TestBind_DoesNotUseHeadersByDefault(t *testing.T) {
 	}
 }
 
-func TestBind_EmptyBodyNoopUsesBodyProbe(t *testing.T) {
+func TestBind_EmptyBodyNoopPreservesEarlierStageWrites(t *testing.T) {
 	type request struct {
 		ID   string `param:"id"`
 		Page int    `query:"page"`
@@ -260,7 +219,7 @@ func TestBind_EmptyBodyNoopUsesBodyProbe(t *testing.T) {
 		t.Fatalf("Bind(unknown-length empty body) error = %v", err)
 	}
 	if dst.ID != "route-id" || dst.Page != 2 || dst.Name != "existing-name" {
-		t.Fatalf("dst = %#v, want path/query updates and body probe no-op", dst)
+		t.Fatalf("dst = %#v, want path/query updates and empty body no-op", dst)
 	}
 }
 
@@ -279,7 +238,7 @@ func TestBind_PartialUpdatesPersistAcrossStageFailure(t *testing.T) {
 
 		dst := request{ID: "existing-id", Page: 3}
 		err := Bind(req, &dst)
-		_ = assertHTTPError(t, err, http.StatusBadRequest, "bad_request", "Bad Request")
+		_ = assertBadRequest(t, err)
 		if dst.ID != "route-id" || dst.Page != 3 {
 			t.Fatalf("dst = %#v, want path update preserved before query failure", dst)
 		}

@@ -1,10 +1,5 @@
 package bind
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] Fuzz 校验 Bind 的公开结果与单源 API 按默认顺序组合后的结果一致。
-// - [✓] Fuzz 校验 Bind 的错误结果维持稳定的 HTTPError 契约。
-
 import (
 	"errors"
 	"net/http"

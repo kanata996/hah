@@ -35,7 +35,7 @@ func NoContent(w http.ResponseWriter) error {
 // 它先校验响应边界，再编码 payload，最后写出已准备好的 JSON 字节，
 // 避免无效状态码或空 writer 触发多余编码，也避免底层写回重复做同一轮校验。
 func writeJSON(w http.ResponseWriter, status int, data any) error {
-	if err := validateJSONBodyWrite(w, status, "JSON body writers"); err != nil {
+	if err := validateJSONBodyWrite(w, status); err != nil {
 		return err
 	}
 
@@ -75,14 +75,14 @@ func writeSuccess(w http.ResponseWriter, status int, data any) error {
 
 // validateJSONBodyWrite 统一校验“会写 JSON body”的响应边界。
 // 该校验独立出来后，上层 writer 可以在编码前提前失败，避免无意义编码与重复校验。
-func validateJSONBodyWrite(w http.ResponseWriter, status int, writerName string) error {
+func validateJSONBodyWrite(w http.ResponseWriter, status int) error {
 	if w == nil {
 		return errNilResponseWriter
 	}
 	if err := validateHTTPStatus(status); err != nil {
 		return err
 	}
-	if err := validateStatusAllowsBody(status, writerName); err != nil {
+	if err := validateStatusAllowsBody(status, "JSON body writers"); err != nil {
 		return err
 	}
 	return nil

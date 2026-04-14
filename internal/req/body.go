@@ -10,8 +10,8 @@ import (
 type presenceKey struct{}
 
 type presenceState struct {
-	known bool
-	has   bool
+	has bool
+	err error
 }
 
 type replayReadCloser struct {
@@ -25,25 +25,24 @@ func HasBody(r *http.Request) (bool, error) {
 	if r == nil {
 		return false, nil
 	}
+	if r.Body == nil {
+		return false, nil
+	}
 
-	if state, ok := r.Context().Value(presenceKey{}).(presenceState); ok && state.known {
-		return state.has, nil
+	if state, ok := r.Context().Value(presenceKey{}).(presenceState); ok {
+		return state.has, state.err
 	}
 
 	has, err := detectBody(r)
-	if err != nil {
-		return false, err
-	}
-
 	*r = *r.WithContext(context.WithValue(r.Context(), presenceKey{}, presenceState{
-		known: true,
-		has:   has,
+		has: has,
+		err: err,
 	}))
-	return has, nil
+	return has, err
 }
 
 func detectBody(r *http.Request) (bool, error) {
-	if r == nil || r.Body == nil {
+	if r.Body == nil {
 		return false, nil
 	}
 

@@ -1,14 +1,5 @@
 package reqx
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `BindAndValidate` 与 `bind + Validate(Source*)` 组合会优先执行 bind，并暴露稳定的成功/失败语义。
-// - [✓] `Validate(Source*)` 在各来源下都会返回请求 tag 字段名、规范化 header 名与稳定的 violation 包络。
-// - [✓] 内部 `postBindValidate`、`validateStruct`、`validateTarget` 会维持稳定目标契约。
-// - [✓] validator 初始化、字段别名、tag 优先级与 panic 分支都会产出稳定结果。
-// - [✓] 嵌套 struct 校验失败时 violation 字段路径会包含完整的嵌套层级。
-// - [✓] 仅实现 Normalizer 不实现 RequestValidator 的 DTO 在绑定校验时只执行 normalize 不触发请求级规则。
-
 import (
 	"errors"
 	"io"
@@ -18,66 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	ut "github.com/go-playground/universal-translator"
 	"github.com/go-playground/validator/v10"
 	"github.com/kanata996/hah/bind"
 )
-
-type fakeFieldLevel struct {
-	field reflect.Value
-}
-
-func (f fakeFieldLevel) Top() reflect.Value      { return reflect.Value{} }
-func (f fakeFieldLevel) Parent() reflect.Value   { return reflect.Value{} }
-func (f fakeFieldLevel) Field() reflect.Value    { return f.field }
-func (f fakeFieldLevel) FieldName() string       { return "" }
-func (f fakeFieldLevel) StructFieldName() string { return "" }
-func (f fakeFieldLevel) Param() string           { return "" }
-func (f fakeFieldLevel) GetTag() string          { return "" }
-func (f fakeFieldLevel) ExtractType(v reflect.Value) (reflect.Value, reflect.Kind, bool) {
-	return v, v.Kind(), false
-}
-func (f fakeFieldLevel) GetStructFieldOK() (reflect.Value, reflect.Kind, bool) {
-	return reflect.Value{}, reflect.Invalid, false
-}
-func (f fakeFieldLevel) GetStructFieldOKAdvanced(reflect.Value, string) (reflect.Value, reflect.Kind, bool) {
-	return reflect.Value{}, reflect.Invalid, false
-}
-func (f fakeFieldLevel) GetStructFieldOK2() (reflect.Value, reflect.Kind, bool, bool) {
-	return reflect.Value{}, reflect.Invalid, false, false
-}
-func (f fakeFieldLevel) GetStructFieldOKAdvanced2(reflect.Value, string) (reflect.Value, reflect.Kind, bool, bool) {
-	return reflect.Value{}, reflect.Invalid, false, false
-}
-
-type fakeFieldError struct {
-	tag        string
-	namespace  string
-	structNS   string
-	field      string
-	structName string
-	value      any
-	param      string
-	typ        reflect.Type
-}
-
-func (f fakeFieldError) Tag() string             { return f.tag }
-func (f fakeFieldError) ActualTag() string       { return f.tag }
-func (f fakeFieldError) Namespace() string       { return f.namespace }
-func (f fakeFieldError) StructNamespace() string { return f.structNS }
-func (f fakeFieldError) Field() string           { return f.field }
-func (f fakeFieldError) StructField() string     { return f.structName }
-func (f fakeFieldError) Value() interface{}      { return f.value }
-func (f fakeFieldError) Param() string           { return f.param }
-func (f fakeFieldError) Kind() reflect.Kind {
-	if f.typ == nil {
-		return reflect.Invalid
-	}
-	return f.typ.Kind()
-}
-func (f fakeFieldError) Type() reflect.Type             { return f.typ }
-func (f fakeFieldError) Translate(ut.Translator) string { return f.Error() }
-func (f fakeFieldError) Error() string                  { return "fake field error" }
 
 func bindAndValidateBody(r *http.Request, target any) error {
 	if err := bind.BindBody(r, target); err != nil {
@@ -107,6 +41,22 @@ func bindAndValidateHeaders(r *http.Request, target any) error {
 	return Validate(r, target, SourceHeader)
 }
 
+func mustValidationErrors(t *testing.T, source Source, target any) validator.ValidationErrors {
+	t.Helper()
+
+	err := validatorFor(source).Struct(target)
+	if err == nil {
+		t.Fatalf("validatorFor(%q).Struct(%T) error = nil, want validation errors", source, target)
+	}
+
+	var validationErrs validator.ValidationErrors
+	if !errors.As(err, &validationErrs) {
+		t.Fatalf("validatorFor(%q).Struct(%T) error = %T, want validator.ValidationErrors", source, target, err)
+	}
+
+	return validationErrs
+}
+
 func TestBindAndValidateRejectsInvalidInputs(t *testing.T) {
 	var dst struct{}
 
@@ -116,6 +66,56 @@ func TestBindAndValidateRejectsInvalidInputs(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/", `{}`)
 	if err := BindAndValidate(req, nil); err == nil || err.Error() != "reqx: destination must not be nil" {
 		t.Fatalf("BindAndValidate(nil target) error = %v", err)
+	}
+
+	t.Run("struct value target", func(t *testing.T) {
+		err := BindAndValidate(httptest.NewRequest(http.MethodGet, "/", nil), struct{}{})
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+			t.Fatalf("BindAndValidate(struct value) error = %v", err)
+		}
+	})
+
+	t.Run("typed nil struct pointer", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		var dst *request
+		err := BindAndValidate(newJSONRequest(http.MethodPost, "/", `{}`), dst)
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+			t.Fatalf("BindAndValidate(typed nil struct pointer) error = %v", err)
+		}
+	})
+
+	t.Run("pointer to non-struct", func(t *testing.T) {
+		dst := &[]string{}
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+		err := BindAndValidate(req, dst)
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+			t.Fatalf("BindAndValidate(pointer to non-struct) error = %v", err)
+		}
+	})
+}
+
+func TestBindAndValidate_RejectsNonStructTargetBeforeBinding(t *testing.T) {
+	dst := []string{"existing"}
+	req := newJSONRequest(http.MethodPost, "/", `["changed"]`)
+
+	err := BindAndValidate(req, &dst)
+	if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+		t.Fatalf("BindAndValidate(pointer to slice) error = %v", err)
+	}
+	if !reflect.DeepEqual(dst, []string{"existing"}) {
+		t.Fatalf("dst = %#v, want existing values preserved", dst)
+	}
+
+	body, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("ReadAll(req.Body) error = %v", readErr)
+	}
+	if string(body) != `["changed"]` {
+		t.Fatalf("remaining body = %q, want original unread body", body)
 	}
 }
 
@@ -132,6 +132,122 @@ func TestValidateRejectsInvalidInputs(t *testing.T) {
 	}
 	if err := Validate(req, &dst, Source("unsupported")); err == nil || err.Error() != `reqx: unsupported validation source "unsupported"` {
 		t.Fatalf("Validate(unsupported source) error = %v", err)
+	}
+
+	t.Run("struct value target", func(t *testing.T) {
+		err := Validate(req, struct{}{}, SourceBody)
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+			t.Fatalf("Validate(struct value) error = %v", err)
+		}
+	})
+
+	t.Run("typed nil struct pointer", func(t *testing.T) {
+		var dst *struct{}
+		err := Validate(req, dst, SourceBody)
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+			t.Fatalf("Validate(typed nil struct pointer) error = %v", err)
+		}
+	})
+
+	t.Run("pointer to non-struct", func(t *testing.T) {
+		dst := &[]string{}
+		err := Validate(req, dst, SourceBody)
+		if err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
+			t.Fatalf("Validate(pointer to non-struct) error = %v", err)
+		}
+	})
+}
+
+func TestValidationResultFromError(t *testing.T) {
+	t.Run("validation errors are sorted and deduplicated by field", func(t *testing.T) {
+		type zRequiredRequest struct {
+			Z string `query:"z" validate:"required"`
+		}
+		type aRequiredRequest struct {
+			A string `query:"a" validate:"required"`
+		}
+		type aMinRequest struct {
+			A string `query:"a" validate:"min=2"`
+		}
+
+		errs := append(validator.ValidationErrors{}, mustValidationErrors(t, SourceQuery, zRequiredRequest{})...)
+		errs = append(errs, mustValidationErrors(t, SourceQuery, aRequiredRequest{})...)
+		errs = append(errs, mustValidationErrors(t, SourceQuery, aMinRequest{A: "x"})...)
+
+		got, err := validationResultFromError(SourceQuery, errs)
+		if err != nil {
+			t.Fatalf("validationResultFromError() error = %v", err)
+		}
+
+		want := []Violation{
+			{Field: "a", In: ViolationInQuery, Code: ViolationCodeRequired, Detail: "is required"},
+			{Field: "z", In: ViolationInQuery, Code: ViolationCodeRequired, Detail: "is required"},
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("violations = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("invalid validation error is returned as is", func(t *testing.T) {
+		wantErr := &validator.InvalidValidationError{Type: reflect.TypeOf(0)}
+
+		got, err := validationResultFromError(SourceBody, wantErr)
+		if err != wantErr {
+			t.Fatalf("error = %v, want %v", err, wantErr)
+		}
+		if got != nil {
+			t.Fatalf("violations = %#v, want nil", got)
+		}
+	})
+
+	t.Run("unexpected validator error is returned as is", func(t *testing.T) {
+		wantErr := errors.New("validator boom")
+
+		got, err := validationResultFromError(SourceBody, wantErr)
+		if err != wantErr {
+			t.Fatalf("error = %v, want %v", err, wantErr)
+		}
+		if got != nil {
+			t.Fatalf("violations = %#v, want nil", got)
+		}
+	})
+}
+
+func TestFieldAlias_UsesSourceTagPriority(t *testing.T) {
+	type request struct {
+		Value string `json:"json_name,omitempty" query:"query_name" param:"param_name" header:"x-trace-id"`
+	}
+
+	field := reflect.TypeOf(request{}).Field(0)
+	testCases := []struct {
+		name   string
+		source Source
+		want   string
+	}{
+		{name: "body", source: SourceBody, want: "json_name"},
+		{name: "query", source: SourceQuery, want: "query_name"},
+		{name: "path", source: SourcePath, want: "param_name"},
+		{name: "header", source: SourceHeader, want: "X-Trace-Id"},
+		{name: "request conflicting tags fall back to struct field", source: SourceRequest, want: "Value"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fieldAlias(field, tc.source); got != tc.want {
+				t.Fatalf("fieldAlias(%q) = %q, want %q", tc.source, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFieldAlias_SourceRequestUsesSharedInputNameWhenTagsAgree(t *testing.T) {
+	type request struct {
+		AccountID string `json:"account_id" query:"account_id" param:"account_id" validate:"required"`
+	}
+
+	field := reflect.TypeOf(request{}).Field(0)
+	if got := fieldAlias(field, SourceRequest); got != "account_id" {
+		t.Fatalf("fieldAlias(SourceRequest) = %q, want account_id", got)
 	}
 }
 
@@ -488,189 +604,31 @@ func TestBindAndValidate_UsesRequestFieldAliases(t *testing.T) {
 	}
 }
 
-func TestPostBindValidateRejectsInvalidTarget(t *testing.T) {
-	if err := postBindValidate(newJSONRequest(http.MethodPost, "/", `{}`), 1, SourceBody); err == nil || err.Error() != "reqx: target must be a non-nil pointer to struct" {
-		t.Fatalf("postBindValidate(non-struct) error = %v", err)
-	}
-}
-
-// validateStruct 返回的校验错误会被转换为 violation 列表。
-func TestValidateStructValidationErrors(t *testing.T) {
-	target := &struct {
-		Name string `json:"name" validate:"required"`
-	}{}
-
-	violations, err := validateStruct(target, SourceBody)
-	if err != nil {
-		t.Fatalf("validateStruct() error = %v", err)
-	}
-	if len(violations) != 1 {
-		t.Fatalf("violations len = %d, want 1", len(violations))
-	}
-	if violations[0].Field != "name" || violations[0].In != ViolationInBody || violations[0].Code != ViolationCodeRequired || violations[0].Detail != "is required" {
-		t.Fatalf("violations[0] = %#v", violations[0])
-	}
-}
-
-// 直接传入 nil 接口值时返回空目标错误。
-func TestValidateTargetRejectsNilTarget(t *testing.T) {
-	err := validateTarget(nil)
-	if err == nil {
-		t.Fatal("validateTarget() error = nil")
-	}
-	if got := err.Error(); got != "reqx: target must not be nil" {
-		t.Fatalf("error = %q", got)
-	}
-}
-
-// 非法的校验目标会透传 validator 的 InvalidValidationError。
-func TestValidateStructReturnsInvalidValidationError(t *testing.T) {
-	_, err := validateStruct(1, SourceBody)
-	if err == nil {
-		t.Fatal("validateStruct() error = nil")
+func TestBindAndValidate_RequestAliasFallsBackToStructFieldOnConflictingSourceNames(t *testing.T) {
+	var dst struct {
+		AccountID string `param:"account_id" json:"id" validate:"required,nospace"`
 	}
 
-	var invalidErr *validator.InvalidValidationError
-	if !errors.As(err, &invalidErr) {
-		t.Fatalf("error = %T, want *validator.InvalidValidationError", err)
-	}
-}
-
-// validateFields 透传 validateStruct 的 InvalidValidationError。
-func TestValidateFieldsReturnsInvalidValidationError(t *testing.T) {
-	err := validateFields(1, SourceBody)
-	if err == nil {
-		t.Fatal("validateFields() error = nil")
-	}
-
-	var invalidErr *validator.InvalidValidationError
-	if !errors.As(err, &invalidErr) {
-		t.Fatalf("error = %T, want *validator.InvalidValidationError", err)
-	}
-}
-
-func TestReqxValidationHelperBranches(t *testing.T) {
-	if !validateNoSpace(fakeFieldLevel{field: reflect.ValueOf("kanata")}) {
-		t.Fatal("validateNoSpace(string without space) = false, want true")
-	}
-	if validateNoSpace(fakeFieldLevel{field: reflect.ValueOf("kana ta")}) {
-		t.Fatal("validateNoSpace(string with space) = true, want false")
-	}
-	if validateNoSpace(fakeFieldLevel{field: reflect.ValueOf(1)}) {
-		t.Fatal("validateNoSpace(non-string) = true, want false")
-	}
-
-	defer func() {
-		if recover() == nil {
-			t.Fatal("mustRegisterValidation() did not panic")
-		}
-	}()
-	mustRegisterValidation(validator.New(), "", validateNoSpace)
-}
-
-// 内部校验器和标签优先级 helper 对不支持的来源会 panic。
-func TestValidatorHelpers_PanicOnUnsupportedSource(t *testing.T) {
-	t.Run("validatorFor", func(t *testing.T) {
-		defer func() {
-			if recover() == nil {
-				t.Fatal("validatorFor() did not panic")
-			}
-		}()
-
-		_ = validatorFor(Source("unsupported"))
+	req := requestWithPathParams(map[string][]string{
+		"account_id": {"acct_1"},
 	})
+	req.Method = http.MethodPost
+	req.Body = io.NopCloser(strings.NewReader(`{"id":"bad value"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = int64(len(`{"id":"bad value"}`))
 
-	t.Run("sourceTagPriority", func(t *testing.T) {
-		defer func() {
-			if recover() == nil {
-				t.Fatal("sourceTagPriority() did not panic")
-			}
-		}()
-
-		_ = sourceTagPriority(Source("unsupported"))
-	})
-}
-
-// body 来源的标签优先级顺序固定，用于字段别名解析。
-func TestSourceTagPriority_UsesBodyPriority(t *testing.T) {
-	got := sourceTagPriority(SourceBody)
-	want := []string{"json", "query", "param", "header"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("sourceTagPriority(SourceBody) = %#v, want %#v", got, want)
+	violation := assertSingleViolation(t, BindAndValidate(req, &dst))
+	want := Violation{
+		Field:  "AccountID",
+		In:     ViolationInRequest,
+		Code:   ViolationCodeInvalid,
+		Detail: "is invalid",
 	}
-}
-
-func TestViolationsFromValidationAndFieldPathBranches(t *testing.T) {
-	if got := violationsFromValidation(SourceBody, nil); got != nil {
-		t.Fatalf("violationsFromValidation(nil) = %#v, want nil", got)
+	if violation != want {
+		t.Fatalf("violation = %#v, want %#v", violation, want)
 	}
-
-	errs := validator.ValidationErrors{
-		fakeFieldError{tag: "required", namespace: "Req.z", field: "z", typ: reflect.TypeOf("")},
-		fakeFieldError{tag: "min", namespace: "Req.a", field: "a", typ: reflect.TypeOf("")},
-		fakeFieldError{tag: "required", namespace: "Req.a", field: "a", typ: reflect.TypeOf("")},
-	}
-	violations := violationsFromValidation(SourceRequest, errs)
-	if len(violations) != 2 {
-		t.Fatalf("violations len = %d, want 2", len(violations))
-	}
-	if violations[0].Field != "a" || violations[0].Code != ViolationCodeInvalid {
-		t.Fatalf("violations[0] = %#v", violations[0])
-	}
-	if violations[1].Field != "z" || violations[1].Code != ViolationCodeRequired {
-		t.Fatalf("violations[1] = %#v", violations[1])
-	}
-
-	if got := validationFieldPath(SourceBody, fakeFieldError{namespace: " Req.body.name ", typ: reflect.TypeOf("")}); got != "body.name" {
-		t.Fatalf("validationFieldPath(namespace) = %q, want body.name", got)
-	}
-	if got := validationFieldPath(SourceBody, fakeFieldError{field: "display_name", typ: reflect.TypeOf("")}); got != "display_name" {
-		t.Fatalf("validationFieldPath(field) = %q, want display_name", got)
-	}
-	if got := validationFieldPath(SourceBody, fakeFieldError{}); got != "body" {
-		t.Fatalf("validationFieldPath(body fallback) = %q, want body", got)
-	}
-	if got := validationFieldPath(SourceRequest, fakeFieldError{}); got != "request" {
-		t.Fatalf("validationFieldPath(request fallback) = %q, want request", got)
-	}
-}
-
-func TestViolationInputHelpers(t *testing.T) {
-
-	testSources := map[Source]string{
-		SourceBody:    ViolationInBody,
-		SourceQuery:   ViolationInQuery,
-		SourcePath:    ViolationInPath,
-		SourceHeader:  ViolationInHeader,
-		SourceRequest: ViolationInRequest,
-		Source("x"):   ViolationInRequest,
-	}
-	for source, want := range testSources {
-		if got := violationInForSource(source); got != want {
-			t.Fatalf("violationInForSource(%q) = %q, want %q", source, got, want)
-		}
-	}
-}
-
-func TestTagValueAdditionalBranches(t *testing.T) {
-	type request struct {
-		NoTag    string
-		BlankTag string `json:"   "`
-		SkipTag  string `json:"-"`
-	}
-
-	noTagField, _ := reflect.TypeOf(request{}).FieldByName("NoTag")
-	blankTagField, _ := reflect.TypeOf(request{}).FieldByName("BlankTag")
-	skipTagField, _ := reflect.TypeOf(request{}).FieldByName("SkipTag")
-
-	if got := tagValue(noTagField, "json"); got != "" {
-		t.Fatalf("tagValue(no tag) = %q, want empty", got)
-	}
-	if got := tagValue(blankTagField, "json"); got != "" {
-		t.Fatalf("tagValue(blank tag) = %q, want empty", got)
-	}
-	if got := tagValue(skipTagField, "json"); got != "" {
-		t.Fatalf("tagValue(skip tag) = %q, want empty", got)
+	if dst.AccountID != "bad value" {
+		t.Fatalf("dst = %#v, want bound body value preserved", dst)
 	}
 }
 

@@ -1,37 +1,13 @@
 package bind
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] BindBody 的 Content-Type、空 body、未知字段与非法 JSON 契约。
-// - [✓] BindBody 支持标准 decoder 目标，包括 struct、slice、map。
-// - [✓] BindBody 公开入口拒绝无效 destination，包括非指针和 typed nil pointer。
-// - [✓] BindBody 在 body 大小达到上限、超出上限和 unknown-length 超限时维持稳定契约。
-// - [✓] body 相关内部辅助有最小补充覆盖，包括 media type、读 body 和错误映射。
-// - [✓] BindBody 在 req.Body 为 nil 时保持 no-op。
-
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 )
-
-type failingReadCloser struct {
-	err error
-}
-
-func (r failingReadCloser) Read(_ []byte) (int, error) {
-	return 0, r.err
-}
-
-func (r failingReadCloser) Close() error {
-	return nil
-}
 
 type byteThenReadErrorCloser struct {
 	done bool
@@ -71,7 +47,7 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 	t.Run("rejects missing content type for non empty body", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
 
-		var dst request
+		dst := request{Name: "existing"}
 		_ = assertHTTPError(
 			t,
 			BindBody(req, &dst),
@@ -79,6 +55,9 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 			CodeUnsupportedMediaType,
 			"Content-Type must be application/json",
 		)
+		if dst.Name != "existing" {
+			t.Fatalf("name = %q, want existing value preserved before decode starts", dst.Name)
+		}
 	})
 
 	t.Run("rejects application json suffix media type", func(t *testing.T) {
@@ -156,9 +135,12 @@ func TestBindBody_ContentTypeContract(t *testing.T) {
 		req.Header.Set("Content-Type", mimeApplicationJSON)
 		req.Body = &byteThenReadErrorCloser{err: wantErr}
 
-		var dst request
+		dst := request{Name: "existing"}
 		if err := BindBody(req, &dst); !errors.Is(err, wantErr) {
 			t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+		}
+		if dst.Name != "existing" {
+			t.Fatalf("name = %q, want existing value preserved when body read fails", dst.Name)
 		}
 	})
 }
@@ -245,27 +227,6 @@ func TestBindBody_UnknownLengthNonEmptyBodyStillBinds(t *testing.T) {
 	}
 }
 
-func TestBindBody_PublicEntryPointRejectsInvalidDestinations(t *testing.T) {
-	type request struct {
-		Name string `json:"name"`
-	}
-
-	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
-
-	t.Run("rejects non pointer destination", func(t *testing.T) {
-		if err := BindBody(req, request{}); err == nil || err.Error() != "bind: destination must not be nil" {
-			t.Fatalf("BindBody(non-pointer) error = %v", err)
-		}
-	})
-
-	t.Run("rejects typed nil pointer destination", func(t *testing.T) {
-		var dst *request
-		if err := BindBody(req, dst); err == nil || err.Error() != "bind: destination must not be nil" {
-			t.Fatalf("BindBody(typed nil pointer) error = %v", err)
-		}
-	})
-}
-
 func TestBindBody_JSONContract(t *testing.T) {
 	t.Run("array binds to slice target", func(t *testing.T) {
 		type item struct {
@@ -289,8 +250,11 @@ func TestBindBody_JSONContract(t *testing.T) {
 		}
 
 		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","age":"oops"}`)
-		var dst request
+		dst := request{Name: "existing", Age: 17}
 		_ = assertHTTPError(t, BindBody(req, &dst), http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		if dst.Name != "kanata" || dst.Age != 17 {
+			t.Fatalf("dst = %#v, want earlier decoded fields preserved and failing field unchanged", dst)
+		}
 	})
 
 	t.Run("unknown fields are accepted by default", func(t *testing.T) {
@@ -408,66 +372,6 @@ func TestBindBody_RequestSizeLimitContract(t *testing.T) {
 	})
 }
 
-func TestBindBody_HelperBranches(t *testing.T) {
-	if got, err := bodyMediaType(nil); err != nil || got != "" {
-		t.Fatalf("bodyMediaType(nil) = (%q, %v), want (empty, nil)", got, err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
-	req.Header.Set("Content-Type", " application/json ; charset=utf-8 ")
-	if got, err := bodyMediaType(req); err != nil || got != mimeApplicationJSON {
-		t.Fatalf("bodyMediaType() = (%q, %v), want (%q, nil)", got, err, mimeApplicationJSON)
-	}
-
-	badReq := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
-	badReq.Header.Set("Content-Type", `application/json; charset="utf-8`)
-	if _, err := bodyMediaType(badReq); err == nil {
-		t.Fatal("bodyMediaType(malformed) error = nil, want parse error")
-	}
-
-	type payload struct {
-		Name string `json:"name"`
-	}
-
-	if err := decodeJSONBody([]byte(`{"name":"kanata"}`), &payload{}, false); err != nil {
-		t.Fatalf("decodeJSONBody() error = %v", err)
-	}
-
-	invalidUnmarshalErr := &json.InvalidUnmarshalError{Type: reflect.TypeOf(payload{})}
-	if got := mapJSONBodyDecodeError(invalidUnmarshalErr); got != invalidUnmarshalErr {
-		t.Fatalf("mapJSONBodyDecodeError() = %v, want same error", got)
-	}
-
-	data, err := readBody(io.NopCloser(strings.NewReader("ok")), 0)
-	if err != nil || string(data) != "ok" {
-		t.Fatalf("readBody(default max) = (%q, %v), want (ok, nil)", data, err)
-	}
-	if data, err := readBody(nil, 10); err != nil || data != nil {
-		t.Fatalf("readBody(nil) = (%v, %v), want (nil, nil)", data, err)
-	}
-
-	wantErr := errors.New("read failed")
-	if _, err := readBody(failingReadCloser{err: wantErr}, 10); !errors.Is(err, wantErr) {
-		t.Fatalf("readBody(failing) error = %v, want %v", err, wantErr)
-	}
-
-	readErrReq := httptest.NewRequest(http.MethodPost, "/", nil)
-	readErrReq.ContentLength = 1
-	readErrReq.Header.Set("Content-Type", mimeApplicationJSON)
-	readErrReq.Body = failingReadCloser{err: wantErr}
-	if err := bindBodyDefault(readErrReq, &payload{}, defaultBindConfig().body); !errors.Is(err, wantErr) {
-		t.Fatalf("bindBodyDefault(read error) = %v, want %v", err, wantErr)
-	}
-
-	readErrAfterProbeReq := httptest.NewRequest(http.MethodPost, "/", nil)
-	readErrAfterProbeReq.ContentLength = -1
-	readErrAfterProbeReq.Header.Set("Content-Type", mimeApplicationJSON)
-	readErrAfterProbeReq.Body = &byteThenReadErrorCloser{err: wantErr}
-	if err := bindBodyDefault(readErrAfterProbeReq, &payload{}, defaultBindConfig().body); !errors.Is(err, wantErr) {
-		t.Fatalf("bindBodyDefault(read error after probe) = %v, want %v", err, wantErr)
-	}
-}
-
 func TestBindBody_NilBodyIsNoop(t *testing.T) {
 	type request struct {
 		Name string `json:"name"`
@@ -479,6 +383,32 @@ func TestBindBody_NilBodyIsNoop(t *testing.T) {
 	dst := request{Name: "existing"}
 	if err := BindBody(req, &dst); err != nil {
 		t.Fatalf("BindBody(nil body) error = %v", err)
+	}
+	if dst.Name != "existing" {
+		t.Fatalf("name = %q, want existing value preserved", dst.Name)
+	}
+}
+
+func TestBindBody_NilBodyAfterCachedPresenceProbeIsNoop(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+
+	var first request
+	if err := BindBody(req, &first); err != nil {
+		t.Fatalf("first BindBody() error = %v", err)
+	}
+	if first.Name != "kanata" {
+		t.Fatalf("first name = %q, want kanata", first.Name)
+	}
+
+	req.Body = nil
+
+	dst := request{Name: "existing"}
+	if err := BindBody(req, &dst); err != nil {
+		t.Fatalf("second BindBody(nil body after cached probe) error = %v", err)
 	}
 	if dst.Name != "existing" {
 		t.Fatalf("name = %q, want existing value preserved", dst.Name)

@@ -1,9 +1,5 @@
 package reqx
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] 测试辅助文件：提供 JSON 请求构造与 HTTP/violation 断言辅助，不声明独立业务覆盖。
-
 import (
 	"errors"
 	"net/http"

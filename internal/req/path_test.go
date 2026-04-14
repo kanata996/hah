@@ -1,7 +1,7 @@
 package req
 
 import (
-	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -11,7 +11,7 @@ func TestPathWildcardNames(t *testing.T) {
 		pattern string
 		want    []string
 	}{
-		{name: "blank", pattern: "   ", want: nil},
+		{name: "blank", pattern: "   ", want: []string{}},
 		{name: "no wildcard", pattern: "/accounts", want: []string{}},
 		{name: "basic", pattern: "/accounts/{id}", want: []string{"id"}},
 		{name: "method prefix", pattern: "GET /accounts/{id}", want: []string{"id"}},
@@ -25,7 +25,7 @@ func TestPathWildcardNames(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := PathWildcardNames(tc.pattern); !reflect.DeepEqual(got, tc.want) {
+			if got := PathWildcardNames(tc.pattern); !slices.Equal(got, tc.want) {
 				t.Fatalf("PathWildcardNames(%q) = %#v, want %#v", tc.pattern, got, tc.want)
 			}
 		})

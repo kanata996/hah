@@ -1,9 +1,5 @@
 package bind
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] 基准文件：定义 BindBody、BindQueryParams、BindPathValues、BindHeaders、Bind 的典型 benchmark 范围。
-
 import (
 	"io"
 	"net/http"

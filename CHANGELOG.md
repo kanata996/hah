@@ -13,6 +13,26 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.4.4] - 2026-04-14
+
+### Fixed
+
+- Preserved `HasBody(...)` read failures across repeated body-presence probes so binding and validation paths no longer lose the original I/O error after the first check.
+- Hardened `bind` string-source writes for pointer fields so failed decodes do not leave newly allocated partial values behind, and made header binding merge canonical and non-canonical keys deterministically.
+- Tightened `reqx.Validate(...)` error handling so unexpected validator failures are returned directly instead of being assumed to be field-violation lists.
+- Normalized fallback `errx.HTTPError` titles for unknown `4xx` statuses to `Client Error` instead of incorrectly falling back to the `500` title.
+- Improved `resp` error-response handling by checking deeper wrapped `http.ResponseWriter` chains before rewriting started responses and by simplifying the final `application/problem+json` write path.
+
+### Testing
+
+- Expanded contract-focused regression coverage across `bind`, `reqx`, `resp`, `errx`, and internal request helpers, including new fuzz coverage for path pattern helpers.
+
+## [v0.4.3] - 2026-04-13
+
+### Changed
+
+- Bumped the main module and bundled examples to Go `1.25.9`.
+
 ## [v0.4.2] - 2026-04-13
 
 ### Breaking

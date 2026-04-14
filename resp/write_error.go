@@ -27,6 +27,8 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
+const maxResponseWriterUnwrapDepth = 64
+
 // problemPayload 是最终写入响应体的公共错误字段。
 // 这里不包含内部原始 error，避免把服务端细节泄露给客户端。
 type problemPayload struct {
@@ -72,7 +74,7 @@ func responseAlreadyStarted(w http.ResponseWriter) bool {
 		Unwrap() http.ResponseWriter
 	}
 
-	for depth := 0; w != nil && depth < 8; depth++ {
+	for depth := 0; w != nil && depth < maxResponseWriterUnwrapDepth; depth++ {
 		if state, ok := w.(responseStateWriter); ok && (state.Status() != 0 || state.BytesWritten() > 0) {
 			return true
 		}
@@ -133,22 +135,13 @@ func (e *ErrorWriteDegraded) Unwrap() error {
 	return e.Cause
 }
 
-// writeHTTPError 负责把已经收敛好的 HTTPError 写回到响应。
-// 这里不再做错误语义推断，统一走 JSON 错误写回路径；
-// 对 HEAD 等请求也复用正常的 Write 回调链路，保持与 net/http 默认行为一致。
-func writeHTTPError(w http.ResponseWriter, httpErr *errx.HTTPError) error {
-	if httpErr == nil {
-		return nil
-	}
-	return writeErrorPayload(w, httpErr)
-}
-
 // writeErrorPayload 负责真正把错误对象编码并写到响应里。
 // 如果 errors 序列化失败，会降级为只保留 title/status/detail/code 的响应，
 // 尽量避免整次错误响应完全失败。
 func writeErrorPayload(w http.ResponseWriter, httpErr *errx.HTTPError) error {
 	body, err := marshalProblemPayload(httpErr)
 	if err != nil {
+		// fallback payload 丢弃 errors 后只剩稳定标量字段，这里不会再出现 JSON 编码失败。
 		fallbackBody, _ := json.Marshal(problemPayloadFromHTTPError(httpErr, false))
 		if writeErr := writeJSONBytesWithContentType(w, httpErr.Status(), problemJSONContentType, fallbackBody); writeErr != nil {
 			return errors.Join(&ErrorWriteDegraded{Cause: err}, writeErr)
@@ -172,18 +165,10 @@ func marshalProblemPayload(httpErr *errx.HTTPError) (body []byte, err error) {
 		}
 	}()
 
-	if httpErr == nil {
-		return json.Marshal(problemPayload{})
-	}
-
 	return json.Marshal(problemPayloadFromHTTPError(httpErr, true))
 }
 
 func problemPayloadFromHTTPError(httpErr *errx.HTTPError, includeErrors bool) problemPayload {
-	if httpErr == nil {
-		return problemPayload{}
-	}
-
 	payload := problemPayload{
 		Title:  httpErr.Title(),
 		Status: httpErr.Status(),

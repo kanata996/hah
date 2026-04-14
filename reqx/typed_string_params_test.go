@@ -8,12 +8,6 @@ import (
 	"testing"
 )
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] QueryParam.String 会覆盖 default 成功路径、长度/枚举/正则约束、custom Check 失败与 usage error 边界。
-// - [✓] PathParam 会通过公开入口直接覆盖代表性的 string/int default、约束检查与 usage error 契约。
-// - [✓] Fuzz 评估：本文件当前只补 string-like builder 规格回归，不新增 fuzz；原因是未引入新的 query/path 解析逻辑或输入状态空间。
-
 func TestPathTypedParams_DirectCoverage(t *testing.T) {
 	t.Run("string default one-of match and check success", func(t *testing.T) {
 		got, err := Path(requestWithPathParams(nil), "slug").String().

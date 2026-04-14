@@ -7,18 +7,14 @@ import (
 	"strings"
 )
 
-// 本文件负责 bind 包的公开 API 入口、默认绑定阶段编排，以及共享基础配置。
+// 本文件负责 bind 包的公开 API 入口、默认绑定阶段编排，以及共享前置校验。
 //
 // 这里集中放：
 //   - 对外公开的核心入口：Bind、BindBody、BindQueryParams、BindPathValues、BindHeaders
 //   - 默认 binder 的阶段顺序：path -> query(GET/DELETE/HEAD) -> body
-//   - 绑定目标的公共前置校验和默认配置
+//   - 绑定目标的公共前置校验
 
 const defaultMaxBodyBytes int64 = 1 << 20
-
-const (
-	mimeApplicationJSON = "application/json"
-)
 
 const (
 	// CodeInvalidJSON 表示请求 body 不是合法 JSON。
@@ -34,32 +30,18 @@ type BindUnmarshaler interface {
 	UnmarshalParam(param string) error
 }
 
-type bindBodyConfig struct {
-	maxBodyBytes       int64
-	allowUnknownFields bool
-}
-
-type bindConfig struct {
-	body bindBodyConfig
-}
-
-func defaultBindConfig() bindConfig {
-	return bindConfig{
-		body: bindBodyConfig{
-			maxBodyBytes:       defaultMaxBodyBytes,
-			allowUnknownFields: true,
-		},
-	}
-}
-
 // Bind 按默认顺序绑定请求数据：path -> query(GET/DELETE/HEAD) -> body。
 func Bind(r *http.Request, target any) error {
-	return bindWithConfig(r, target, defaultBindConfig())
+	return bindDefault(r, target)
 }
 
 // BindBody 只从请求 body 绑定数据。
 func BindBody(r *http.Request, target any) error {
-	return bindBodyDefault(r, target, defaultBindConfig().body)
+	if err := validateBindInputs(r, target); err != nil {
+		return err
+	}
+
+	return bindBody(r, target)
 }
 
 // BindQueryParams 只从 query 参数绑定数据。
@@ -89,8 +71,8 @@ func BindHeaders(r *http.Request, target any) error {
 	return bindHeadersDefault(r, target)
 }
 
-// bindWithConfig 负责串联默认 binder 的各个阶段。
-func bindWithConfig(r *http.Request, target any, cfg bindConfig) error {
+// bindDefault 负责串联默认 binder 的各个阶段。
+func bindDefault(r *http.Request, target any) error {
 	if err := validateBindInputs(r, target); err != nil {
 		return err
 	}
@@ -109,7 +91,7 @@ func bindWithConfig(r *http.Request, target any, cfg bindConfig) error {
 	}
 
 	// body 最后执行，因此它对同名字段拥有最高优先级。
-	return bindBodyValidated(r, target, cfg.body)
+	return bindBody(r, target)
 }
 
 // validateBindInputs 统一校验公开 Bind* 入口和内部阶段共享的前置条件。

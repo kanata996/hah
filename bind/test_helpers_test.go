@@ -1,9 +1,5 @@
 package bind
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] 测试辅助文件：提供请求构造、path pattern 构造与 HTTPError 断言 helper。
-
 import (
 	"errors"
 	"io"
@@ -14,6 +10,11 @@ import (
 	"testing"
 
 	"github.com/kanata996/hah/errx"
+)
+
+const (
+	wantNilRequestErr     = "bind: request must not be nil"
+	wantNilDestinationErr = "bind: destination must not be nil"
 )
 
 func newJSONRequest(method, target, body string) *http.Request {
@@ -84,4 +85,27 @@ func assertHTTPErrorLike(t *testing.T, err error) *errx.HTTPError {
 		t.Fatalf("error type = %T, want *errx.HTTPError", err)
 	}
 	return httpErr
+}
+
+func assertErrorString(t *testing.T, err error, want string) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatalf("error = nil, want %q", want)
+	}
+	if got := err.Error(); got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+func assertUsageError(t *testing.T, err error, want string) {
+	t.Helper()
+
+	assertErrorString(t, err, want)
+}
+
+func assertBadRequest(t *testing.T, err error) *errx.HTTPError {
+	t.Helper()
+
+	return assertHTTPError(t, err, http.StatusBadRequest, "bad_request", "Bad Request")
 }

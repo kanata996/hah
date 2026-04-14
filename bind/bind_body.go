@@ -22,16 +22,10 @@ import (
 //   - 非法 JSON 返回 400 invalid_json
 //   - 不支持的 Content-Type 返回 415 unsupported_media_type
 
-// bindBodyDefault 实现默认 body 绑定契约。
-func bindBodyDefault(r *http.Request, target any, cfg bindBodyConfig) error {
-	if err := validateBindInputs(r, target); err != nil {
-		return err
-	}
-	return bindBodyValidated(r, target, cfg)
-}
+const mimeApplicationJSON = "application/json"
 
-// bindBodyValidated 假定 request 和 target 已完成前置校验，只执行 body 绑定本身。
-func bindBodyValidated(r *http.Request, target any, cfg bindBodyConfig) error {
+// bindBody 假定 request 和 target 已完成前置校验，只执行默认 body 绑定本身。
+func bindBody(r *http.Request, target any) error {
 	// 先探测是否真的存在 body，这样零字节请求可以在 Content-Type 校验前直接 no-op。
 	hasBody, err := req.HasBody(r)
 	if err != nil {
@@ -42,7 +36,7 @@ func bindBodyValidated(r *http.Request, target any, cfg bindBodyConfig) error {
 	}
 
 	// 读取优先于 media type 语义判断，确保底层 I/O 错误不会被 415 掩盖。
-	body, err := readBody(r.Body, cfg.maxBodyBytes)
+	body, err := readBody(r.Body)
 	if err != nil {
 		if errors.Is(err, errRequestTooLarge) {
 			return requestTooLargeError()
@@ -58,18 +52,15 @@ func bindBodyValidated(r *http.Request, target any, cfg bindBodyConfig) error {
 	// 默认 body binder 只分发到显式支持的媒体类型实现。
 	switch mediaType {
 	case mimeApplicationJSON:
-		return decodeJSONBody(body, target, cfg.allowUnknownFields)
+		return decodeJSONBody(body, target)
 	default:
 		return unsupportedMediaTypeError()
 	}
 }
 
 // bodyMediaType 解析请求头中的主 media type。
+// 调用方保证 request 已完成公开入口校验。
 func bodyMediaType(r *http.Request) (string, error) {
-	if r == nil {
-		return "", nil
-	}
-
 	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
 	if contentType == "" {
 		return "", nil
@@ -83,11 +74,8 @@ func bodyMediaType(r *http.Request) (string, error) {
 }
 
 // decodeJSONBody 负责按默认 JSON 契约解码 body。
-func decodeJSONBody(body []byte, target any, allowUnknownFields bool) error {
+func decodeJSONBody(body []byte, target any) error {
 	dec := json.NewDecoder(bytes.NewReader(body))
-	if !allowUnknownFields {
-		dec.DisallowUnknownFields()
-	}
 	if err := dec.Decode(target); err != nil {
 		return mapJSONBodyDecodeError(err)
 	}
@@ -121,19 +109,13 @@ func mapJSONBodyDecodeError(err error) error {
 var errRequestTooLarge = errors.New("bind: request body too large")
 
 // readBody 在默认大小限制内完整读取请求 body。
-func readBody(body io.ReadCloser, maxBytes int64) ([]byte, error) {
-	if body == nil {
-		return nil, nil
-	}
-	if maxBytes <= 0 {
-		maxBytes = defaultMaxBodyBytes
-	}
-
-	data, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
+// bindBody 仅在 HasBody 已确认存在非空 body 后调用这里，因此 body 非 nil。
+func readBody(body io.ReadCloser) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, defaultMaxBodyBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > maxBytes {
+	if int64(len(data)) > defaultMaxBodyBytes {
 		return nil, errRequestTooLarge
 	}
 	return data, nil

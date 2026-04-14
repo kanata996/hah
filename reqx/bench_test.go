@@ -1,11 +1,5 @@
 package reqx
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] 本文件定义 `Bind*`、`Validate(Source*)` 与 `BindAndValidate` 的典型 benchmark 场景。
-// - [✓] 这些 benchmark 仅用于性能观测，不作为功能验收覆盖。
-// - [✓] 包含 POST body 热路径和校验失败路径的 benchmark。
-
 import (
 	"net/http"
 	"testing"

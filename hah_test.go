@@ -3,6 +3,8 @@ package hah
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,6 +23,27 @@ import (
 // [✓] README 中承诺的 create account handler 主路径有根包级端到端测试支撑
 
 type rootPayloadMap map[string]any
+
+type partialReadErrorCloser struct {
+	done bool
+	err  error
+}
+
+func (r *partialReadErrorCloser) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if r.done {
+		return 0, io.EOF
+	}
+	r.done = true
+	p[0] = '{'
+	return 1, r.err
+}
+
+func (r *partialReadErrorCloser) Close() error {
+	return nil
+}
 
 // Bind 会通过根包 facade 复用 bind 包的默认绑定顺序。
 func TestBind_DelegatesToBind(t *testing.T) {
@@ -174,6 +197,28 @@ func TestRequireBody_DelegatesToReqx(t *testing.T) {
 	violation := assertSingleRootViolation(t, RequireBody(req))
 	if violation.Field != "body" || violation.In != reqx.ViolationInBody || violation.Code != reqx.ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
+	}
+}
+
+// 同一请求先经过 body-required 探测，再进入 body 绑定时，底层短读错误不能被后续探测掩盖。
+func TestRequireBodyThenBindBody_PreservesShortReadError(t *testing.T) {
+	wantErr := errors.New("short read")
+	req := newJSONRequest(http.MethodPost, "/accounts", "")
+	req.Body = &partialReadErrorCloser{err: wantErr}
+	req.ContentLength = -1
+
+	if err := RequireBody(req); !errors.Is(err, wantErr) {
+		t.Fatalf("RequireBody() error = %v, want %v", err, wantErr)
+	}
+
+	dst := struct {
+		Name string `json:"name"`
+	}{Name: "existing"}
+	if err := BindBody(req, &dst); !errors.Is(err, wantErr) {
+		t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+	}
+	if dst.Name != "existing" {
+		t.Fatalf("name = %q, want existing value preserved on read error", dst.Name)
 	}
 }
 

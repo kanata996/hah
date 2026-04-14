@@ -11,13 +11,6 @@ import (
 	"time"
 )
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] Query 入口会为单参数 query 读取提供 source-aware required/invalid violation，并对重复 query key 维持首值语义。
-// - [✓] QueryParam 的通用 usage error 与 optional 行为维持稳定契约。
-// - [✓] query lookup helper 会维持 URL.Query() 的公开契约。
-// - [✓] Fuzz 评估：本文件当前只补公开入口与 lookup 契约回归，不新增 fuzz；原因是未引入新的 query/path 解析逻辑或状态空间。
-
 func TestQuery_SuccessPaths(t *testing.T) {
 	t.Run("query int default min max", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items", nil)
@@ -248,56 +241,12 @@ func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
 	})
 }
 
-func TestQueryLookupHelpers_Branches(t *testing.T) {
-	t.Run("query helper", func(t *testing.T) {
-		if values, ok := queryParamValues(nil, "page"); ok || values != nil {
-			t.Fatalf("queryParamValues(nil) = (%v, %v), want (nil, false)", values, ok)
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/items?page=5&tag=a&tag=b", nil)
-
-		t.Run("single value", func(t *testing.T) {
-			values, ok := queryParamValues(req, "page")
-			if !ok || len(values) != 1 || values[0] != "5" {
-				t.Fatalf("queryParamValues(page) = (%v, %v), want ([5], true)", values, ok)
-			}
-		})
-
-		t.Run("multiple values", func(t *testing.T) {
-			values, ok := queryParamValues(req, "tag")
-			if !ok || len(values) != 2 || values[0] != "a" || values[1] != "b" {
-				t.Fatalf("queryParamValues(tag) = (%v, %v), want ([a b], true)", values, ok)
-			}
-		})
-
-		t.Run("missing key", func(t *testing.T) {
-			values, ok := queryParamValues(req, "missing")
-			if ok || values != nil {
-				t.Fatalf("queryParamValues(missing) = (%v, %v), want (nil, false)", values, ok)
-			}
-		})
-
-		t.Run("empty value", func(t *testing.T) {
-			emptyReq := httptest.NewRequest(http.MethodGet, "/items?page=", nil)
-			values, ok := queryParamValues(emptyReq, "page")
-			if !ok || len(values) != 1 || values[0] != "" {
-				t.Fatalf("queryParamValues(empty) = (%v, %v), want ([\"\"], true)", values, ok)
-			}
-		})
-	})
-}
-
 func TestQueryBuilder_UsageAndOptionalBehavior(t *testing.T) {
 	t.Run("nil query builder", func(t *testing.T) {
 		var p *QueryParam
 
 		_, err := p.Values().Get()
 		assertUsageErrorContains(t, err, "param builder must not be nil")
-	})
-
-	t.Run("zero path builder", func(t *testing.T) {
-		_, err := (&PathParam{}).String().Get()
-		assertUsageErrorContains(t, err, "param builder must be created with Path or Query")
 	})
 
 	t.Run("zero query builder", func(t *testing.T) {
