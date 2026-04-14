@@ -59,11 +59,8 @@ func bindBody(r *http.Request, target any) error {
 }
 
 // bodyMediaType 解析请求头中的主 media type。
+// 调用方保证 request 已完成公开入口校验。
 func bodyMediaType(r *http.Request) (string, error) {
-	if r == nil {
-		return "", nil
-	}
-
 	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
 	if contentType == "" {
 		return "", nil
@@ -112,11 +109,8 @@ func mapJSONBodyDecodeError(err error) error {
 var errRequestTooLarge = errors.New("bind: request body too large")
 
 // readBody 在默认大小限制内完整读取请求 body。
+// bindBody 仅在 HasBody 已确认存在非空 body 后调用这里，因此 body 非 nil。
 func readBody(body io.ReadCloser) ([]byte, error) {
-	if body == nil {
-		return nil, nil
-	}
-
 	data, err := io.ReadAll(io.LimitReader(body, defaultMaxBodyBytes+1))
 	if err != nil {
 		return nil, err

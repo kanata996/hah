@@ -32,10 +32,8 @@ type bindMultipleUnmarshaler interface {
 // bindPathValuesDefault 负责把 path 参数绑定到目标对象。
 func bindPathValuesDefault(r *http.Request, target any) error {
 	params := map[string][]string{}
-	if r != nil {
-		for _, name := range ireq.PathWildcardNames(r.Pattern) {
-			params[name] = []string{r.PathValue(name)}
-		}
+	for _, name := range ireq.PathWildcardNames(r.Pattern) {
+		params[name] = []string{r.PathValue(name)}
 	}
 	return bindStringSourceDefault(target, params, "param")
 }
@@ -43,7 +41,7 @@ func bindPathValuesDefault(r *http.Request, target any) error {
 // bindQueryParamsDefault 负责把 query 参数绑定到目标对象。
 func bindQueryParamsDefault(r *http.Request, target any) error {
 	params := map[string][]string{}
-	if r != nil && r.URL != nil {
+	if r.URL != nil {
 		params = r.URL.Query()
 	}
 	return bindStringSourceDefault(target, params, "query")
@@ -52,49 +50,48 @@ func bindQueryParamsDefault(r *http.Request, target any) error {
 // bindHeadersDefault 负责把 header 参数绑定到目标对象。
 func bindHeadersDefault(r *http.Request, target any) error {
 	params := map[string][]string{}
-	if r != nil {
-		type headerEntry struct {
-			trimmed   string
-			canonical string
-			values    []string
-		}
+	type headerEntry struct {
+		trimmed   string
+		canonical string
+		values    []string
+	}
 
-		grouped := map[string][]headerEntry{}
-		for key, values := range r.Header {
-			trimmed := strings.TrimSpace(key)
-			if trimmed == "" {
-				continue
+	grouped := map[string][]headerEntry{}
+	for key, values := range r.Header {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			continue
+		}
+		canonical := textproto.CanonicalMIMEHeaderKey(trimmed)
+		grouped[canonical] = append(grouped[canonical], headerEntry{
+			trimmed:   trimmed,
+			canonical: canonical,
+			values:    values,
+		})
+	}
+
+	for canonical, entries := range grouped {
+		sort.Slice(entries, func(i, j int) bool {
+			iCanonical := entries[i].trimmed == entries[i].canonical
+			jCanonical := entries[j].trimmed == entries[j].canonical
+			if iCanonical != jCanonical {
+				return iCanonical
 			}
-			canonical := textproto.CanonicalMIMEHeaderKey(trimmed)
-			grouped[canonical] = append(grouped[canonical], headerEntry{
-				trimmed:   trimmed,
-				canonical: canonical,
-				values:    values,
-			})
-		}
+			return entries[i].trimmed < entries[j].trimmed
+		})
 
-		for canonical, entries := range grouped {
-			sort.Slice(entries, func(i, j int) bool {
-				iCanonical := entries[i].trimmed == entries[i].canonical
-				jCanonical := entries[j].trimmed == entries[j].canonical
-				if iCanonical != jCanonical {
-					return iCanonical
-				}
-				return entries[i].trimmed < entries[j].trimmed
-			})
-
-			merged := make([]string, 0)
-			for _, entry := range entries {
-				merged = append(merged, entry.values...)
-			}
-			params[canonical] = merged
+		merged := make([]string, 0)
+		for _, entry := range entries {
+			merged = append(merged, entry.values...)
 		}
+		params[canonical] = merged
 	}
 	return bindStringSourceDefault(target, params, "header")
 }
 
-// badRequestWrap 把字符串源绑定阶段的普通错误统一收敛为 400。
-func badRequestWrap(err error) error {
+// bindStringSourceDefault 为 path/query/header 这类字符串源复用同一套错误边界。
+func bindStringSourceDefault(target any, data map[string][]string, tag string) error {
+	err := bindDataDefault(target, data, tag)
 	if err == nil {
 		return nil
 	}
@@ -107,28 +104,15 @@ func badRequestWrap(err error) error {
 	return errx.NewHTTPErrorWithCause(http.StatusBadRequest, "", "", err)
 }
 
-// bindStringSourceDefault 为 path/query/header 这类字符串源复用同一套错误边界。
-func bindStringSourceDefault(target any, data map[string][]string, tag string) error {
-	if err := bindDataDefault(target, data, tag); err != nil {
-		return badRequestWrap(err)
-	}
-	return nil
-}
-
 // bindDataDefault 按 tag 和字段类型把字符串输入写入目标对象。
+// 调用方保证 destination 已通过公开入口校验，是非 nil 指针。
 func bindDataDefault(destination any, data map[string][]string, tag string) error {
-	if destination == nil || len(data) == 0 {
+	if len(data) == 0 {
 		return nil
 	}
 
-	typ := reflect.TypeOf(destination)
-	val := reflect.ValueOf(destination)
-	if typ.Kind() != reflect.Pointer || val.IsNil() {
-		return errors.New("binding element must be a pointer")
-	}
-
-	typ = typ.Elem()
-	val = val.Elem()
+	val := reflect.ValueOf(destination).Elem()
+	typ := val.Type()
 
 	stringType := reflect.TypeOf("")
 	sliceOfStringType := reflect.TypeOf([]string(nil))

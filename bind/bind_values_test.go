@@ -146,6 +146,44 @@ func TestBindPathValues_NameMatchingIsCaseSensitive(t *testing.T) {
 	}
 }
 
+func TestBindPathValues_SupportsNetHTTPPatternVariants(t *testing.T) {
+	t.Run("method-prefixed typed wildcard binds by declared name", func(t *testing.T) {
+		type request struct {
+			ID int `param:"id"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/accounts/42", nil)
+		req.Pattern = "GET /accounts/{id:[0-9]+}"
+		req.SetPathValue("id", "42")
+
+		var dst request
+		if err := BindPathValues(req, &dst); err != nil {
+			t.Fatalf("BindPathValues() error = %v", err)
+		}
+		if dst.ID != 42 {
+			t.Fatalf("id = %d, want 42", dst.ID)
+		}
+	})
+
+	t.Run("catch-all wildcard binds full path value", func(t *testing.T) {
+		type request struct {
+			Path string `param:"path"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/files/a/b/report.txt", nil)
+		req.Pattern = "/files/{path...}"
+		req.SetPathValue("path", "a/b/report.txt")
+
+		var dst request
+		if err := BindPathValues(req, &dst); err != nil {
+			t.Fatalf("BindPathValues() error = %v", err)
+		}
+		if dst.Path != "a/b/report.txt" {
+			t.Fatalf("path = %q, want a/b/report.txt", dst.Path)
+		}
+	})
+}
+
 func TestBindQueryParams_BindsSupportedTypes(t *testing.T) {
 	type request struct {
 		Page   int        `query:"page"`
@@ -165,6 +203,49 @@ func TestBindQueryParams_BindsSupportedTypes(t *testing.T) {
 	}
 	if len(dst.IDs) != 2 || dst.IDs[0] != 1 || dst.IDs[1] != 2 {
 		t.Fatalf("ids = %#v, want [1 2]", dst.IDs)
+	}
+}
+
+func TestBindQueryParams_BindsUnsignedAndFloatTypes(t *testing.T) {
+	type request struct {
+		Attempt uint    `query:"attempt"`
+		Limit   uint64  `query:"limit"`
+		Ratio   float32 `query:"ratio"`
+		Score   float64 `query:"score"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?attempt=2&limit=9&ratio=1.5&score=2.25", nil)
+
+	var dst request
+	if err := BindQueryParams(req, &dst); err != nil {
+		t.Fatalf("BindQueryParams() error = %v", err)
+	}
+	if dst.Attempt != 2 || dst.Limit != 9 || dst.Ratio != 1.5 || dst.Score != 2.25 {
+		t.Fatalf("dst = %#v, want bound unsigned and float values", dst)
+	}
+}
+
+func TestBindQueryParams_EmptyUnsignedAndFloatValuesBindZero(t *testing.T) {
+	type request struct {
+		Attempt uint    `query:"attempt"`
+		Limit   uint64  `query:"limit"`
+		Ratio   float32 `query:"ratio"`
+		Score   float64 `query:"score"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?attempt=&limit=&ratio=&score=", nil)
+	dst := request{
+		Attempt: 7,
+		Limit:   9,
+		Ratio:   1.5,
+		Score:   2.25,
+	}
+
+	if err := BindQueryParams(req, &dst); err != nil {
+		t.Fatalf("BindQueryParams() error = %v", err)
+	}
+	if dst.Attempt != 0 || dst.Limit != 0 || dst.Ratio != 0 || dst.Score != 0 {
+		t.Fatalf("dst = %#v, want zero values after empty inputs", dst)
 	}
 }
 
@@ -300,6 +381,30 @@ func TestBindQueryParams_BindingErrorsAreBadRequest(t *testing.T) {
 
 	var dst request
 	_ = assertBadRequest(t, BindQueryParams(req, &dst))
+}
+
+func TestBindQueryParams_UnsignedAndFloatBindingErrorsAreBadRequest(t *testing.T) {
+	t.Run("unsigned parse failure returns bad request", func(t *testing.T) {
+		type request struct {
+			Attempt uint `query:"attempt"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?attempt=-1", nil)
+
+		var dst request
+		_ = assertBadRequest(t, BindQueryParams(req, &dst))
+	})
+
+	t.Run("float parse failure returns bad request", func(t *testing.T) {
+		type request struct {
+			Score float64 `query:"score"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?score=oops", nil)
+
+		var dst request
+		_ = assertBadRequest(t, BindQueryParams(req, &dst))
+	})
 }
 
 func TestBindHeaders_BindsSupportedScalarTypes(t *testing.T) {
