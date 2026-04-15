@@ -511,3 +511,21 @@ func TestHTTPErrorErrorsReturnsNilWhenNoErrors(t *testing.T) {
 		t.Fatalf("Errors() = %#v, want nil", got)
 	}
 }
+
+// nil 接收者调用 WithViolations 应保持 nil-safe，不触发 panic。
+func TestHTTPErrorWithViolationsNilReceiverReturnsNil(t *testing.T) {
+	var err *HTTPError
+
+	if got := err.WithViolations([]Violation{{Field: "name"}}); got != nil {
+		t.Fatalf("WithViolations() = %#v, want nil", got)
+	}
+}
+
+// 显式传入空切片时，也应收敛为无 violations 的稳定 nil 表示。
+func TestHTTPErrorWithViolationsEmptySliceNormalizesToNil(t *testing.T) {
+	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request").WithViolations([]Violation{})
+
+	if got := err.Errors(); got != nil {
+		t.Fatalf("Errors() = %#v, want nil", got)
+	}
+}

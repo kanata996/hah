@@ -164,11 +164,11 @@ func (p *paramValue[T]) resolve() (T, error) {
 
 type multiParamValue[T any] struct {
 	spec  paramSpec
-	parse func([]string) (T, error)
+	parse func([]string) T
 	state paramState[T]
 }
 
-func newMultiParamValue[T any](spec paramSpec, parse func([]string) (T, error), clone func(T) T) multiParamValue[T] {
+func newMultiParamValue[T any](spec paramSpec, parse func([]string) T, clone func(T) T) multiParamValue[T] {
 	return multiParamValue[T]{
 		spec:  spec,
 		parse: parse,
@@ -202,11 +202,7 @@ func (p *multiParamValue[T]) resolve() (T, error) {
 		return p.state.resolveMissing(p.spec)
 	}
 
-	value, err := p.parse(values)
-	if err != nil {
-		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.ViolationCodeInvalid, ""))
-	}
-
+	value := p.parse(values)
 	return p.state.runChecks(p.spec, value)
 }
 
