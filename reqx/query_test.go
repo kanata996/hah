@@ -165,12 +165,12 @@ func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("strings alias returns raw values including empty string", func(t *testing.T) {
+	t.Run("values returns raw values including empty string", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?tag=&tag=b", nil)
 
-		got, err := Query(req, "tag").Strings().Get()
+		got, err := Query(req, "tag").Values().Get()
 		if err != nil {
-			t.Fatalf("Query().Strings().Get() error = %v", err)
+			t.Fatalf("Query().Values().Get() error = %v", err)
 		}
 		if !reflect.DeepEqual(got, []string{"", "b"}) {
 			t.Fatalf("tag = %#v, want [\"\" b]", got)

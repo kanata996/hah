@@ -11,6 +11,10 @@
 // query/body DTO 场景下的 source-to-struct 映射。调整 Path / Query 的形状、
 // 链式能力或错误语义时，应按核心 public API 变更看待。
 //
+// BindQuery 的目标当前限定为 struct、map[string]string、map[string][]string
+// 或 map[string]any；如果 DTO/tag 形状本身非法，会直接返回普通错误，
+// 而不是按客户端输入错误收敛。
+//
 // 典型用法：
 //   - 读取单个 path/query 参数时，优先使用 Path(...) / Query(...)
 //   - 绑定 query/body DTO 时，使用 BindQuery / BindBody 或根包 hah 的对应 facade

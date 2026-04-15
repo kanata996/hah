@@ -19,13 +19,13 @@ type paramSpec struct {
 
 func (s paramSpec) values() ([]string, bool, error) {
 	if s.lookup == nil || s.input == "" {
-		return nil, false, errorsf("param builder must be created with Path or Query")
+		return nil, false, usageErrorf("param builder must be created with Path or Query")
 	}
 	if s.r == nil {
-		return nil, false, errorsf("request must not be nil")
+		return nil, false, usageErrorf("request must not be nil")
 	}
 	if s.name == "" {
-		return nil, false, errorsf("parameter name must not be empty")
+		return nil, false, usageErrorf("parameter name must not be empty")
 	}
 
 	values, exists := s.lookup(s.r, s.name)
@@ -44,7 +44,7 @@ type paramValue[T any] struct {
 
 func newParamValue[T any](spec paramSpec, builderNil bool, parse func(string) (T, error)) paramValue[T] {
 	if builderNil {
-		return paramValue[T]{usageErr: errorsf("param builder must not be nil")}
+		return paramValue[T]{usageErr: usageErrorf("param builder must not be nil")}
 	}
 
 	return paramValue[T]{
@@ -61,7 +61,7 @@ func (p *paramValue[T]) setUsageErr(err error) {
 
 func (p *paramValue[T]) setRequired() {
 	if p.hasDefault {
-		p.setUsageErr(errorsf("required and default are mutually exclusive"))
+		p.setUsageErr(usageErrorf("required and default are mutually exclusive"))
 		return
 	}
 	p.required = true
@@ -69,7 +69,7 @@ func (p *paramValue[T]) setRequired() {
 
 func (p *paramValue[T]) setDefault(value T) {
 	if p.required {
-		p.setUsageErr(errorsf("required and default are mutually exclusive"))
+		p.setUsageErr(usageErrorf("required and default are mutually exclusive"))
 		return
 	}
 	p.hasDefault = true
@@ -78,7 +78,7 @@ func (p *paramValue[T]) setDefault(value T) {
 
 func (p *paramValue[T]) addCheck(check func(T) error) {
 	if check == nil {
-		p.setUsageErr(errorsf("check must not be nil"))
+		p.setUsageErr(usageErrorf("check must not be nil"))
 		return
 	}
 	p.checks = append(p.checks, check)
@@ -140,7 +140,7 @@ type multiParamValue[T any] struct {
 
 func newMultiParamValue[T any](spec paramSpec, builderNil bool, parse func([]string) (T, error), clone func(T) T) multiParamValue[T] {
 	if builderNil {
-		return multiParamValue[T]{usageErr: errorsf("param builder must not be nil")}
+		return multiParamValue[T]{usageErr: usageErrorf("param builder must not be nil")}
 	}
 
 	return multiParamValue[T]{
@@ -165,7 +165,7 @@ func (p *multiParamValue[T]) setUsageErr(err error) {
 
 func (p *multiParamValue[T]) setRequired() {
 	if p.hasDefault {
-		p.setUsageErr(errorsf("required and default are mutually exclusive"))
+		p.setUsageErr(usageErrorf("required and default are mutually exclusive"))
 		return
 	}
 	p.required = true
@@ -173,7 +173,7 @@ func (p *multiParamValue[T]) setRequired() {
 
 func (p *multiParamValue[T]) setDefault(value T) {
 	if p.required {
-		p.setUsageErr(errorsf("required and default are mutually exclusive"))
+		p.setUsageErr(usageErrorf("required and default are mutually exclusive"))
 		return
 	}
 	p.hasDefault = true
@@ -182,7 +182,7 @@ func (p *multiParamValue[T]) setDefault(value T) {
 
 func (p *multiParamValue[T]) addCheck(check func(T) error) {
 	if check == nil {
-		p.setUsageErr(errorsf("check must not be nil"))
+		p.setUsageErr(usageErrorf("check must not be nil"))
 		return
 	}
 	p.checks = append(p.checks, check)

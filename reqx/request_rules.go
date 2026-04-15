@@ -21,7 +21,7 @@ func InvalidRequest(violations ...Violation) error {
 // empty-body no-op 语义保持一致。
 func RequireBody(r *http.Request) error {
 	if r == nil {
-		return errorsf("request must not be nil")
+		return usageErrorf("request must not be nil")
 	}
 
 	hasBody, err := hasRequestBody(r)

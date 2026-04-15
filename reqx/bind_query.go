@@ -16,6 +16,13 @@ var (
 	queryStringMapType = reflect.TypeOf([]string(nil))
 )
 
+type queryMapBindingMode int
+
+const (
+	queryMapBindingFirstValue queryMapBindingMode = iota + 1
+	queryMapBindingAllValues
+)
+
 // BindUnmarshaler 允许字段从单个字符串输入值自定义解码。
 type BindUnmarshaler interface {
 	UnmarshalParam(param string) error
@@ -46,6 +53,11 @@ func bindQuery(r *http.Request, target any) error {
 		return nil
 	}
 
+	var usageErr usageError
+	if errors.As(err, &usageErr) {
+		return err
+	}
+
 	var httpErr *errx.HTTPError
 	if errors.As(err, &httpErr) && httpErr != nil {
 		return err
@@ -55,36 +67,52 @@ func bindQuery(r *http.Request, target any) error {
 }
 
 func bindQueryData(target any, data map[string][]string) error {
-	if len(data) == 0 {
-		return nil
-	}
-
 	destination := reflect.ValueOf(target).Elem()
 	switch destination.Kind() {
 	case reflect.Map:
-		return bindQueryMap(destination, data)
+		mode, err := classifyQueryMapBinding(destination.Type())
+		if err != nil {
+			return err
+		}
+		if len(data) == 0 {
+			return nil
+		}
+		return bindQueryMap(destination, data, mode)
 	case reflect.Struct:
+		if len(data) == 0 {
+			return nil
+		}
 		return bindQueryStruct(destination, data)
 	default:
-		return nil
+		return usageErrorf("destination must point to struct or supported map")
 	}
 }
 
-func bindQueryMap(destination reflect.Value, data map[string][]string) error {
-	mapType := destination.Type()
+func classifyQueryMapBinding(mapType reflect.Type) (queryMapBindingMode, error) {
 	if mapType.Key() != queryMapKeyType {
-		return nil
+		return 0, usageErrorf("destination must point to struct or supported map")
 	}
 
 	switch elemType := mapType.Elem(); {
 	case elemType == queryMapKeyType:
-		return bindQueryFirstValueMap(destination, data)
+		return queryMapBindingFirstValue, nil
 	case elemType == queryStringMapType:
-		return bindQueryValuesMap(destination, data)
+		return queryMapBindingAllValues, nil
 	case elemType.Kind() == reflect.Interface && elemType.NumMethod() == 0:
-		return bindQueryFirstValueMap(destination, data)
+		return queryMapBindingFirstValue, nil
 	default:
-		return nil
+		return 0, usageErrorf("destination must point to struct or supported map")
+	}
+}
+
+func bindQueryMap(destination reflect.Value, data map[string][]string, mode queryMapBindingMode) error {
+	switch mode {
+	case queryMapBindingFirstValue:
+		return bindQueryFirstValueMap(destination, data)
+	case queryMapBindingAllValues:
+		return bindQueryValuesMap(destination, data)
+	default:
+		return usageErrorf("destination must point to struct or supported map")
 	}
 }
 
@@ -156,7 +184,7 @@ func validateAnonymousQueryField(typeField reflect.StructField, fieldName string
 		embeddedType = embeddedType.Elem()
 	}
 	if embeddedType.Kind() == reflect.Struct {
-		return errors.New("query tags are not allowed with anonymous struct field")
+		return usageErrorf("query tags are not allowed with anonymous struct field")
 	}
 
 	return nil
@@ -293,7 +321,7 @@ func setFieldValue(value string, field reflect.Value, formatTag string) error {
 		field.SetString(value)
 		return nil
 	default:
-		return errors.New("unknown type")
+		return usageErrorf("unsupported query field type: %s", field.Type())
 	}
 }
 

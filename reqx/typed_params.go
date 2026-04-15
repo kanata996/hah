@@ -97,7 +97,7 @@ func (p *StringParam) Default(value string) *StringParam {
 
 func (p *StringParam) MinLen(n int) *StringParam {
 	if n < 0 {
-		p.value.setUsageErr(errorsf("minimum length must be >= 0"))
+		p.value.setUsageErr(usageErrorf("minimum length must be >= 0"))
 		return p
 	}
 	p.value.addCheck(func(value string) error {
@@ -111,7 +111,7 @@ func (p *StringParam) MinLen(n int) *StringParam {
 
 func (p *StringParam) MaxLen(n int) *StringParam {
 	if n < 0 {
-		p.value.setUsageErr(errorsf("maximum length must be >= 0"))
+		p.value.setUsageErr(usageErrorf("maximum length must be >= 0"))
 		return p
 	}
 	p.value.addCheck(func(value string) error {
@@ -125,7 +125,7 @@ func (p *StringParam) MaxLen(n int) *StringParam {
 
 func (p *StringParam) OneOf(values ...string) *StringParam {
 	if len(values) == 0 {
-		p.value.setUsageErr(errorsf("one-of values must not be empty"))
+		p.value.setUsageErr(usageErrorf("one-of values must not be empty"))
 		return p
 	}
 	allowed := make(map[string]struct{}, len(values))
@@ -143,7 +143,7 @@ func (p *StringParam) OneOf(values ...string) *StringParam {
 
 func (p *StringParam) Match(pattern *regexp.Regexp) *StringParam {
 	if pattern == nil {
-		p.value.setUsageErr(errorsf("match pattern must not be nil"))
+		p.value.setUsageErr(usageErrorf("match pattern must not be nil"))
 		return p
 	}
 	p.value.addCheck(func(value string) error {
@@ -183,7 +183,7 @@ func (p *IntParam) Default(value int) *IntParam {
 
 func (p *IntParam) Min(value int) *IntParam {
 	if p.max != nil && value > *p.max {
-		p.value.setUsageErr(errorsf("minimum must be less than or equal to maximum"))
+		p.value.setUsageErr(usageErrorf("minimum must be less than or equal to maximum"))
 		return p
 	}
 	p.min = &value
@@ -198,7 +198,7 @@ func (p *IntParam) Min(value int) *IntParam {
 
 func (p *IntParam) Max(value int) *IntParam {
 	if p.min != nil && *p.min > value {
-		p.value.setUsageErr(errorsf("maximum must be greater than or equal to minimum"))
+		p.value.setUsageErr(usageErrorf("maximum must be greater than or equal to minimum"))
 		return p
 	}
 	p.max = &value
@@ -239,7 +239,7 @@ func (p *Int64Param) Default(value int64) *Int64Param {
 
 func (p *Int64Param) Min(value int64) *Int64Param {
 	if p.max != nil && value > *p.max {
-		p.value.setUsageErr(errorsf("minimum must be less than or equal to maximum"))
+		p.value.setUsageErr(usageErrorf("minimum must be less than or equal to maximum"))
 		return p
 	}
 	p.min = &value
@@ -254,7 +254,7 @@ func (p *Int64Param) Min(value int64) *Int64Param {
 
 func (p *Int64Param) Max(value int64) *Int64Param {
 	if p.min != nil && *p.min > value {
-		p.value.setUsageErr(errorsf("maximum must be greater than or equal to minimum"))
+		p.value.setUsageErr(usageErrorf("maximum must be greater than or equal to minimum"))
 		return p
 	}
 	p.max = &value
@@ -295,7 +295,7 @@ func (p *UintParam) Default(value uint) *UintParam {
 
 func (p *UintParam) Min(value uint) *UintParam {
 	if p.max != nil && value > *p.max {
-		p.value.setUsageErr(errorsf("minimum must be less than or equal to maximum"))
+		p.value.setUsageErr(usageErrorf("minimum must be less than or equal to maximum"))
 		return p
 	}
 	p.min = &value
@@ -310,7 +310,7 @@ func (p *UintParam) Min(value uint) *UintParam {
 
 func (p *UintParam) Max(value uint) *UintParam {
 	if p.min != nil && *p.min > value {
-		p.value.setUsageErr(errorsf("maximum must be greater than or equal to minimum"))
+		p.value.setUsageErr(usageErrorf("maximum must be greater than or equal to minimum"))
 		return p
 	}
 	p.max = &value
@@ -351,7 +351,7 @@ func (p *Uint64Param) Default(value uint64) *Uint64Param {
 
 func (p *Uint64Param) Min(value uint64) *Uint64Param {
 	if p.max != nil && value > *p.max {
-		p.value.setUsageErr(errorsf("minimum must be less than or equal to maximum"))
+		p.value.setUsageErr(usageErrorf("minimum must be less than or equal to maximum"))
 		return p
 	}
 	p.min = &value
@@ -366,7 +366,7 @@ func (p *Uint64Param) Min(value uint64) *Uint64Param {
 
 func (p *Uint64Param) Max(value uint64) *Uint64Param {
 	if p.min != nil && *p.min > value {
-		p.value.setUsageErr(errorsf("maximum must be greater than or equal to minimum"))
+		p.value.setUsageErr(usageErrorf("maximum must be greater than or equal to minimum"))
 		return p
 	}
 	p.max = &value
@@ -431,7 +431,7 @@ func (p *Float64Param) Default(value float64) *Float64Param {
 
 func (p *Float64Param) Min(value float64) *Float64Param {
 	if p.max != nil && value > *p.max {
-		p.value.setUsageErr(errorsf("minimum must be less than or equal to maximum"))
+		p.value.setUsageErr(usageErrorf("minimum must be less than or equal to maximum"))
 		return p
 	}
 	p.min = &value
@@ -446,7 +446,7 @@ func (p *Float64Param) Min(value float64) *Float64Param {
 
 func (p *Float64Param) Max(value float64) *Float64Param {
 	if p.min != nil && *p.min > value {
-		p.value.setUsageErr(errorsf("maximum must be greater than or equal to minimum"))
+		p.value.setUsageErr(usageErrorf("maximum must be greater than or equal to minimum"))
 		return p
 	}
 	p.max = &value
@@ -487,7 +487,7 @@ func (p *DurationParam) Default(value time.Duration) *DurationParam {
 
 func (p *DurationParam) Min(value time.Duration) *DurationParam {
 	if p.max != nil && value > *p.max {
-		p.value.setUsageErr(errorsf("minimum must be less than or equal to maximum"))
+		p.value.setUsageErr(usageErrorf("minimum must be less than or equal to maximum"))
 		return p
 	}
 	p.min = &value
@@ -502,7 +502,7 @@ func (p *DurationParam) Min(value time.Duration) *DurationParam {
 
 func (p *DurationParam) Max(value time.Duration) *DurationParam {
 	if p.min != nil && *p.min > value {
-		p.value.setUsageErr(errorsf("maximum must be greater than or equal to minimum"))
+		p.value.setUsageErr(usageErrorf("maximum must be greater than or equal to minimum"))
 		return p
 	}
 	p.max = &value
@@ -567,7 +567,7 @@ func (p *TimeParam) Default(value time.Time) *TimeParam {
 
 func (p *TimeParam) After(value time.Time) *TimeParam {
 	if p.before != nil && value.After(*p.before) {
-		p.value.setUsageErr(errorsf("after time must be less than or equal to before time"))
+		p.value.setUsageErr(usageErrorf("after time must be less than or equal to before time"))
 		return p
 	}
 	p.after = &value
@@ -582,7 +582,7 @@ func (p *TimeParam) After(value time.Time) *TimeParam {
 
 func (p *TimeParam) Before(value time.Time) *TimeParam {
 	if p.after != nil && p.after.After(value) {
-		p.value.setUsageErr(errorsf("before time must be greater than or equal to after time"))
+		p.value.setUsageErr(usageErrorf("before time must be greater than or equal to after time"))
 		return p
 	}
 	p.before = &value

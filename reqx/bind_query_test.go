@@ -95,20 +95,21 @@ func TestBind_PublicEntryPointsRejectInvalidInputs(t *testing.T) {
 	}
 }
 
-func TestBindQuery_NoopsOnUnsupportedTargets(t *testing.T) {
+func TestBindQuery_RejectsUnsupportedTargets(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/?page=1", nil)
 
 	scalar := 1
-	if err := BindQuery(req, &scalar); err != nil {
-		t.Fatalf("BindQuery(scalar) error = %v", err)
+	err := BindQuery(req, &scalar)
+	assertUsageErrorContains(t, err, "destination must point to struct or supported map")
+	if scalar != 1 {
+		t.Fatalf("scalar = %d, want existing value preserved", scalar)
 	}
 
 	unsupportedMap := map[string]int(nil)
-	if err := BindQuery(req, &unsupportedMap); err != nil {
-		t.Fatalf("BindQuery(map[string]int) error = %v", err)
-	}
+	err = BindQuery(req, &unsupportedMap)
+	assertUsageErrorContains(t, err, "destination must point to struct or supported map")
 	if unsupportedMap != nil {
-		t.Fatalf("unsupportedMap = %#v, want nil no-op", unsupportedMap)
+		t.Fatalf("unsupportedMap = %#v, want nil preserved on failure", unsupportedMap)
 	}
 }
 
@@ -311,7 +312,7 @@ func TestBindQuery_EmbeddedFieldContracts(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
 
 		var dst request
-		_ = assertBadRequest(t, BindQuery(req, &dst))
+		assertUsageErrorContains(t, BindQuery(req, &dst), "query tags are not allowed with anonymous struct field")
 	})
 
 	t.Run("rejects tagged anonymous embedded pointer even when nil", func(t *testing.T) {
@@ -325,7 +326,7 @@ func TestBindQuery_EmbeddedFieldContracts(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
 
 		var dst request
-		_ = assertBadRequest(t, BindQuery(req, &dst))
+		assertUsageErrorContains(t, BindQuery(req, &dst), "query tags are not allowed with anonymous struct field")
 	})
 
 	t.Run("traverses non nil anonymous embedded pointer", func(t *testing.T) {
@@ -342,6 +343,17 @@ func TestBindQuery_EmbeddedFieldContracts(t *testing.T) {
 		if dst.Embedded == nil || dst.Name != "kanata" {
 			t.Fatalf("dst = %#v, want embedded name to bind", dst)
 		}
+	})
+
+	t.Run("rejects unsupported tagged field type", func(t *testing.T) {
+		type request struct {
+			Ch chan int `query:"ch"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?ch=value", nil)
+
+		var dst request
+		assertUsageErrorContains(t, BindQuery(req, &dst), "unsupported query field type")
 	})
 }
 

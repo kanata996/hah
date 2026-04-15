@@ -94,11 +94,6 @@ func (p *QueryParam) Values() *ValuesParam {
 	return newValuesParam(p.specOrZero(), p == nil)
 }
 
-// Strings 是 Values 的别名。
-func (p *QueryParam) Strings() *ValuesParam {
-	return newValuesParam(p.specOrZero(), p == nil)
-}
-
 func queryParamValues(r *http.Request, name string) ([]string, bool) {
 	if r == nil || r.URL == nil {
 		return nil, false
