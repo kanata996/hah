@@ -189,10 +189,6 @@ func hasRequestBody(r *http.Request) (bool, error) {
 }
 
 func detectRequestBody(r *http.Request) (bool, error) {
-	if r.Body == nil {
-		return false, nil
-	}
-
 	body := r.Body
 	var prefix [1]byte
 	n, err := body.Read(prefix[:])

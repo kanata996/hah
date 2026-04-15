@@ -59,6 +59,14 @@ func (v *customTextValue) UnmarshalText(text []byte) error {
 	return nil
 }
 
+type nestedBindUnmarshaler struct {
+	Name string `query:"name"`
+}
+
+func (*nestedBindUnmarshaler) UnmarshalParam(string) error {
+	return errors.New("should not be called for untagged nested struct")
+}
+
 func TestBind_PublicEntryPointsRejectInvalidInputs(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
@@ -238,6 +246,30 @@ func TestBindQuery_BindsSupportedMapTargets(t *testing.T) {
 	mustBindQuery(t, req, &anyMap)
 	if got := anyMap["name"]; got != "kanata" {
 		t.Fatalf("anyMap[name] = %#v, want kanata", got)
+	}
+}
+
+func TestBindQuery_FirstValueMapSkipsEmptySlices(t *testing.T) {
+	dst := map[string]string{
+		"empty": "preserved",
+		"keep":  "existing",
+	}
+
+	err := bindQueryFirstValueMap(reflect.ValueOf(&dst).Elem(), map[string][]string{
+		"empty": {},
+		"name":  {"kanata", "ignored"},
+	})
+	if err != nil {
+		t.Fatalf("bindQueryFirstValueMap() error = %v, want nil", err)
+	}
+	if got := dst["empty"]; got != "preserved" {
+		t.Fatalf("dst[empty] = %q, want preserved", got)
+	}
+	if got := dst["keep"]; got != "existing" {
+		t.Fatalf("dst[keep] = %q, want existing", got)
+	}
+	if got := dst["name"]; got != "kanata" {
+		t.Fatalf("dst[name] = %q, want kanata", got)
 	}
 }
 
@@ -452,6 +484,20 @@ func TestBindQuery_DecodeFailuresAreBadRequest(t *testing.T) {
 
 		var dst request
 		_ = assertBadRequest(t, BindQuery(req, &dst))
+	})
+
+	t.Run("nested bind unmarshaler structs are not traversed", func(t *testing.T) {
+		type request struct {
+			Nested nestedBindUnmarshaler
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
+		dst := request{Nested: nestedBindUnmarshaler{Name: "existing"}}
+
+		mustBindQuery(t, req, &dst)
+		if dst.Nested.Name != "existing" {
+			t.Fatalf("Nested.Name = %q, want existing preserved", dst.Nested.Name)
+		}
 	})
 
 	t.Run("custom single value decoder failures are bad request", func(t *testing.T) {

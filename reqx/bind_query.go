@@ -112,9 +112,9 @@ func bindQueryMap(destination reflect.Value, data map[string][]string, mode quer
 		return bindQueryFirstValueMap(destination, data)
 	case queryMapBindingAllValues:
 		return bindQueryValuesMap(destination, data)
-	default:
-		return usageErrorf("destination must point to struct or supported map")
 	}
+
+	panic("reqx: unreachable query map binding mode")
 }
 
 func bindQueryFirstValueMap(destination reflect.Value, data map[string][]string) error {
