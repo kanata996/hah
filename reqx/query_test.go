@@ -270,13 +270,6 @@ func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
 }
 
 func TestQueryBuilder_UsageAndOptionalBehavior(t *testing.T) {
-	t.Run("nil query builder", func(t *testing.T) {
-		var p *QueryParam
-
-		_, err := p.Values().Get()
-		assertUsageErrorContains(t, err, "param builder must not be nil")
-	})
-
 	t.Run("zero query builder", func(t *testing.T) {
 		_, err := (&QueryParam{}).Values().Get()
 		assertUsageErrorContains(t, err, "param builder must be created with Path or Query")

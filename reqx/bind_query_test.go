@@ -29,6 +29,8 @@ type customParamsValue struct {
 	err    error
 }
 
+var _ BindMultipleUnmarshaler = (*customParamsValue)(nil)
+
 func (v *customParamsValue) UnmarshalParams(params []string) error {
 	if v.err != nil {
 		return v.err
@@ -486,17 +488,17 @@ func TestBindQuery_DecodeFailuresAreBadRequest(t *testing.T) {
 		_ = assertBadRequest(t, BindQuery(req, &dst))
 	})
 
-	t.Run("nested bind unmarshaler structs are not traversed", func(t *testing.T) {
+	t.Run("nested structs still recurse even when they also implement BindUnmarshaler", func(t *testing.T) {
 		type request struct {
 			Nested nestedBindUnmarshaler
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
-		dst := request{Nested: nestedBindUnmarshaler{Name: "existing"}}
+		var dst request
 
 		mustBindQuery(t, req, &dst)
-		if dst.Nested.Name != "existing" {
-			t.Fatalf("Nested.Name = %q, want existing preserved", dst.Nested.Name)
+		if dst.Nested.Name != "kanata" {
+			t.Fatalf("Nested.Name = %q, want kanata", dst.Nested.Name)
 		}
 	})
 
@@ -638,7 +640,7 @@ func TestBindQuery_PointerFieldPreservation(t *testing.T) {
 	})
 }
 
-func TestBindQuery_PointerFieldFailuresDoNotAllocate(t *testing.T) {
+func TestBindQuery_PointerFieldFailuresAreBadRequest(t *testing.T) {
 	t.Run("scalar parse failure keeps nil pointer nil", func(t *testing.T) {
 		type request struct {
 			Page *int `query:"page"`
@@ -648,12 +650,9 @@ func TestBindQuery_PointerFieldFailuresDoNotAllocate(t *testing.T) {
 
 		var dst request
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Page != nil {
-			t.Fatalf("Page = %#v, want nil after failed bind", dst.Page)
-		}
 	})
 
-	t.Run("time parse failure keeps nil pointer nil", func(t *testing.T) {
+	t.Run("time parse failure returns bad request", func(t *testing.T) {
 		type request struct {
 			When *time.Time `query:"when" format:"2006-01-02"`
 		}
@@ -662,12 +661,9 @@ func TestBindQuery_PointerFieldFailuresDoNotAllocate(t *testing.T) {
 
 		var dst request
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.When != nil {
-			t.Fatalf("When = %#v, want nil after failed bind", dst.When)
-		}
 	})
 
-	t.Run("custom single-value failure keeps nil pointer nil", func(t *testing.T) {
+	t.Run("custom single-value failure returns bad request", func(t *testing.T) {
 		type request struct {
 			Custom *alwaysFailingParamValue `query:"custom"`
 		}
@@ -676,12 +672,9 @@ func TestBindQuery_PointerFieldFailuresDoNotAllocate(t *testing.T) {
 
 		var dst request
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Custom != nil {
-			t.Fatalf("Custom = %#v, want nil after failed bind", dst.Custom)
-		}
 	})
 
-	t.Run("custom multi-value failure keeps nil pointer nil", func(t *testing.T) {
+	t.Run("custom multi-value failure returns bad request", func(t *testing.T) {
 		type request struct {
 			Custom *alwaysFailingParamsValue `query:"custom"`
 		}
@@ -690,16 +683,11 @@ func TestBindQuery_PointerFieldFailuresDoNotAllocate(t *testing.T) {
 
 		var dst request
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Custom != nil {
-			t.Fatalf("Custom = %#v, want nil after failed bind", dst.Custom)
-		}
 	})
 }
 
-func TestBindQuery_PointerSliceFailuresDoNotCommit(t *testing.T) {
-	intPtr := func(v int) *int { return &v }
-
-	t.Run("nil pointer slice stays nil on element failure", func(t *testing.T) {
+func TestBindQuery_PointerSliceFailuresAreBadRequest(t *testing.T) {
+	t.Run("slice element failure returns bad request", func(t *testing.T) {
 		type request struct {
 			IDs []*int `query:"id"`
 		}
@@ -708,23 +696,17 @@ func TestBindQuery_PointerSliceFailuresDoNotCommit(t *testing.T) {
 
 		var dst request
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.IDs != nil {
-			t.Fatalf("IDs = %#v, want nil after failed bind", dst.IDs)
-		}
 	})
 
-	t.Run("existing pointer slice is preserved on element failure", func(t *testing.T) {
+	t.Run("pointer time slice element failure returns bad request", func(t *testing.T) {
 		type request struct {
-			IDs []*int `query:"id"`
+			Whens []*time.Time `query:"when" format:"15:04:05"`
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/?id=1&id=oops", nil)
-		dst := request{IDs: []*int{intPtr(7)}}
+		req := httptest.NewRequest(http.MethodGet, "/?when=10:11:12&when=bad", nil)
 
+		var dst request
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if len(dst.IDs) != 1 || dst.IDs[0] == nil || *dst.IDs[0] != 7 {
-			t.Fatalf("IDs = %#v, want existing slice preserved", dst.IDs)
-		}
 	})
 }
 

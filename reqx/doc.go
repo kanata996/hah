@@ -24,7 +24,7 @@
 // 公开 API：
 //   - request helper 入口：Path、Query
 //   - DTO binding 入口：BindQuery、BindBody
-//   - DTO 自定义解码接口：BindUnmarshaler
+//   - DTO 自定义解码接口：BindUnmarshaler、BindMultipleUnmarshaler
 //   - request helper root 类型：PathParam、QueryParam
 //   - PathParam builder 返回类型：StringParam、IntParam、Int64Param、
 //     UintParam、Uint64Param、UUIDParam
@@ -47,6 +47,8 @@
 //   - RequireBody 沿用 BindBody 的 empty-body 判定：实际读取到零字节 body 视为“没有 body”。
 //   - BindBody 对空 body 不主动报错；是否必填由调用方显式决定。
 //
-// path 输入只依赖 net/http 暴露的 PathValue / Pattern 命名 wildcard 语义，
-// 不依赖 chi.RouteContext，也不承诺 chi 专有 `*` catch-all 的兼容行为。
+// path 输入只依赖 net/http 暴露的 PathValue / Pattern 命名 wildcard 语义。
+// 如果上层 router 有自定义 pattern 语法，应在桥接层先归一化后再写入 Pattern。
+// reqx 不依赖 chi.RouteContext，也不承诺 chi 专有 `*` catch-all 或 `:{regexp}` 之类
+// router-specific token 的兼容行为。
 package reqx

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"reflect"
-	"strconv"
 	"time"
 
 	"github.com/kanata996/hah/errx"
@@ -29,8 +28,8 @@ type BindUnmarshaler interface {
 	UnmarshalParam(param string) error
 }
 
-// bindMultipleUnmarshaler 允许字段一次性接收同名输入的全部值。
-type bindMultipleUnmarshaler interface {
+// BindMultipleUnmarshaler 允许字段一次性接收同名输入的全部值。
+type BindMultipleUnmarshaler interface {
 	UnmarshalParams(params []string) error
 }
 
@@ -205,9 +204,6 @@ func bindNestedQueryStruct(field reflect.Value, data map[string][]string) error 
 	if field.Kind() != reflect.Struct {
 		return nil
 	}
-	if _, ok := field.Addr().Interface().(BindUnmarshaler); ok {
-		return nil
-	}
 	return bindQueryData(field.Addr().Interface(), data)
 }
 
@@ -220,37 +216,31 @@ func lookupQueryFieldValues(data map[string][]string, name string) ([]string, bo
 }
 
 func bindTaggedQueryField(field reflect.Value, values []string, formatTag string) error {
-	writeField, commitWrite := stagedFieldValue(field)
+	writeField := bindFieldValue(field)
 
 	if ok, err := unmarshalMultipleInputs(values, writeField); ok {
-		if err != nil {
-			return err
-		}
-		commitWrite()
-		return nil
+		return err
 	}
 
 	if ok, err := unmarshalSingleInput(values[0], writeField, formatTag); ok {
-		if err != nil {
-			return err
-		}
-		commitWrite()
-		return nil
+		return err
 	}
 
 	if writeField.Kind() == reflect.Slice {
-		if err := bindSliceField(writeField, values, formatTag); err != nil {
-			return err
-		}
-		commitWrite()
-		return nil
+		return bindSliceField(writeField, values, formatTag)
 	}
 
-	if err := setFieldValue(values[0], writeField, formatTag); err != nil {
-		return err
+	return setFieldValue(values[0], writeField, formatTag)
+}
+
+func bindFieldValue(field reflect.Value) reflect.Value {
+	for field.Kind() == reflect.Pointer {
+		if field.IsNil() {
+			field.Set(reflect.New(field.Type().Elem()))
+		}
+		field = field.Elem()
 	}
-	commitWrite()
-	return nil
+	return field
 }
 
 func bindSliceField(field reflect.Value, values []string, formatTag string) error {
@@ -265,7 +255,7 @@ func bindSliceField(field reflect.Value, values []string, formatTag string) erro
 }
 
 func unmarshalMultipleInputs(values []string, field reflect.Value) (bool, error) {
-	unmarshaler, ok := field.Addr().Interface().(bindMultipleUnmarshaler)
+	unmarshaler, ok := field.Addr().Interface().(BindMultipleUnmarshaler)
 	if !ok {
 		return false, nil
 	}
@@ -297,12 +287,10 @@ func unmarshalSingleInput(value string, field reflect.Value, formatTag string) (
 
 func setFieldValue(value string, field reflect.Value, formatTag string) error {
 	if field.Kind() == reflect.Pointer {
-		writeField, commitWrite := stagedFieldValue(field)
-		if err := setFieldValue(value, writeField, formatTag); err != nil {
-			return err
+		if field.IsNil() {
+			field.Set(reflect.New(field.Type().Elem()))
 		}
-		commitWrite()
-		return nil
+		return setFieldValue(value, field.Elem(), formatTag)
 	}
 
 	if ok, err := unmarshalSingleInput(value, field, formatTag); ok {
@@ -334,26 +322,8 @@ func setFieldValue(value string, field reflect.Value, formatTag string) error {
 	}
 }
 
-func stagedFieldValue(field reflect.Value) (reflect.Value, func()) {
-	if field.Kind() != reflect.Pointer {
-		return field, func() {}
-	}
-
-	if field.IsNil() {
-		staged := reflect.New(field.Type().Elem())
-		return staged.Elem(), func() {
-			field.Set(staged)
-		}
-	}
-
-	return field.Elem(), func() {}
-}
-
 func setIntField(value string, field reflect.Value) error {
-	if value == "" {
-		value = "0"
-	}
-	intValue, err := strconv.ParseInt(value, 10, field.Type().Bits())
+	intValue, err := parseIntBits(value, field.Type().Bits())
 	if err == nil {
 		field.SetInt(intValue)
 	}
@@ -361,10 +331,7 @@ func setIntField(value string, field reflect.Value) error {
 }
 
 func setUintField(value string, field reflect.Value) error {
-	if value == "" {
-		value = "0"
-	}
-	uintValue, err := strconv.ParseUint(value, 10, field.Type().Bits())
+	uintValue, err := parseUintBits(value, field.Type().Bits())
 	if err == nil {
 		field.SetUint(uintValue)
 	}
@@ -372,10 +339,7 @@ func setUintField(value string, field reflect.Value) error {
 }
 
 func setBoolField(value string, field reflect.Value) error {
-	if value == "" {
-		value = "false"
-	}
-	boolValue, err := strconv.ParseBool(value)
+	boolValue, err := parseBoolValue(value)
 	if err == nil {
 		field.SetBool(boolValue)
 	}
@@ -383,10 +347,7 @@ func setBoolField(value string, field reflect.Value) error {
 }
 
 func setFloatField(value string, field reflect.Value) error {
-	if value == "" {
-		value = "0.0"
-	}
-	floatValue, err := strconv.ParseFloat(value, field.Type().Bits())
+	floatValue, err := parseFloatBits(value, field.Type().Bits())
 	if err == nil {
 		field.SetFloat(floatValue)
 	}

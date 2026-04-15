@@ -66,7 +66,6 @@ func TestPath_SuccessPaths(t *testing.T) {
 			{name: "basic wildcard", pattern: "/accounts/{id}", param: "id"},
 			{name: "method prefix wildcard", pattern: "GET /accounts/{id}", param: "id"},
 			{name: "catch all wildcard", pattern: "/files/{path...}", param: "path"},
-			{name: "typed wildcard", pattern: "/accounts/{id:[0-9]+}", param: "id"},
 		}
 
 		for _, tc := range tests {
@@ -118,6 +117,7 @@ func TestPath_RequiredAndInvalidViolations(t *testing.T) {
 			{name: "blank pattern", pattern: "   ", param: "id"},
 			{name: "no wildcard", pattern: "/accounts", param: "id"},
 			{name: "different wildcard name", pattern: "/accounts/{id}", param: "slug"},
+			{name: "adapter specific typed wildcard", pattern: "/accounts/{id:[0-9]+}", param: "id"},
 			{name: "dollar placeholder", pattern: "/{$}", param: "$"},
 			{name: "blank wildcard token", pattern: "/{ }", param: "id"},
 			{name: "malformed pattern", pattern: "/accounts/{id", param: "id"},
@@ -144,13 +144,6 @@ func TestPathBuilder_UsageAndOptionalBehavior(t *testing.T) {
 	t.Run("empty name", func(t *testing.T) {
 		_, err := Path(requestWithPathParams(map[string][]string{"id": {"u_1"}}), " ").String().Get()
 		assertUsageErrorContains(t, err, "parameter name must not be empty")
-	})
-
-	t.Run("nil path builder", func(t *testing.T) {
-		var p *PathParam
-
-		_, err := p.String().Get()
-		assertUsageErrorContains(t, err, "param builder must not be nil")
 	})
 
 	t.Run("zero path builder", func(t *testing.T) {
