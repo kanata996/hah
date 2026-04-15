@@ -2,34 +2,6 @@ package reqx
 
 import "strings"
 
-func pathWildcardNames(pattern string) []string {
-	pattern = strings.TrimSpace(pattern)
-	if pattern == "" {
-		return nil
-	}
-
-	names := make([]string, 0, 2)
-	for i := 0; i < len(pattern); i++ {
-		if pattern[i] != '{' {
-			continue
-		}
-
-		end := strings.IndexByte(pattern[i+1:], '}')
-		if end < 0 {
-			break
-		}
-
-		token := normalizePathWildcardToken(pattern[i+1 : i+1+end])
-		if token != "" {
-			names = append(names, token)
-		}
-
-		i += end + 1
-	}
-
-	return names
-}
-
 func pathHasWildcard(pattern, name string) bool {
 	pattern = strings.TrimSpace(pattern)
 	name = strings.TrimSpace(name)

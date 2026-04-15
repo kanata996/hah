@@ -1,12 +1,5 @@
 package resp
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `JSON` 在典型小型响应体上的基准性能。
-// - [✓] `JSONBlob` 直写原始 JSON 字节的基准性能。
-// - [✓] `WriteError` 在 4xx 校验错误场景下的基准性能。
-// - [✓] `WriteError` 在 5xx 服务端错误场景下的基准性能。
-
 import (
 	"errors"
 	"net/http"

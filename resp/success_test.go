@@ -1,6 +1,7 @@
 package resp
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -60,13 +61,13 @@ func TestSuccessWritersCooperateWithHeadLikeWriter(t *testing.T) {
 		{
 			name:       "OK",
 			wantStatus: http.StatusOK,
-			wantBody:   mustEncodeJSON(t, map[string]any{"id": "u_1"}),
+			wantBody:   []byte("{\"id\":\"u_1\"}\n"),
 			write:      func(w http.ResponseWriter) error { return OK(w, map[string]any{"id": "u_1"}) },
 		},
 		{
 			name:       "Created",
 			wantStatus: http.StatusCreated,
-			wantBody:   mustEncodeJSON(t, map[string]any{"id": "u_1"}),
+			wantBody:   []byte("{\"id\":\"u_1\"}\n"),
 			write:      func(w http.ResponseWriter) error { return Created(w, map[string]any{"id": "u_1"}) },
 		},
 	}
@@ -198,8 +199,18 @@ func TestSuccessWritersReturnWrappedWriteError(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			w := &failingWriter{}
-			_ = assertWrappedResponseWriteError(t, tc.write(w))
+			cause := errors.New("socket closed")
+			w := &failingWriter{cause: cause}
+			err := tc.write(w)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !errors.Is(err, cause) {
+				t.Fatalf("errors.Is(err, cause) = false, want true")
+			}
+			if got := err.Error(); got != "resp: write response failed: socket closed" {
+				t.Fatalf("error = %q, want %q", got, "resp: write response failed: socket closed")
+			}
 			if w.status != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", w.status, tc.wantStatus)
 			}

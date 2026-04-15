@@ -14,86 +14,6 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-func TestNormalizeHTTPErrorCommonErrors(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name       string
-		input      error
-		wantStatus int
-		wantCode   string
-		wantTitle  string
-		wantDetail string
-	}{
-		{
-			name:       "nil",
-			input:      nil,
-			wantStatus: 0,
-		},
-		{
-			name:       "wrapped http error",
-			input:      errors.Join(errors.New("handler failed"), errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")),
-			wantStatus: http.StatusBadRequest,
-			wantCode:   "bad_request",
-			wantTitle:  http.StatusText(http.StatusBadRequest),
-			wantDetail: "bad request",
-		},
-		{
-			name:       "context canceled",
-			input:      context.Canceled,
-			wantStatus: 499,
-			wantCode:   "client_closed_request",
-			wantTitle:  "Client Closed Request",
-			wantDetail: "Client Closed Request",
-		},
-		{
-			name:       "deadline exceeded",
-			input:      context.DeadlineExceeded,
-			wantStatus: http.StatusGatewayTimeout,
-			wantCode:   "timeout",
-			wantTitle:  http.StatusText(http.StatusGatewayTimeout),
-			wantDetail: http.StatusText(http.StatusGatewayTimeout),
-		},
-		{
-			name:       "generic error",
-			input:      errors.New("db timeout"),
-			wantStatus: http.StatusInternalServerError,
-			wantCode:   "internal_error",
-			wantTitle:  http.StatusText(http.StatusInternalServerError),
-			wantDetail: http.StatusText(http.StatusInternalServerError),
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := asHTTPError(tc.input)
-			if tc.wantStatus == 0 {
-				if got != nil {
-					t.Fatalf("asHTTPError() = %#v, want nil", got)
-				}
-				return
-			}
-			if got == nil {
-				t.Fatal("asHTTPError() = nil")
-			}
-			if got.Status() != tc.wantStatus {
-				t.Fatalf("status = %d, want %d", got.Status(), tc.wantStatus)
-			}
-			if got.Code() != tc.wantCode {
-				t.Fatalf("code = %q, want %q", got.Code(), tc.wantCode)
-			}
-			if got.Title() != tc.wantTitle {
-				t.Fatalf("title = %q, want %q", got.Title(), tc.wantTitle)
-			}
-			if got.Detail() != tc.wantDetail {
-				t.Fatalf("detail = %q, want %q", got.Detail(), tc.wantDetail)
-			}
-		})
-	}
-}
-
 type panicJSONDetail struct{}
 
 func (panicJSONDetail) MarshalJSON() ([]byte, error) {
@@ -144,15 +64,18 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 	})
 }
 
-// 显式传入的公共 code/detail/errors 应原样进入 problem JSON，而不是被默认值覆盖。
-func TestWriteErrorPreservesExplicitPublicFields(t *testing.T) {
+// 包装后的 HTTPError 也应保留显式公共字段，而不是被默认值覆盖。
+func TestWriteErrorPreservesExplicitPublicFieldsFromWrappedHTTPError(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, errx.NewHTTPError(
-		http.StatusBadRequest,
-		"invalid_json",
-		"payload invalid",
-		map[string]any{"field": "name", "code": "required"},
+	err := WriteError(rr, errors.Join(
+		errors.New("handler failed"),
+		errx.NewHTTPError(
+			http.StatusBadRequest,
+			"invalid_json",
+			"payload invalid",
+			map[string]any{"field": "name", "code": "required"},
+		),
 	))
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
@@ -249,15 +172,16 @@ func TestWriteErrorRejectsNilWriter(t *testing.T) {
 
 // HEAD 请求写错误时仍走正常 Write 链路，但最终对外只保留状态和头语义。
 func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
-	inner := &headLikeResponseWriter{}
-	w := &writeCallbackResponseWriter{ResponseWriter: inner}
+	expected := httptest.NewRecorder()
 	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "", "detail")
-	body, err := marshalProblemPayload(httpErr)
-	if err != nil {
-		t.Fatalf("marshalProblemPayload() error = %v", err)
+	if err := WriteError(expected, httpErr); err != nil {
+		t.Fatalf("WriteError() expected recorder error = %v", err)
 	}
 
-	err = WriteError(w, httpErr)
+	inner := &headLikeResponseWriter{}
+	w := &writeCallbackResponseWriter{ResponseWriter: inner}
+
+	err := WriteError(w, httpErr)
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
@@ -267,8 +191,8 @@ func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	if got := inner.Header().Get("Content-Type"); got != "application/problem+json" {
 		t.Fatalf("Content-Type = %q, want application/problem+json", got)
 	}
-	if got := inner.Header().Get("Content-Length"); got != strconv.Itoa(len(body)) {
-		t.Fatalf("Content-Length = %q, want %d", got, len(body))
+	if got := inner.Header().Get("Content-Length"); got != strconv.Itoa(expected.Body.Len()) {
+		t.Fatalf("Content-Length = %q, want %d", got, expected.Body.Len())
 	}
 	if w.writeCalls != 1 {
 		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)

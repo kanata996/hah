@@ -1,8 +1,10 @@
 package resp
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -88,7 +90,7 @@ func TestJSONBodyWritersCooperateWithHeadLikeWriter(t *testing.T) {
 		{
 			name:       "JSON",
 			wantStatus: http.StatusAccepted,
-			wantBody:   mustEncodeJSON(t, map[string]any{"id": "u_1"}),
+			wantBody:   []byte("{\"id\":\"u_1\"}\n"),
 			write:      func(w http.ResponseWriter) error { return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"}) },
 		},
 		{
@@ -159,7 +161,7 @@ func TestJSONBodyWritersRejectInvalidStatusOrBodylessStatus(t *testing.T) {
 			name:      "JSON invalid status",
 			write:     func(w http.ResponseWriter) error { return JSON(w, 1000, map[string]any{"id": "u_1"}) },
 			wantErr:   "resp: invalid HTTP status 1000",
-			checkBody: false,
+			checkBody: true,
 		},
 		{
 			name: "JSON bodyless status",
@@ -245,8 +247,18 @@ func TestJSONBodyWritersReturnWrappedWriteError(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			w := &failingWriter{}
-			_ = assertWrappedResponseWriteError(t, tc.write(w))
+			cause := errors.New("socket closed")
+			w := &failingWriter{cause: cause}
+			err := tc.write(w)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !errors.Is(err, cause) {
+				t.Fatalf("errors.Is(err, cause) = false, want true")
+			}
+			if got := err.Error(); got != "resp: write response failed: socket closed" {
+				t.Fatalf("error = %q, want %q", got, "resp: write response failed: socket closed")
+			}
 			if w.status != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", w.status, tc.wantStatus)
 			}
@@ -254,5 +266,36 @@ func TestJSONBodyWritersReturnWrappedWriteError(t *testing.T) {
 				t.Fatalf("writes = %d, want 1", w.writes)
 			}
 		})
+	}
+}
+
+func TestJSONBodyWritersRecoverWriteErrorStringFromCausePanic(t *testing.T) {
+	w := &failingWriter{cause: panicWriteCause{}}
+
+	err := JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`))
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("err.Error() panicked: %v", recovered)
+		}
+	}()
+
+	if got := err.Error(); !strings.Contains(got, "resp: write response failed: panic calling Error()") {
+		t.Fatalf("error = %q, want panic fallback text", got)
+	}
+}
+
+func TestJSONBodyWritersFallbackWriteErrorStringOnBlankCause(t *testing.T) {
+	w := &failingWriter{cause: blankWriteCause{}}
+
+	err := JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`))
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if got := err.Error(); got != "resp: write response failed" {
+		t.Fatalf("error = %q, want fallback text", got)
 	}
 }
