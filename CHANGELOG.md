@@ -13,6 +13,19 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.5.3] - 2026-04-16
+
+### Fixed
+
+- Restored `reqx.BindQuery(...)` field-local rollback for tagged query targets backed by pointers, custom param/text unmarshaler types, and formatted `time.Time` values. A failing query decode no longer leaves partially mutated field state behind, while earlier successful field writes still remain visible and later fields stay untouched.
+- Made repeated `reqx.Path(...)` / `reqx.Query(...)` bounds honor the latest builder call for `Min` / `Max`, `After` / `Before`, and `MinLen` / `MaxLen`, so callers can override earlier bounds without stale checks leaking into the final validation result.
+- Changed `errx.HTTPError.WithViolations(...)` to return a cloned error value instead of mutating the receiver, so shared base errors can safely produce sibling results with different violation lists.
+- Aligned `resp` JSON and problem-response writers with wrapped `http.ResponseWriter` behavior: `Content-Length` now reflects the bytes actually written through wrappers, and `NoContent(...)` clears stale `Content-Type` / `Content-Length` headers before sending `204`.
+
+### Testing
+
+- Tightened contract coverage across `reqx`, `errx`, and `resp`, including query rollback regressions, repeated-bound ordering, `HTTPError` violation cloning, wrapped-writer `Content-Length` behavior, and response write-failure handling.
+
 ## [v0.5.2] - 2026-04-15
 
 ### Breaking
