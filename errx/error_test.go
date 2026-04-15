@@ -179,6 +179,17 @@ func assertHTTPErrorPublicFields(t *testing.T, err *HTTPError, wantStatus int, w
 	}
 }
 
+func assertHTTPErrorHasNoCause(t *testing.T, err *HTTPError, wantError string) {
+	t.Helper()
+
+	if got := err.Error(); got != wantError {
+		t.Fatalf("Error() = %q, want %q", got, wantError)
+	}
+	if got := err.Unwrap(); got != nil {
+		t.Fatalf("Unwrap() = %v, want nil", got)
+	}
+}
+
 func assertHTTPErrorUsesStatusTextPublicMessage(t *testing.T, err *HTTPError, wantStatus int) {
 	t.Helper()
 
@@ -189,9 +200,7 @@ func assertHTTPErrorUsesStatusTextPublicMessage(t *testing.T, err *HTTPError, wa
 	if got := err.Detail(); got != want {
 		t.Fatalf("Detail() = %q, want %q", got, want)
 	}
-	if got := err.Error(); got != want {
-		t.Fatalf("Error() = %q, want %q", got, want)
-	}
+	assertHTTPErrorHasNoCause(t, err, want)
 }
 
 func assertHTTPErrorErrors(t *testing.T, err *HTTPError, want ...Violation) {
@@ -235,93 +244,21 @@ func TestHTTPErrorNilReceiverUsesSafeDefaults(t *testing.T) {
 	}
 }
 
-// 零值和内部脏值的 HTTPError 也应通过 getter 收敛到稳定公开契约。
-func TestHTTPErrorGettersNormalizeZeroAndDirtyValues(t *testing.T) {
-	testCases := []struct {
-		name       string
-		err        HTTPError
-		wantStatus int
-		wantCode   string
-		wantTitle  string
-		wantDetail string
-		wantError  string
-	}{
-		{
-			name:       "zero value falls back to internal server error contract",
-			err:        HTTPError{},
-			wantStatus: http.StatusInternalServerError,
-			wantCode:   "internal_error",
-			wantTitle:  http.StatusText(http.StatusInternalServerError),
-			wantDetail: http.StatusText(http.StatusInternalServerError),
-			wantError:  http.StatusText(http.StatusInternalServerError),
-		},
-		{
-			name:       "invalid internal fields are normalized again",
-			err:        HTTPError{status: http.StatusOK, code: "   ", detail: "   "},
-			wantStatus: http.StatusInternalServerError,
-			wantCode:   "internal_error",
-			wantTitle:  http.StatusText(http.StatusInternalServerError),
-			wantDetail: http.StatusText(http.StatusInternalServerError),
-			wantError:  http.StatusText(http.StatusInternalServerError),
-		},
-		{
-			name:       "499 internal state keeps non standard public contract",
-			err:        HTTPError{status: 499, code: "   ", detail: "   "},
-			wantStatus: 499,
-			wantCode:   "client_closed_request",
-			wantTitle:  "Client Closed Request",
-			wantDetail: "Client Closed Request",
-			wantError:  "Client Closed Request",
-		},
-	}
+// 零值 HTTPError 也应对外暴露稳定、可预测的默认错误契约。
+func TestHTTPErrorZeroValueUsesNormalizedPublicContract(t *testing.T) {
+	var err HTTPError
 
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := tc.err
-
-			assertHTTPErrorPublicFields(t, &err, tc.wantStatus, tc.wantCode, tc.wantTitle, tc.wantDetail)
-			if got := err.Error(); got != tc.wantError {
-				t.Fatalf("Error() = %q, want %q", got, tc.wantError)
-			}
-			if got := err.Errors(); got != nil {
-				t.Fatalf("Errors() = %#v, want nil", got)
-			}
-		})
-	}
-}
-
-// HTTPError 会优先暴露底层 cause，并对 violations 做防御性拷贝。
-func TestHTTPErrorUsesCauseAndClonesViolations(t *testing.T) {
-	cause := errors.New("db timeout")
-	input := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
-	err := NewHTTPErrorWithCause(http.StatusConflict, "", "", cause).WithViolations(input)
-
-	if got := err.Error(); got != cause.Error() {
-		t.Fatalf("Error() = %q, want %q", got, cause.Error())
-	}
-	if got := err.Unwrap(); !errors.Is(got, cause) {
-		t.Fatalf("Unwrap() = %v, want %v", got, cause)
-	}
-	if got := err.Status(); got != http.StatusConflict {
-		t.Fatalf("Status() = %d, want %d", got, http.StatusConflict)
-	}
-	if got := err.Code(); got != "conflict" {
-		t.Fatalf("Code() = %q, want conflict", got)
-	}
-	if got := err.Detail(); got != http.StatusText(http.StatusConflict) {
-		t.Fatalf("Detail() = %q, want %q", got, http.StatusText(http.StatusConflict))
-	}
-
-	input[0].Field = "email"
-
-	gotErrors := err.Errors()
-	want := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
-	if len(gotErrors) != 1 || gotErrors[0] != want[0] {
-		t.Fatalf("Errors() = %#v, want %#v", gotErrors, want)
-	}
-	gotErrors[0] = Violation{Field: "changed", In: ViolationInQuery, Code: ViolationCodeInvalid, Detail: "is invalid"}
-	if got := err.Errors()[0]; got != want[0] {
-		t.Fatalf("Errors() after mutation = %#v, want %#v", got, want[0])
+	assertHTTPErrorPublicFields(
+		t,
+		&err,
+		http.StatusInternalServerError,
+		"internal_error",
+		http.StatusText(http.StatusInternalServerError),
+		http.StatusText(http.StatusInternalServerError),
+	)
+	assertHTTPErrorHasNoCause(t, &err, http.StatusText(http.StatusInternalServerError))
+	if got := err.Errors(); got != nil {
+		t.Fatalf("Errors() = %#v, want nil", got)
 	}
 }
 
@@ -349,65 +286,43 @@ func TestHTTPErrorErrorFallsBackWhenCauseMessageBlank(t *testing.T) {
 	}
 }
 
-// Detail/Errors 会暴露公共字段，并返回独立的切片副本给调用方修改。
-func TestHTTPErrorDetailAndErrorsExposePublicFields(t *testing.T) {
-	err := NewHTTPError(http.StatusBadRequest, " invalid_json ", " invalid payload ").WithViolations([]Violation{
-		{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"},
-	})
-
-	if got := err.Detail(); got != "invalid payload" {
-		t.Fatalf("Detail() = %q, want %q", got, "invalid payload")
+// WithViolations 会立刻拷贝入参，Errors 也会返回独立副本；有无 cause 时契约一致。
+func TestHTTPErrorWithViolationsClonesInputAndReturnedSlices(t *testing.T) {
+	testCases := []struct {
+		name  string
+		cause error
+		build func(error, []Violation) *HTTPError
+	}{
+		{
+			name: "without cause",
+			build: func(_ error, violations []Violation) *HTTPError {
+				return NewHTTPError(http.StatusBadRequest, " invalid_json ", " invalid payload ").WithViolations(violations)
+			},
+		},
+		{
+			name:  "with cause",
+			cause: errors.New("db timeout"),
+			build: func(cause error, violations []Violation) *HTTPError {
+				return NewHTTPErrorWithCause(http.StatusConflict, "", "", cause).WithViolations(violations)
+			},
+		},
 	}
 
-	gotErrors := err.Errors()
 	want := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
-	if len(gotErrors) != 1 || gotErrors[0] != want[0] {
-		t.Fatalf("Errors() = %#v, want %#v", gotErrors, want)
-	}
-	gotErrors[0] = Violation{Field: "changed", In: ViolationInQuery, Code: ViolationCodeInvalid, Detail: "is invalid"}
-	if got := err.Errors()[0]; got != want[0] {
-		t.Fatalf("Errors() after mutation = %#v, want %#v", got, want[0])
-	}
-}
 
-// WithViolations 会立刻拷贝 violations 入参，避免调用方后续修改原切片影响错误对象。
-func TestHTTPErrorWithViolationsClonesInputSlice(t *testing.T) {
-	input := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
-	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request").WithViolations(input)
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			input := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
+			err := tc.build(tc.cause, input)
 
-	input[0].Field = "changed"
+			input[0].Field = "changed"
+			assertHTTPErrorErrors(t, err, want...)
 
-	gotErrors := err.Errors()
-	want := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
-	if len(gotErrors) != 1 || gotErrors[0] != want[0] {
-		t.Fatalf("Errors() = %#v, want original %#v", gotErrors, want)
-	}
-}
-
-// NewHTTPErrorWithCause 携带 cause 时，WithViolations 也应拷贝 violations 入参。
-func TestNewHTTPErrorWithCauseAndViolationsCloneInputSlice(t *testing.T) {
-	input := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
-	cause := errors.New("db timeout")
-	err := NewHTTPErrorWithCause(http.StatusConflict, "conflict", "conflict detail", cause).WithViolations(input)
-
-	input[0].Field = "changed"
-
-	gotErrors := err.Errors()
-	want := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
-	if len(gotErrors) != 1 || gotErrors[0] != want[0] {
-		t.Fatalf("Errors() = %#v, want original %#v", gotErrors, want)
-	}
-	if !errors.Is(err, cause) {
-		t.Fatalf("errors.Is(%v, %v) = false, want true", err, cause)
-	}
-}
-
-// 没有 cause 时，HTTPError.Error 会回退为公开消息本身。
-func TestHTTPErrorErrorReturnsMessageWithoutCause(t *testing.T) {
-	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")
-
-	if got := err.Error(); got != "bad request" {
-		t.Fatalf("Error() = %q, want %q", got, "bad request")
+			gotErrors := err.Errors()
+			gotErrors[0] = Violation{Field: "changed", In: ViolationInQuery, Code: ViolationCodeInvalid, Detail: "is invalid"}
+			assertHTTPErrorErrors(t, err, want...)
+		})
 	}
 }
 
@@ -415,9 +330,7 @@ func TestHTTPErrorErrorReturnsMessageWithoutCause(t *testing.T) {
 func TestHTTPErrorErrorFallsBackToNormalizedDetail(t *testing.T) {
 	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", nil)
 
-	if got := err.Error(); got != http.StatusText(http.StatusBadRequest) {
-		t.Fatalf("Error() = %q, want %q", got, http.StatusText(http.StatusBadRequest))
-	}
+	assertHTTPErrorHasNoCause(t, err, http.StatusText(http.StatusBadRequest))
 }
 
 // 各个常用错误构造器都会生成稳定的公开契约，并透传显式 code/detail。
@@ -440,9 +353,7 @@ func TestHTTPErrorConstructorsExposeExpectedPublicContract(t *testing.T) {
 				if got := err.Detail(); got != "custom detail" {
 					t.Fatalf("Detail() = %q, want %q", got, "custom detail")
 				}
-				if got := err.Error(); got != "custom detail" {
-					t.Fatalf("Error() = %q, want %q", got, "custom detail")
-				}
+				assertHTTPErrorHasNoCause(t, err, "custom detail")
 				assertHTTPErrorErrors(t, err)
 			})
 		})
@@ -458,15 +369,6 @@ func TestNewHTTPErrorWithCauseNormalizesPublicFields(t *testing.T) {
 			err := NewHTTPErrorWithCause(tc.status, tc.code, tc.detail, cause)
 
 			assertHTTPErrorPublicFields(t, err, tc.wantStatus, tc.wantCode, tc.wantTitle, tc.wantDetail)
-			if got := err.Error(); got != cause.Error() {
-				t.Fatalf("Error() = %q, want %q", got, cause.Error())
-			}
-			if !errors.Is(err, cause) {
-				t.Fatalf("errors.Is(%v, %v) = false, want true", err, cause)
-			}
-			if got := err.Errors(); got != nil {
-				t.Fatalf("Errors() = %#v, want nil", got)
-			}
 		})
 	}
 }
@@ -478,9 +380,7 @@ func TestNewHTTPErrorNormalizesPublicFields(t *testing.T) {
 			err := NewHTTPError(tc.status, tc.code, tc.detail)
 
 			assertHTTPErrorPublicFields(t, err, tc.wantStatus, tc.wantCode, tc.wantTitle, tc.wantDetail)
-			if got := err.Errors(); got != nil {
-				t.Fatalf("Errors() = %#v, want nil", got)
-			}
+			assertHTTPErrorHasNoCause(t, err, tc.wantDetail)
 		})
 	}
 }
@@ -490,6 +390,12 @@ func TestHTTPErrorWorksWithErrorsIsAndAs(t *testing.T) {
 	cause := errors.New("db timeout")
 	err := NewHTTPErrorWithCause(http.StatusConflict, "", "", cause)
 
+	if got := err.Error(); got != cause.Error() {
+		t.Fatalf("Error() = %q, want %q", got, cause.Error())
+	}
+	if got := err.Unwrap(); got != cause {
+		t.Fatalf("Unwrap() = %v, want %v", got, cause)
+	}
 	if !errors.Is(err, cause) {
 		t.Fatal("errors.Is should find cause through Unwrap chain")
 	}

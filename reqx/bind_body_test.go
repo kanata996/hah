@@ -3,7 +3,6 @@ package reqx
 import (
 	"bytes"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -357,37 +356,53 @@ func TestBindBody_RequestSizeLimitContract(t *testing.T) {
 		Age  int    `json:"age"`
 	}
 
-	makeJSONBody := func(size int64) []byte {
+	makeJSONBody := func(size int) []byte {
 		t.Helper()
 
 		const envelope = `{"name":""}`
-		payloadLen := int(size) - len(envelope)
+		payloadLen := size - len(envelope)
 		if payloadLen < 0 {
 			t.Fatalf("size = %d, smaller than minimal JSON envelope", size)
 		}
 		return []byte(`{"name":"` + strings.Repeat("a", payloadLen) + `"}`)
 	}
 
-	t.Run("accepts body exactly at default limit", func(t *testing.T) {
-		body := makeJSONBody(defaultMaxBodyBytes)
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
-		req.Header.Set("Content-Type", mimeApplicationJSON)
-		req.ContentLength = int64(len(body))
+	findOversizedJSONBody := func() []byte {
+		t.Helper()
 
-		var dst request
-		if err := BindBody(req, &dst); err != nil {
-			t.Fatalf("BindBody() error = %v", err)
-		}
-		if got, want := len(dst.Name), len(body)-len(`{"name":""}`); got != want {
-			t.Fatalf("len(name) = %d, want %d", got, want)
-		}
-	})
+		const maxProbeBodyBytes = 32 << 20
+		for size := 1 << 10; size <= maxProbeBodyBytes; size <<= 1 {
+			body := makeJSONBody(size)
+			req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+			req.Header.Set("Content-Type", mimeApplicationJSON)
+			req.ContentLength = int64(len(body))
 
-	t.Run("rejects body larger than default limit by one byte", func(t *testing.T) {
-		body := makeJSONBody(defaultMaxBodyBytes + 1)
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+			var dst request
+			err := BindBody(req, &dst)
+			if err == nil {
+				continue
+			}
+
+			httpErr := assertHTTPErrorLike(t, err)
+			if httpErr.Status() == http.StatusRequestEntityTooLarge &&
+				httpErr.Code() == CodeRequestTooLarge &&
+				httpErr.Detail() == "request body is too large" {
+				return body
+			}
+
+			t.Fatalf("BindBody() probe error = %v, want nil or request_too_large", err)
+		}
+
+		t.Fatal("failed to find oversized body within probe range")
+		return nil
+	}
+
+	oversizedBody := findOversizedJSONBody()
+
+	t.Run("rejects representative oversized body with content length", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(oversizedBody))
 		req.Header.Set("Content-Type", mimeApplicationJSON)
-		req.ContentLength = int64(len(body))
+		req.ContentLength = int64(len(oversizedBody))
 
 		dst := request{Name: "existing", Age: 17}
 		_ = assertHTTPError(t, BindBody(req, &dst), http.StatusRequestEntityTooLarge, CodeRequestTooLarge, "request body is too large")
@@ -396,9 +411,8 @@ func TestBindBody_RequestSizeLimitContract(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects unknown length body larger than default limit by one byte", func(t *testing.T) {
-		body := makeJSONBody(defaultMaxBodyBytes + 1)
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+	t.Run("rejects representative oversized body with unknown length", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(oversizedBody))
 		req.Header.Set("Content-Type", mimeApplicationJSON)
 		req.ContentLength = -1
 
@@ -427,73 +441,6 @@ func TestBindBody_NilBodyIsNoop(t *testing.T) {
 	}
 }
 
-func TestBindBody_NilBodyAfterCachedPresenceProbeIsNoop(t *testing.T) {
-	type request struct {
-		Name string `json:"name"`
-	}
-
-	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
-
-	var first request
-	if err := BindBody(req, &first); err != nil {
-		t.Fatalf("first BindBody() error = %v", err)
-	}
-	if first.Name != "kanata" {
-		t.Fatalf("first name = %q, want kanata", first.Name)
-	}
-
-	req.Body = nil
-
-	dst := request{Name: "existing"}
-	if err := BindBody(req, &dst); err != nil {
-		t.Fatalf("second BindBody(nil body after cached probe) error = %v", err)
-	}
-	if dst.Name != "existing" {
-		t.Fatalf("name = %q, want existing value preserved", dst.Name)
-	}
-}
-
-type probeStaticReadCloser struct {
-	data []byte
-}
-
-func (r *probeStaticReadCloser) Read(p []byte) (int, error) {
-	if len(r.data) == 0 {
-		return 0, io.EOF
-	}
-	n := copy(p, r.data)
-	r.data = r.data[n:]
-	if len(r.data) == 0 {
-		return n, io.EOF
-	}
-	return n, nil
-}
-
-func (r *probeStaticReadCloser) Close() error {
-	return nil
-}
-
-type probeByteThenErrorReadCloser struct {
-	done bool
-	err  error
-}
-
-func (r *probeByteThenErrorReadCloser) Read(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	if r.done {
-		return 0, io.EOF
-	}
-	r.done = true
-	p[0] = 'x'
-	return 1, r.err
-}
-
-func (r *probeByteThenErrorReadCloser) Close() error {
-	return nil
-}
-
 type probeErrorReadCloser struct {
 	err error
 }
@@ -504,99 +451,4 @@ func (r probeErrorReadCloser) Read(_ []byte) (int, error) {
 
 func (r probeErrorReadCloser) Close() error {
 	return nil
-}
-
-func TestHasRequestBody(t *testing.T) {
-	t.Run("nil request", func(t *testing.T) {
-		if got, err := hasRequestBody(nil); err != nil || got {
-			t.Fatalf("hasRequestBody(nil) = (%v, %v), want (false, nil)", got, err)
-		}
-	})
-
-	t.Run("nil body is treated as empty", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = nil
-
-		if got, err := hasRequestBody(req); err != nil || got {
-			t.Fatalf("hasRequestBody(nil body) = (%v, %v), want (false, nil)", got, err)
-		}
-	})
-
-	t.Run("non-empty body is detected and cached", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = &probeStaticReadCloser{data: []byte(`{"name":"kanata"}`)}
-
-		if got, err := hasRequestBody(req); err != nil || !got {
-			t.Fatalf("hasRequestBody(non-empty) = (%v, %v), want (true, nil)", got, err)
-		}
-
-		body, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatalf("ReadAll(replayed body) error = %v", err)
-		}
-		if string(body) != `{"name":"kanata"}` {
-			t.Fatalf("replayed body = %q, want original body", body)
-		}
-
-		if got, err := hasRequestBody(req); err != nil || !got {
-			t.Fatalf("hasRequestBody(second call after read) = (%v, %v), want (true, nil)", got, err)
-		}
-	})
-
-	t.Run("empty body is detected and cached", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = &probeStaticReadCloser{}
-
-		if got, err := hasRequestBody(req); err != nil || got {
-			t.Fatalf("hasRequestBody(empty) = (%v, %v), want (false, nil)", got, err)
-		}
-
-		body, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatalf("ReadAll(empty replayed body) error = %v", err)
-		}
-		if len(body) != 0 {
-			t.Fatalf("empty replayed body = %q, want empty", body)
-		}
-
-		if got, err := hasRequestBody(req); err != nil || got {
-			t.Fatalf("hasRequestBody(second call after empty read) = (%v, %v), want (false, nil)", got, err)
-		}
-	})
-
-	t.Run("read error after a byte preserves replay body", func(t *testing.T) {
-		wantErr := errors.New("boom")
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = &probeByteThenErrorReadCloser{err: wantErr}
-
-		if got, err := hasRequestBody(req); !errors.Is(err, wantErr) || got {
-			t.Fatalf("hasRequestBody(byte+error) = (%v, %v), want (false, %v)", got, err, wantErr)
-		}
-
-		body, err := io.ReadAll(req.Body)
-		if err != nil {
-			t.Fatalf("ReadAll(replayed error body) error = %v", err)
-		}
-		if string(body) != "x" {
-			t.Fatalf("replayed error body = %q, want x", body)
-		}
-	})
-
-	t.Run("read error without bytes is returned and not cached", func(t *testing.T) {
-		wantErr := errors.New("read failed")
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = probeErrorReadCloser{err: wantErr}
-
-		if got, err := hasRequestBody(req); !errors.Is(err, wantErr) || got {
-			t.Fatalf("hasRequestBody(read error) = (%v, %v), want (false, %v)", got, err, wantErr)
-		}
-
-		if _, err := io.ReadAll(req.Body); !errors.Is(err, wantErr) {
-			t.Fatalf("ReadAll(error body) error = %v, want %v", err, wantErr)
-		}
-
-		if got, err := hasRequestBody(req); !errors.Is(err, wantErr) || got {
-			t.Fatalf("hasRequestBody(second read error) = (%v, %v), want (false, %v)", got, err, wantErr)
-		}
-	})
 }

@@ -356,13 +356,26 @@ func TestWriteErrorWriteFailureDoesNotWriteStandaloneLog(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
 	defer slog.SetDefault(previousDefault)
 
-	w := &failingWriter{}
+	cause := errors.New("socket closed")
+	w := &failingWriter{cause: cause}
 	err := WriteError(w, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"))
 	if err == nil {
 		t.Fatal("expected write error, got nil")
 	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("errors.Is(err, cause) = false, want true")
+	}
+	if got := err.Error(); got != "resp: write response failed: socket closed" {
+		t.Fatalf("error = %q, want %q", got, "resp: write response failed: socket closed")
+	}
 	if w.status != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.status, http.StatusInternalServerError)
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	}
+	if w.writes != 1 {
+		t.Fatalf("writes = %d, want 1", w.writes)
 	}
 	if defaultBuf.Len() != 0 {
 		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())

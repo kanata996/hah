@@ -19,14 +19,14 @@ func TestSuccessWritersWriteExpectedResponses(t *testing.T) {
 			name:            "Created writes compact JSON",
 			write:           func(w http.ResponseWriter) error { return Created(w, map[string]any{"id": "u_1"}) },
 			wantStatus:      http.StatusCreated,
-			wantContentType: jsonContentType,
+			wantContentType: "application/json",
 			wantBody:        "{\"id\":\"u_1\"}\n",
 		},
 		{
 			name:            "OK writes compact JSON",
 			write:           func(w http.ResponseWriter) error { return OK(w, map[string]any{"id": "u_1"}) },
 			wantStatus:      http.StatusOK,
-			wantContentType: jsonContentType,
+			wantContentType: "application/json",
 			wantBody:        "{\"id\":\"u_1\"}\n",
 		},
 	}
@@ -83,8 +83,8 @@ func TestSuccessWritersCooperateWithHeadLikeWriter(t *testing.T) {
 			if inner.status != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", inner.status, tc.wantStatus)
 			}
-			if got := inner.Header().Get("Content-Type"); got != jsonContentType {
-				t.Fatalf("Content-Type = %q, want %q", got, jsonContentType)
+			if got := inner.Header().Get("Content-Type"); got != "application/json" {
+				t.Fatalf("Content-Type = %q, want %q", got, "application/json")
 			}
 			if got := inner.Header().Get("Content-Length"); got != stringLen(tc.wantBody) {
 				t.Fatalf("Content-Length = %q, want %s", got, stringLen(tc.wantBody))

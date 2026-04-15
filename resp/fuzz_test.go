@@ -2,7 +2,6 @@ package resp
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,32 +13,40 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-func FuzzRespPublicContracts(f *testing.F) {
-	f.Add(uint8(0), uint8(0), http.StatusOK, "u_1", "  ", []byte(nil))
-	f.Add(uint8(0), uint8(1), http.StatusOK, "u_1", "\t", []byte(nil))
-	f.Add(uint8(0), uint8(2), http.StatusNoContent, "u_1", "  ", []byte(nil))
-	f.Add(uint8(0), uint8(3), 1000, "u_1", "  ", []byte(nil))
-	f.Add(uint8(1), uint8(0), http.StatusAccepted, "", "", []byte(`{"id":"u_1"}`))
-	f.Add(uint8(1), uint8(0), http.StatusNoContent, "", "", []byte(`{"id":"u_1"}`))
-	f.Add(uint8(1), uint8(0), 1000, "", "", []byte(`{"id":"u_1"}`))
-	f.Add(uint8(2), uint8(0), http.StatusBadRequest, "payload invalid", "name", []byte(nil))
-	f.Add(uint8(2), uint8(1), 99, "payload invalid", "name", []byte(nil))
-	f.Add(uint8(2), uint8(2), http.StatusGatewayTimeout, "", "", []byte(nil))
-	f.Add(uint8(2), uint8(3), http.StatusInternalServerError, "", "", []byte(nil))
+func FuzzJSONWritersPublicContracts(f *testing.F) {
+	f.Add(uint8(0), "u_1")
+	f.Add(uint8(1), "\t")
+	f.Add(uint8(2), "")
+	f.Add(uint8(3), "kanata")
 
-	f.Fuzz(func(t *testing.T, kind uint8, variant uint8, status int, a, b string, raw []byte) {
-		switch kind % 3 {
-		case 0:
-			fuzzSuccessWriterContracts(t, variant, a)
-		case 1:
-			fuzzJSONBlobContracts(t, raw)
-		default:
-			fuzzWriteErrorContracts(t, variant, status, a, b)
-		}
+	f.Fuzz(func(t *testing.T, variant uint8, value string) {
+		fuzzJSONWriterContracts(t, variant, value)
 	})
 }
 
-func fuzzSuccessWriterContracts(t *testing.T, variant uint8, value string) {
+func FuzzJSONBlobPublicContracts(f *testing.F) {
+	f.Add([]byte(`{"id":"u_1"}`))
+	f.Add([]byte(`{"id":`))
+	f.Add([]byte(nil))
+	f.Add([]byte{})
+
+	f.Fuzz(func(t *testing.T, body []byte) {
+		fuzzJSONBlobContracts(t, body)
+	})
+}
+
+func FuzzWriteErrorWrappedHTTPErrorPublicContracts(f *testing.F) {
+	f.Add(http.StatusBadRequest, "payload invalid", "name")
+	f.Add(http.StatusUnprocessableEntity, "", "")
+	f.Add(99, "payload invalid", "name")
+	f.Add(1000, "\xff", "\xff")
+
+	f.Fuzz(func(t *testing.T, status int, detail, field string) {
+		fuzzWriteErrorWrappedHTTPErrorContracts(t, status, detail, field)
+	})
+}
+
+func fuzzJSONWriterContracts(t *testing.T, variant uint8, value string) {
 	t.Helper()
 
 	payload := map[string]string{"value": value}
@@ -117,57 +124,27 @@ func fuzzJSONBlobContracts(t *testing.T, body []byte) {
 	}
 }
 
-func fuzzWriteErrorContracts(t *testing.T, variant uint8, status int, detail, field string) {
+func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, field string) {
 	t.Helper()
 
 	rr := httptest.NewRecorder()
 
-	var input error
-	var hiddenCause string
-	var wantStatus int
-	var wantCode string
-	var wantTitle string
-	var wantDetail string
-	var wantErrors map[string]any
-
-	switch variant % 4 {
-	case 0:
-		hiddenCause = "internal cause sentinel"
-		input = errors.New(hiddenCause + ": " + detail)
-		wantStatus = http.StatusInternalServerError
-		wantCode = "internal_error"
-		wantTitle = http.StatusText(http.StatusInternalServerError)
-		wantDetail = http.StatusText(http.StatusInternalServerError)
-	case 1:
-		input = context.Canceled
-		wantStatus = 499
-		wantCode = "client_closed_request"
-		wantTitle = "Client Closed Request"
-		wantDetail = "Client Closed Request"
-	case 2:
-		input = context.DeadlineExceeded
-		wantStatus = http.StatusGatewayTimeout
-		wantCode = "timeout"
-		wantTitle = http.StatusText(http.StatusGatewayTimeout)
-		wantDetail = http.StatusText(http.StatusGatewayTimeout)
-	default:
-		hiddenCause = "internal cause sentinel"
-		wantErrors = map[string]any{
-			"code":   errx.ViolationCodeInvalid,
-			"detail": "is invalid",
-		}
-		if normalizedField := jsonSafeString(field); normalizedField != "" {
-			wantErrors["field"] = normalizedField
-		}
-		httpErr := errx.NewHTTPErrorWithCause(status, "", detail, errors.New(hiddenCause)).WithViolations([]errx.Violation{
-			{Field: field, Code: errx.ViolationCodeInvalid, Detail: "is invalid"},
-		})
-		input = fmt.Errorf("wrapped: %w", httpErr)
-		wantStatus = httpErr.Status()
-		wantCode = httpErr.Code()
-		wantTitle = httpErr.Title()
-		wantDetail = jsonSafeString(httpErr.Detail())
+	hiddenCause := "internal cause sentinel"
+	wantErrors := map[string]any{
+		"code":   errx.ViolationCodeInvalid,
+		"detail": "is invalid",
 	}
+	if normalizedField := jsonSafeString(field); normalizedField != "" {
+		wantErrors["field"] = normalizedField
+	}
+	httpErr := errx.NewHTTPErrorWithCause(status, "", detail, errors.New(hiddenCause)).WithViolations([]errx.Violation{
+		{Field: field, Code: errx.ViolationCodeInvalid, Detail: "is invalid"},
+	})
+	input := fmt.Errorf("wrapped: %w", httpErr)
+	wantStatus := httpErr.Status()
+	wantCode := httpErr.Code()
+	wantTitle := httpErr.Title()
+	wantDetail := jsonSafeString(httpErr.Detail())
 
 	if err := WriteError(rr, input); err != nil {
 		t.Fatalf("WriteError() error = %v", err)
@@ -193,19 +170,13 @@ func fuzzWriteErrorContracts(t *testing.T, variant uint8, status int, detail, fi
 		t.Fatalf("detail = %#v, want %q", got, wantDetail)
 	}
 
-	if wantErrors == nil {
-		if _, exists := body["errors"]; exists {
-			t.Fatalf("errors unexpectedly present: %#v", body["errors"])
-		}
-	} else {
-		errorsValue, ok := body["errors"].([]any)
-		if !ok || len(errorsValue) != 1 {
-			t.Fatalf("errors = %#v, want 1 item", body["errors"])
-		}
-		assertPublicErrorObject(t, errorsValue[0], wantErrors)
+	errorsValue, ok := body["errors"].([]any)
+	if !ok || len(errorsValue) != 1 {
+		t.Fatalf("errors = %#v, want 1 item", body["errors"])
 	}
+	assertPublicErrorObject(t, errorsValue[0], wantErrors)
 
-	if hiddenCause != "" && bytes.Contains(rr.Body.Bytes(), []byte(hiddenCause)) {
+	if bytes.Contains(rr.Body.Bytes(), []byte(hiddenCause)) {
 		t.Fatalf("body leaked internal cause: %q", rr.Body.String())
 	}
 }

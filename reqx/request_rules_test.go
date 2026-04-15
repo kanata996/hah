@@ -60,6 +60,17 @@ func TestRequireBody(t *testing.T) {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
+
+	t.Run("nil body is required violation", func(t *testing.T) {
+		req := newJSONRequest(http.MethodPost, "/", "")
+		req.Body = nil
+		req.ContentLength = 0
+
+		violation := assertSingleViolation(t, RequireBody(req))
+		if violation.Field != "body" || violation.In != errx.ViolationInBody || violation.Code != errx.ViolationCodeRequired || violation.Detail != "is required" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
 }
 
 func TestRequireBodyNilRequest(t *testing.T) {

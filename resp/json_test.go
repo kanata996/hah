@@ -19,42 +19,42 @@ func TestJSONWritersWriteExpectedResponses(t *testing.T) {
 			name:            "JSON writes compact JSON",
 			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"}) },
 			wantStatus:      http.StatusAccepted,
-			wantContentType: jsonContentType,
+			wantContentType: "application/json",
 			wantBody:        "{\"id\":\"u_1\"}\n",
 		},
 		{
 			name:            "JSON allows nil data",
 			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusOK, nil) },
 			wantStatus:      http.StatusOK,
-			wantContentType: jsonContentType,
+			wantContentType: "application/json",
 			wantBody:        "null\n",
 		},
 		{
 			name:            "JSONBlob writes raw bytes",
 			write:           func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`)) },
 			wantStatus:      http.StatusAccepted,
-			wantContentType: jsonContentType,
+			wantContentType: "application/json",
 			wantBody:        `{"id":"u_1"}`,
 		},
 		{
 			name:            "JSONBlob passes through invalid JSON",
 			write:           func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusOK, []byte(`{"id":`)) },
 			wantStatus:      http.StatusOK,
-			wantContentType: jsonContentType,
+			wantContentType: "application/json",
 			wantBody:        `{"id":`,
 		},
 		{
 			name:            "JSONBlob allows nil body",
 			write:           func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusOK, nil) },
 			wantStatus:      http.StatusOK,
-			wantContentType: jsonContentType,
+			wantContentType: "application/json",
 			wantBody:        "",
 		},
 		{
 			name:            "JSONBlob allows empty body",
 			write:           func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusOK, []byte{}) },
 			wantStatus:      http.StatusOK,
-			wantContentType: jsonContentType,
+			wantContentType: "application/json",
 			wantBody:        "",
 		},
 	}
@@ -111,8 +111,8 @@ func TestJSONBodyWritersCooperateWithHeadLikeWriter(t *testing.T) {
 			if inner.status != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", inner.status, tc.wantStatus)
 			}
-			if got := inner.Header().Get("Content-Type"); got != jsonContentType {
-				t.Fatalf("Content-Type = %q, want %q", got, jsonContentType)
+			if got := inner.Header().Get("Content-Type"); got != "application/json" {
+				t.Fatalf("Content-Type = %q, want %q", got, "application/json")
 			}
 			if got := inner.Header().Get("Content-Length"); got != stringLen(tc.wantBody) {
 				t.Fatalf("Content-Length = %q, want %s", got, stringLen(tc.wantBody))

@@ -87,11 +87,17 @@ func decodePayload(t *testing.T, body []byte) payloadMap {
 func assertRecorderHasNoBodyOrContentType(t *testing.T, rr *httptest.ResponseRecorder) {
 	t.Helper()
 
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want recorder default %d", rr.Code, http.StatusOK)
+	}
 	if rr.Body.Len() != 0 {
 		t.Fatalf("body = %q, want empty", rr.Body.String())
 	}
 	if got := rr.Header().Get("Content-Type"); got != "" {
 		t.Fatalf("Content-Type = %q, want empty", got)
+	}
+	if len(rr.Header()) != 0 {
+		t.Fatalf("headers = %#v, want empty", rr.Header())
 	}
 }
 
