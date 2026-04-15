@@ -3,6 +3,8 @@ package reqx
 import (
 	"net/http"
 	"strings"
+
+	"github.com/kanata996/hah/errx"
 )
 
 // PathParam 表示一个待解析的 path 单参数。
@@ -16,7 +18,7 @@ func Path(r *http.Request, name string) *PathParam {
 		spec: paramSpec{
 			r:      r,
 			name:   strings.TrimSpace(name),
-			input:  ViolationInPath,
+			input:  errx.ViolationInPath,
 			lookup: pathParamValues,
 		},
 	}

@@ -10,19 +10,10 @@ import (
 //
 // 这里承载的能力包括：
 //   - 公开的顶层错误码常量
-//   - 公开的 violation code / violation in 常量
-//   - Violation 结构及默认 detail 规范化
+//   - request-side violation 默认 detail 规范化
 //   - 422 invalid_request 错误的统一构造
 
-const CodeInvalidRequest = "invalid_request"
-
-const (
-	ViolationCodeInvalid  = "invalid"
-	ViolationCodeRequired = "required"
-	ViolationCodeUnknown  = "unknown"
-	ViolationCodeType     = "type"
-	ViolationCodeMultiple = "multiple"
-)
+const invalidRequestCode = "invalid_request"
 
 const (
 	violationDetailInvalid       = "is invalid"
@@ -32,36 +23,20 @@ const (
 	violationDetailMustNotRepeat = "must not be repeated"
 )
 
-const (
-	ViolationInBody   = "body"
-	ViolationInQuery  = "query"
-	ViolationInPath   = "path"
-	ViolationInHeader = "header"
-)
-
-// Violation 描述单个请求字段违规。
-type Violation struct {
-	Field  string `json:"field,omitempty"`
-	In     string `json:"in,omitempty"`
-	Code   string `json:"code"`
-	Detail string `json:"detail"`
-}
-
-func invalidFieldsError(violations []Violation) error {
-	details := make([]any, 0, len(violations))
+func invalidFieldsError(violations []errx.Violation) error {
+	details := make([]errx.Violation, 0, len(violations))
 	for _, violation := range violations {
 		details = append(details, normalizeViolation(violation))
 	}
 	return errx.NewHTTPError(
 		http.StatusUnprocessableEntity,
-		CodeInvalidRequest,
+		invalidRequestCode,
 		"request contains invalid fields",
-		details...,
-	)
+	).WithViolations(details)
 }
 
-func newViolation(field, input, code, detail string) Violation {
-	return Violation{
+func newViolation(field, input, code, detail string) errx.Violation {
+	return errx.Violation{
 		Field:  field,
 		In:     input,
 		Code:   code,
@@ -69,9 +44,9 @@ func newViolation(field, input, code, detail string) Violation {
 	}
 }
 
-func normalizeViolation(violation Violation) Violation {
+func normalizeViolation(violation errx.Violation) errx.Violation {
 	if violation.Code == "" {
-		violation.Code = ViolationCodeInvalid
+		violation.Code = errx.ViolationCodeInvalid
 	}
 	if violation.Detail == "" {
 		violation.Detail = violationDetailForCode(violation.Code)
@@ -81,13 +56,13 @@ func normalizeViolation(violation Violation) Violation {
 
 func violationDetailForCode(code string) string {
 	switch code {
-	case ViolationCodeRequired:
+	case errx.ViolationCodeRequired:
 		return violationDetailRequired
-	case ViolationCodeUnknown:
+	case errx.ViolationCodeUnknown:
 		return violationDetailUnknownField
-	case ViolationCodeType:
+	case errx.ViolationCodeType:
 		return violationDetailInvalidType
-	case ViolationCodeMultiple:
+	case errx.ViolationCodeMultiple:
 		return violationDetailMustNotRepeat
 	default:
 		return violationDetailInvalid

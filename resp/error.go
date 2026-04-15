@@ -8,12 +8,12 @@ package resp
 //
 // 职责：
 //   - 统一错误 JSON 对象的编码与写回。
-//   - 处理错误响应写出与 errors 序列化失败等边界。
+//   - 处理错误响应写出等边界。
 //
 // 要点：
 //   - 对外响应契约稳定优先，不泄露内部原始错误对象。
 //   - 普通 4xx / 5xx 只写统一错误响应，不额外输出重复业务错误日志。
-//   - 若公开 errors 不可编码，则直接返回错误，由调用方决定如何处理。
+//   - violation 明细固定为公开结构，不再接受任意 payload。
 
 import (
 	"context"
@@ -43,9 +43,9 @@ func asHTTPError(err error) *errx.HTTPError {
 
 	switch {
 	case errors.Is(err, context.Canceled):
-		return errx.NewHTTPErrorWithCause(499, "client_closed_request", "Client Closed Request", err)
+		return errx.NewHTTPErrorWithCause(499, "", "", err)
 	case errors.Is(err, context.DeadlineExceeded):
-		return errx.NewHTTPErrorWithCause(http.StatusGatewayTimeout, "timeout", "", err)
+		return errx.NewHTTPErrorWithCause(http.StatusGatewayTimeout, "", "", err)
 	}
 
 	return errx.NewHTTPErrorWithCause(http.StatusInternalServerError, "", "", err)
@@ -54,11 +54,11 @@ func asHTTPError(err error) *errx.HTTPError {
 // problemPayload 是最终写入响应体的公共错误字段。
 // 这里不包含内部原始 error，避免把服务端细节泄露给客户端。
 type problemPayload struct {
-	Title  string `json:"title"`
-	Status int    `json:"status"`
-	Detail string `json:"detail"`
-	Code   string `json:"code"`
-	Errors []any  `json:"errors,omitempty"`
+	Title  string           `json:"title"`
+	Status int              `json:"status"`
+	Detail string           `json:"detail"`
+	Code   string           `json:"code"`
+	Errors []errx.Violation `json:"errors,omitempty"`
 }
 
 // WriteError 是 HTTP 错误写回的统一入口。

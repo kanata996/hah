@@ -5,6 +5,7 @@
 核心关注点：
 
 - 使用当前 `hah` / `errx` 公开 API，而不是旧的 render/runtime 模型
+- 显式请求校验默认走根包 `hah.InvalidRequest(...)`
 - 保留 `chi` 常用中间件：`RequestID`、`RealIP`、`Timeout`、`Heartbeat`
 - 用 `traceid.Middleware` 生成/透传 `TraceId`，并把它带到 `httplog` 和 `slog` 上下文
 - 用 `httplog/v3` 输出结构化 access log，并补 `request.id`

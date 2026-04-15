@@ -152,8 +152,16 @@ func fuzzWriteErrorContracts(t *testing.T, variant uint8, status int, detail, fi
 		wantDetail = http.StatusText(http.StatusGatewayTimeout)
 	default:
 		hiddenCause = "internal cause sentinel"
-		wantErrors = map[string]any{"field": jsonSafeString(field)}
-		httpErr := errx.NewHTTPErrorWithCause(status, "", detail, errors.New(hiddenCause), map[string]any{"field": field})
+		wantErrors = map[string]any{
+			"code":   errx.ViolationCodeInvalid,
+			"detail": "is invalid",
+		}
+		if normalizedField := jsonSafeString(field); normalizedField != "" {
+			wantErrors["field"] = normalizedField
+		}
+		httpErr := errx.NewHTTPErrorWithCause(status, "", detail, errors.New(hiddenCause)).WithViolations([]errx.Violation{
+			{Field: field, Code: errx.ViolationCodeInvalid, Detail: "is invalid"},
+		})
 		input = fmt.Errorf("wrapped: %w", httpErr)
 		wantStatus = httpErr.Status()
 		wantCode = httpErr.Code()

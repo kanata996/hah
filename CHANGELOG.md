@@ -13,6 +13,20 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+### Breaking
+
+- Refactored `errx.HTTPError` violation handling to use a fixed typed `Violation` list instead of the old `errors ...any` constructor parameters. `NewHTTPError(...)` / `NewHTTPErrorWithCause(...)` no longer accept detail payload arguments; callers now bind violations explicitly via `WithViolations(...)`.
+- Moved the canonical public `Violation` type and related code/input constants into `errx`; `reqx` now re-exports that type and those constants while keeping request-side normalization and `invalid_request` construction in `reqx`.
+- Removed the root `hah.PathParam` and `hah.QueryParam` type aliases. Root callers should use `hah.Path(...)` / `hah.Query(...)` directly, or import `reqx` when they need the underlying builder types.
+
+### Added
+
+- Re-exported the common invalid-request and public error-model entry points from the root `hah` package: `InvalidRequest(...)`, `Violation`, `HTTPError`, `NewHTTPError(...)`, `NewHTTPErrorWithCause(...)`, and the public violation code/input constants.
+
+### Documentation
+
+- Updated the root docs, request guide, and bundled examples so the default path uses `hah.InvalidRequest(...)` and `hah.Violation{...}` before falling back to `reqx` / `errx` for advanced cases.
+
 ## [v0.5.1] - 2026-04-15
 
 ### Documentation

@@ -1,6 +1,6 @@
 # 请求输入指南
 
-这份文档聚焦 `hah` 的输入侧能力，核心包是：
+这份文档聚焦 `hah` 的输入侧能力。默认入口是根包 `hah`，底层输入核心包是：
 
 - `reqx`：负责 request helper、query/body binding、`RequireBody`、`InvalidRequest` 和公开 violations
 
@@ -19,7 +19,7 @@
 | 批量 query DTO 绑定 | `hah.BindQuery` / `reqx.BindQuery` | 适合筛选条件、分页参数、复杂多值 query |
 | 只做 JSON body 绑定 | `hah.BindBody` / `reqx.BindBody` | 适合 body DTO 解码 |
 | body 是否必须存在 | `hah.RequireBody` / `reqx.RequireBody` | 适合在 body 绑定后显式声明 body-required 契约 |
-| 手写字段级请求违规 | `reqx.InvalidRequest` | 适合把业务前的输入错误收敛成统一 `422 invalid_request` |
+| 手写字段级请求违规 | `hah.InvalidRequest` / `reqx.InvalidRequest` | 适合把业务前的输入错误收敛成统一 `422 invalid_request` |
 | 读取 header | `r.Header.Get(...)` / `r.Header.Values(...)` | header 默认直接走标准库 |
 
 ## 读取 request 数据
@@ -36,7 +36,7 @@ actor := r.Header.Get("X-Actor")
 
 ### 单参数读取与常见校验
 
-如果你不想定义 DTO，但希望 path/query 单字段读取时直接得到 `required` / `invalid` 风格错误，优先用 `reqx` 或根包 facade：
+如果你不想定义 DTO，但希望 path/query 单字段读取时直接得到 `required` / `invalid` 风格错误，优先用根包 `hah`：
 
 ```go
 import "github.com/kanata996/hah"
@@ -196,6 +196,7 @@ type SearchQuery struct {
 ## 绑定后的显式校验
 
 `hah` 不预设 DTO 的校验方式。绑定完成后，调用方自己决定下一步是手写校验、接入第三方库，还是映射到应用层命令再校验。
+多数 handler 直接用 `hah.InvalidRequest(...)`、`hah.Violation{...}` 就够了；如果你需要更完整的错误构造器族，再导入 `errx`。
 
 ### 1. 手写校验
 
@@ -211,10 +212,10 @@ func validateCreateAccountBody(r *http.Request, body *CreateAccountBody) error {
 
 	body.Name = strings.TrimSpace(body.Name)
 	if body.Name == "" {
-		return reqx.InvalidRequest(reqx.Violation{
+		return hah.InvalidRequest(hah.Violation{
 			Field: "name",
-			In:    reqx.ViolationInBody,
-			Code:  reqx.ViolationCodeRequired,
+			In:    hah.ViolationInBody,
+			Code:  hah.ViolationCodeRequired,
 		})
 	}
 	return nil
@@ -297,10 +298,10 @@ _ = orgID
 ```go
 actor := strings.TrimSpace(r.Header.Get("X-Actor"))
 if actor == "" {
-	return reqx.InvalidRequest(reqx.Violation{
+	return hah.InvalidRequest(hah.Violation{
 		Field: "X-Actor",
-		In:    reqx.ViolationInHeader,
-		Code:  reqx.ViolationCodeRequired,
+		In:    hah.ViolationInHeader,
+		Code:  hah.ViolationCodeRequired,
 	})
 }
 ```

@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/reqx"
+	"github.com/kanata996/hah/errx"
 )
 
 // 测试清单：
@@ -122,8 +122,67 @@ func TestRequireBody_DelegatesToReqx(t *testing.T) {
 	req.ContentLength = -1
 
 	violation := assertSingleRootViolation(t, RequireBody(req))
-	if violation.Field != "body" || violation.In != reqx.ViolationInBody || violation.Code != reqx.ViolationCodeRequired || violation.Detail != "is required" {
+	if violation.Field != "body" || violation.In != errx.ViolationInBody || violation.Code != errx.ViolationCodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
+	}
+}
+
+// InvalidRequest 会通过根包 facade 暴露统一的 invalid_request 错误构造。
+func TestInvalidRequest_DelegatesToReqx(t *testing.T) {
+	violation := assertSingleRootViolation(t, InvalidRequest(Violation{
+		Field: "name",
+		In:    ViolationInBody,
+		Code:  ViolationCodeRequired,
+	}))
+
+	if violation.Field != "name" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+		t.Fatalf("violation = %#v", violation)
+	}
+}
+
+// NewHTTPError 会通过根包 facade 暴露共享公共错误模型。
+func TestNewHTTPError_DelegatesToErrx(t *testing.T) {
+	err := NewHTTPError(http.StatusConflict, "account_conflict", "account already exists").WithViolations([]Violation{
+		{
+			Field:  "name",
+			In:     ViolationInBody,
+			Code:   ViolationCodeInvalid,
+			Detail: "is invalid",
+		},
+	})
+
+	if got := err.Status(); got != http.StatusConflict {
+		t.Fatalf("Status() = %d, want %d", got, http.StatusConflict)
+	}
+	if got := err.Code(); got != "account_conflict" {
+		t.Fatalf("Code() = %q, want account_conflict", got)
+	}
+	if got := err.Detail(); got != "account already exists" {
+		t.Fatalf("Detail() = %q, want account already exists", got)
+	}
+
+	violation := assertSingleRootViolation(t, err)
+	if violation.Field != "name" || violation.In != ViolationInBody || violation.Code != ViolationCodeInvalid || violation.Detail != "is invalid" {
+		t.Fatalf("violation = %#v", violation)
+	}
+}
+
+// NewHTTPErrorWithCause 会通过根包 facade 暴露保留 cause 的公共错误构造。
+func TestNewHTTPErrorWithCause_DelegatesToErrx(t *testing.T) {
+	cause := errors.New("db timeout")
+	err := NewHTTPErrorWithCause(99, "", "", cause)
+
+	if !errors.Is(err, cause) {
+		t.Fatalf("errors.Is(err, cause) = false, want true")
+	}
+	if got := err.Status(); got != http.StatusInternalServerError {
+		t.Fatalf("Status() = %d, want %d", got, http.StatusInternalServerError)
+	}
+	if got := err.Code(); got != "internal_error" {
+		t.Fatalf("Code() = %q, want internal_error", got)
+	}
+	if got := err.Error(); got != "db timeout" {
+		t.Fatalf("Error() = %q, want db timeout", got)
 	}
 }
 
@@ -275,7 +334,7 @@ func decodeRootPayload(t *testing.T, body []byte) rootPayloadMap {
 	return payload
 }
 
-func assertSingleRootViolation(t *testing.T, err error) reqx.Violation {
+func assertSingleRootViolation(t *testing.T, err error) Violation {
 	t.Helper()
 
 	payload := decodeRootPayload(t, mustWriteRootError(t, err))
@@ -289,7 +348,7 @@ func assertSingleRootViolation(t *testing.T, err error) reqx.Violation {
 		t.Fatalf("violation type = %T, want map[string]any", errorsValue[0])
 	}
 
-	return reqx.Violation{
+	return Violation{
 		Field:  stringValue(violationMap["field"]),
 		In:     stringValue(violationMap["in"]),
 		Code:   stringValue(violationMap["code"]),

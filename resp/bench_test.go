@@ -27,11 +27,6 @@ type benchmarkSuccessPayload struct {
 	Profile benchmarkSuccessProfile `json:"profile"`
 }
 
-type benchmarkValidationError struct {
-	Field  string `json:"field"`
-	Reason string `json:"reason"`
-}
-
 var (
 	benchmarkJSONPayload = benchmarkSuccessPayload{
 		ID:     "acct_123456",
@@ -49,9 +44,10 @@ var (
 	benchmarkClientHTTPError = errx.UnprocessableEntity(
 		"validation_failed",
 		"request validation failed",
-		benchmarkValidationError{Field: "email", Reason: "must be a valid email"},
-		benchmarkValidationError{Field: "name", Reason: "must not be blank"},
-	)
+	).WithViolations([]errx.Violation{
+		{Field: "email", In: errx.ViolationInBody, Code: errx.ViolationCodeInvalid, Detail: "must be a valid email"},
+		{Field: "name", In: errx.ViolationInBody, Code: errx.ViolationCodeRequired, Detail: "must not be blank"},
+	})
 	errBenchmarkServer = errors.New("dial tcp 10.0.0.7:5432: connect: connection reset by peer")
 )
 

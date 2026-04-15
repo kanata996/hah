@@ -192,7 +192,7 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 - `HTTPError` nil 接收者的安全默认值
 - `Status` / `Code` / `Title` / `Detail` / `Errors` 的标准化规则
 - `Error` / `Unwrap` 的 cause 语义
-- 公开 detail/errors 的防御性切片拷贝
+- 公开 violation 列表的防御性切片拷贝
 - 构造器与快捷构造器的稳定输出
 
 ### 7.4 `resp`

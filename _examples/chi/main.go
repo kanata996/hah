@@ -19,7 +19,6 @@ import (
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/hah"
 	"github.com/kanata996/hah/errx"
-	"github.com/kanata996/hah/reqx"
 )
 
 type account struct {
@@ -148,9 +147,9 @@ func (r *createAccountRequest) normalize() {
 func validateListAccountsRequest(req *listAccountsRequest) error {
 	req.normalize()
 	if req.Limit < 1 || req.Limit > 100 {
-		return reqx.InvalidRequest(reqx.Violation{
+		return hah.InvalidRequest(hah.Violation{
 			Field:  "limit",
-			In:     reqx.ViolationInQuery,
+			In:     hah.ViolationInQuery,
 			Detail: "must be between 1 and 100",
 		})
 	}
@@ -165,21 +164,21 @@ func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) er
 	req.normalize()
 	switch nameLen := utf8.RuneCountInString(req.Name); {
 	case req.Name == "":
-		return reqx.InvalidRequest(reqx.Violation{
+		return hah.InvalidRequest(hah.Violation{
 			Field: "name",
-			In:    reqx.ViolationInBody,
-			Code:  reqx.ViolationCodeRequired,
+			In:    hah.ViolationInBody,
+			Code:  hah.ViolationCodeRequired,
 		})
 	case nameLen < 3:
-		return reqx.InvalidRequest(reqx.Violation{
+		return hah.InvalidRequest(hah.Violation{
 			Field:  "name",
-			In:     reqx.ViolationInBody,
+			In:     hah.ViolationInBody,
 			Detail: "must be at least 3 characters",
 		})
 	case nameLen > 64:
-		return reqx.InvalidRequest(reqx.Violation{
+		return hah.InvalidRequest(hah.Violation{
 			Field:  "name",
-			In:     reqx.ViolationInBody,
+			In:     hah.ViolationInBody,
 			Detail: "must be at most 64 characters",
 		})
 	default:
@@ -189,10 +188,10 @@ func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) er
 
 func validateDeleteActor(actor string) error {
 	if strings.TrimSpace(actor) == "" {
-		return reqx.InvalidRequest(reqx.Violation{
+		return hah.InvalidRequest(hah.Violation{
 			Field: "X-Actor",
-			In:    reqx.ViolationInHeader,
-			Code:  reqx.ViolationCodeRequired,
+			In:    hah.ViolationInHeader,
+			Code:  hah.ViolationCodeRequired,
 		})
 	}
 	return nil

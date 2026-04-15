@@ -20,7 +20,7 @@ func (blankWriteCause) Error() string {
 
 type standardHTTPErrorConstructorCase struct {
 	name       string
-	build      func(string, string, ...any) *HTTPError
+	build      func(string, string) *HTTPError
 	wantStatus int
 	wantCode   string
 }
@@ -194,7 +194,7 @@ func assertHTTPErrorUsesStatusTextPublicMessage(t *testing.T, err *HTTPError, wa
 	}
 }
 
-func assertHTTPErrorErrors(t *testing.T, err *HTTPError, want ...string) {
+func assertHTTPErrorErrors(t *testing.T, err *HTTPError, want ...Violation) {
 	t.Helper()
 
 	got := err.Errors()
@@ -290,10 +290,11 @@ func TestHTTPErrorGettersNormalizeZeroAndDirtyValues(t *testing.T) {
 	}
 }
 
-// HTTPError 会优先暴露底层 cause，并对 details 做防御性拷贝。
-func TestHTTPErrorUsesCauseAndClonesDetails(t *testing.T) {
+// HTTPError 会优先暴露底层 cause，并对 violations 做防御性拷贝。
+func TestHTTPErrorUsesCauseAndClonesViolations(t *testing.T) {
 	cause := errors.New("db timeout")
-	err := NewHTTPErrorWithCause(http.StatusConflict, "", "", cause, "detail")
+	input := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
+	err := NewHTTPErrorWithCause(http.StatusConflict, "", "", cause).WithViolations(input)
 
 	if got := err.Error(); got != cause.Error() {
 		t.Fatalf("Error() = %q, want %q", got, cause.Error())
@@ -311,13 +312,16 @@ func TestHTTPErrorUsesCauseAndClonesDetails(t *testing.T) {
 		t.Fatalf("Detail() = %q, want %q", got, http.StatusText(http.StatusConflict))
 	}
 
-	details := err.Errors()
-	if len(details) != 1 || details[0] != "detail" {
-		t.Fatalf("Errors() = %#v, want [detail]", details)
+	input[0].Field = "email"
+
+	gotErrors := err.Errors()
+	want := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
+	if len(gotErrors) != 1 || gotErrors[0] != want[0] {
+		t.Fatalf("Errors() = %#v, want %#v", gotErrors, want)
 	}
-	details[0] = "changed"
-	if got := err.Errors()[0]; got != "detail" {
-		t.Fatalf("Errors() after mutation = %#v, want detail", got)
+	gotErrors[0] = Violation{Field: "changed", In: ViolationInQuery, Code: ViolationCodeInvalid, Detail: "is invalid"}
+	if got := err.Errors()[0]; got != want[0] {
+		t.Fatalf("Errors() after mutation = %#v, want %#v", got, want[0])
 	}
 }
 
@@ -347,46 +351,51 @@ func TestHTTPErrorErrorFallsBackWhenCauseMessageBlank(t *testing.T) {
 
 // Detail/Errors 会暴露公共字段，并返回独立的切片副本给调用方修改。
 func TestHTTPErrorDetailAndErrorsExposePublicFields(t *testing.T) {
-	err := NewHTTPError(http.StatusBadRequest, " invalid_json ", " invalid payload ", "detail")
+	err := NewHTTPError(http.StatusBadRequest, " invalid_json ", " invalid payload ").WithViolations([]Violation{
+		{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"},
+	})
 
 	if got := err.Detail(); got != "invalid payload" {
 		t.Fatalf("Detail() = %q, want %q", got, "invalid payload")
 	}
 
 	gotErrors := err.Errors()
-	if len(gotErrors) != 1 || gotErrors[0] != "detail" {
-		t.Fatalf("Errors() = %#v, want [detail]", gotErrors)
+	want := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
+	if len(gotErrors) != 1 || gotErrors[0] != want[0] {
+		t.Fatalf("Errors() = %#v, want %#v", gotErrors, want)
 	}
-	gotErrors[0] = "changed"
-	if got := err.Errors()[0]; got != "detail" {
-		t.Fatalf("Errors() after mutation = %#v, want detail", got)
+	gotErrors[0] = Violation{Field: "changed", In: ViolationInQuery, Code: ViolationCodeInvalid, Detail: "is invalid"}
+	if got := err.Errors()[0]; got != want[0] {
+		t.Fatalf("Errors() after mutation = %#v, want %#v", got, want[0])
 	}
 }
 
-// 构造 HTTPError 时会立刻拷贝 errors 入参，避免调用方后续修改原切片影响错误对象。
-func TestNewHTTPErrorClonesInputErrorsSlice(t *testing.T) {
-	input := []any{"detail"}
-	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request", input...)
+// WithViolations 会立刻拷贝 violations 入参，避免调用方后续修改原切片影响错误对象。
+func TestHTTPErrorWithViolationsClonesInputSlice(t *testing.T) {
+	input := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
+	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request").WithViolations(input)
 
-	input[0] = "changed"
+	input[0].Field = "changed"
 
 	gotErrors := err.Errors()
-	if len(gotErrors) != 1 || gotErrors[0] != "detail" {
-		t.Fatalf("Errors() = %#v, want original [detail]", gotErrors)
+	want := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
+	if len(gotErrors) != 1 || gotErrors[0] != want[0] {
+		t.Fatalf("Errors() = %#v, want original %#v", gotErrors, want)
 	}
 }
 
-// NewHTTPErrorWithCause 也应在构造时拷贝 errors 入参，不能因保留 cause 而泄漏调用方后续修改。
-func TestNewHTTPErrorWithCauseClonesInputErrorsSlice(t *testing.T) {
-	input := []any{"detail"}
+// NewHTTPErrorWithCause 携带 cause 时，WithViolations 也应拷贝 violations 入参。
+func TestNewHTTPErrorWithCauseAndViolationsCloneInputSlice(t *testing.T) {
+	input := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
 	cause := errors.New("db timeout")
-	err := NewHTTPErrorWithCause(http.StatusConflict, "conflict", "conflict detail", cause, input...)
+	err := NewHTTPErrorWithCause(http.StatusConflict, "conflict", "conflict detail", cause).WithViolations(input)
 
-	input[0] = "changed"
+	input[0].Field = "changed"
 
 	gotErrors := err.Errors()
-	if len(gotErrors) != 1 || gotErrors[0] != "detail" {
-		t.Fatalf("Errors() = %#v, want original [detail]", gotErrors)
+	want := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
+	if len(gotErrors) != 1 || gotErrors[0] != want[0] {
+		t.Fatalf("Errors() = %#v, want original %#v", gotErrors, want)
 	}
 	if !errors.Is(err, cause) {
 		t.Fatalf("errors.Is(%v, %v) = false, want true", err, cause)
@@ -416,14 +425,14 @@ func TestHTTPErrorConstructorsExposeExpectedPublicContract(t *testing.T) {
 	for _, tc := range standardHTTPErrorConstructors {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Run("defaults", func(t *testing.T) {
-				err := tc.build("", "", "detail")
+				err := tc.build("", "")
 				assertHTTPErrorStatusAndCode(t, err, tc.wantStatus, tc.wantCode)
 				assertHTTPErrorUsesStatusTextPublicMessage(t, err, tc.wantStatus)
-				assertHTTPErrorErrors(t, err, "detail")
+				assertHTTPErrorErrors(t, err)
 			})
 
 			t.Run("custom code and detail", func(t *testing.T) {
-				err := tc.build("custom_code", "custom detail", "detail")
+				err := tc.build("custom_code", "custom detail")
 				assertHTTPErrorStatusAndCode(t, err, tc.wantStatus, "custom_code")
 				if got := err.Title(); got != http.StatusText(tc.wantStatus) {
 					t.Fatalf("Title() = %q, want %q", got, http.StatusText(tc.wantStatus))
@@ -434,7 +443,7 @@ func TestHTTPErrorConstructorsExposeExpectedPublicContract(t *testing.T) {
 				if got := err.Error(); got != "custom detail" {
 					t.Fatalf("Error() = %q, want %q", got, "custom detail")
 				}
-				assertHTTPErrorErrors(t, err, "detail")
+				assertHTTPErrorErrors(t, err)
 			})
 		})
 	}
@@ -494,7 +503,7 @@ func TestHTTPErrorWorksWithErrorsIsAndAs(t *testing.T) {
 	}
 }
 
-// 构造时不传 errors，Errors() 应返回 nil 而非空切片。
+// 构造时不设置 violations，Errors() 应返回 nil 而非空切片。
 func TestHTTPErrorErrorsReturnsNilWhenNoErrors(t *testing.T) {
 	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")
 

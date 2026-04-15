@@ -3,6 +3,8 @@ package reqx
 import (
 	"net/http"
 	"strings"
+
+	"github.com/kanata996/hah/errx"
 )
 
 // QueryParam 表示一个待解析的 query 单参数。
@@ -16,7 +18,7 @@ func Query(r *http.Request, name string) *QueryParam {
 		spec: paramSpec{
 			r:      r,
 			name:   strings.TrimSpace(name),
-			input:  ViolationInQuery,
+			input:  errx.ViolationInQuery,
 			lookup: queryParamValues,
 		},
 	}

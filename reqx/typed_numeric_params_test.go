@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/kanata996/hah/errx"
 )
 
 type numericBuilderOps[T comparable] struct {
@@ -373,27 +375,27 @@ func runNumericContract[T comparable](t *testing.T, contract numericContract[T])
 
 	t.Run("default min invalid", func(t *testing.T) {
 		err := contract.newBuilder(newNumericRequest("/items"), contract.field).defaultMinGet(contract.conflictLow, contract.minValue)
-		assertInvalidViolationAt(t, err, contract.field, ViolationInQuery)
+		assertInvalidViolationAt(t, err, contract.field, errx.ViolationInQuery)
 	})
 
 	t.Run("default check invalid uses custom detail", func(t *testing.T) {
 		err := contract.newBuilder(newNumericRequest("/items"), contract.field).defaultCheckGet(contract.defaultValue, contract.defaultDetail)
-		assertViolation(t, err, Violation{
+		assertViolation(t, err, errx.Violation{
 			Field:  contract.field,
-			In:     ViolationInQuery,
-			Code:   ViolationCodeInvalid,
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
 			Detail: contract.defaultDetail,
 		})
 	})
 
 	t.Run("min invalid", func(t *testing.T) {
 		err := contract.newBuilder(newNumericRequest(contract.minInvalidTarget), contract.field).minGet(contract.minValue)
-		assertInvalidViolationAt(t, err, contract.field, ViolationInQuery)
+		assertInvalidViolationAt(t, err, contract.field, errx.ViolationInQuery)
 	})
 
 	t.Run("max invalid", func(t *testing.T) {
 		err := contract.newBuilder(newNumericRequest(contract.maxInvalidTarget), contract.field).maxGet(contract.maxValue)
-		assertInvalidViolationAt(t, err, contract.field, ViolationInQuery)
+		assertInvalidViolationAt(t, err, contract.field, errx.ViolationInQuery)
 	})
 
 	t.Run("max then min conflict", func(t *testing.T) {
@@ -410,7 +412,7 @@ func runNumericContract[T comparable](t *testing.T, contract numericContract[T])
 
 	t.Run("parse invalid", func(t *testing.T) {
 		err := contract.newBuilder(newNumericRequest(contract.parseInvalidTarget), contract.field).parseGet()
-		assertInvalidViolationAt(t, err, contract.field, ViolationInQuery)
+		assertInvalidViolationAt(t, err, contract.field, errx.ViolationInQuery)
 	})
 }
 
