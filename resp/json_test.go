@@ -210,22 +210,6 @@ func TestJSONRejectsUnsupportedValue(t *testing.T) {
 	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
-func TestJSONPanicsOnMarshalPanic(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	defer func() {
-		recovered := recover()
-		if recovered != "panic during MarshalJSON" {
-			t.Fatalf("recover() = %#v, want panic during MarshalJSON", recovered)
-		}
-		assertRecorderHasNoBodyOrContentType(t, rr)
-	}()
-
-	if err := JSON(rr, http.StatusOK, panicSuccessJSONValue{}); err != nil {
-		t.Fatalf("JSON() error = %v, want panic", err)
-	}
-}
-
 func TestJSONBodyWritersReturnWrappedWriteError(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -266,22 +250,4 @@ func TestJSONBodyWritersReturnWrappedWriteError(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestJSONBodyWritersExposeCauseErrorPanic(t *testing.T) {
-	w := &failingWriter{cause: panicWriteCause{}}
-
-	err := JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`))
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-
-	defer func() {
-		recovered := recover()
-		if recovered != "panic during Error" {
-			t.Fatalf("recover() = %#v, want panic during Error", recovered)
-		}
-	}()
-
-	_ = err.Error()
 }

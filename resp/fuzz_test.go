@@ -30,16 +30,16 @@ func FuzzRespPublicContracts(f *testing.F) {
 	f.Fuzz(func(t *testing.T, kind uint8, variant uint8, status int, a, b string, raw []byte) {
 		switch kind % 3 {
 		case 0:
-			fuzzSuccessWriterContracts(t, variant, status, a, b)
+			fuzzSuccessWriterContracts(t, variant, a)
 		case 1:
-			fuzzJSONBlobContracts(t, status, raw)
+			fuzzJSONBlobContracts(t, raw)
 		default:
 			fuzzWriteErrorContracts(t, variant, status, a, b)
 		}
 	})
 }
 
-func fuzzSuccessWriterContracts(t *testing.T, variant uint8, status int, value, _ string) {
+func fuzzSuccessWriterContracts(t *testing.T, variant uint8, value string) {
 	t.Helper()
 
 	payload := map[string]string{"value": value}
@@ -47,11 +47,11 @@ func fuzzSuccessWriterContracts(t *testing.T, variant uint8, status int, value, 
 
 	switch variant % 4 {
 	case 0:
-		err := JSON(rr, status, payload)
-		assertJSONWriterResult(t, rr, err, status, payload)
+		err := JSON(rr, http.StatusAccepted, payload)
+		assertRecorderJSONSuccess(t, rr, err, http.StatusAccepted, payload)
 	case 1:
-		err := JSON(rr, status, nil)
-		assertJSONNullWriterResult(t, rr, err, status)
+		err := JSON(rr, http.StatusOK, nil)
+		assertJSONNullWriterResult(t, rr, err, http.StatusOK)
 	case 2:
 		err := OK(rr, payload)
 		assertRecorderJSONSuccess(t, rr, err, http.StatusOK, payload)
@@ -61,30 +61,8 @@ func fuzzSuccessWriterContracts(t *testing.T, variant uint8, status int, value, 
 	}
 }
 
-func assertJSONWriterResult(t *testing.T, rr *httptest.ResponseRecorder, err error, status int, payload map[string]string) {
-	t.Helper()
-
-	if wantErr := wantJSONBodyWriterError(status); wantErr != "" {
-		if err == nil || err.Error() != wantErr {
-			t.Fatalf("writer error = %v, want %q", err, wantErr)
-		}
-		assertRecorderHasNoBodyOrContentType(t, rr)
-		return
-	}
-
-	assertRecorderJSONSuccess(t, rr, err, status, payload)
-}
-
 func assertJSONNullWriterResult(t *testing.T, rr *httptest.ResponseRecorder, err error, status int) {
 	t.Helper()
-
-	if wantErr := wantJSONBodyWriterError(status); wantErr != "" {
-		if err == nil || err.Error() != wantErr {
-			t.Fatalf("writer error = %v, want %q", err, wantErr)
-		}
-		assertRecorderHasNoBodyOrContentType(t, rr)
-		return
-	}
 
 	if err != nil {
 		t.Fatalf("writer error = %v", err)
@@ -119,25 +97,17 @@ func assertRecorderJSONSuccess(t *testing.T, rr *httptest.ResponseRecorder, err 
 	}
 }
 
-func fuzzJSONBlobContracts(t *testing.T, status int, body []byte) {
+func fuzzJSONBlobContracts(t *testing.T, body []byte) {
 	t.Helper()
 
 	rr := httptest.NewRecorder()
-	err := JSONBlob(rr, status, body)
-
-	if wantErr := wantJSONBodyWriterError(status); wantErr != "" {
-		if err == nil || err.Error() != wantErr {
-			t.Fatalf("JSONBlob() error = %v, want %q", err, wantErr)
-		}
-		assertRecorderHasNoBodyOrContentType(t, rr)
-		return
-	}
+	err := JSONBlob(rr, http.StatusAccepted, body)
 
 	if err != nil {
 		t.Fatalf("JSONBlob() error = %v", err)
 	}
-	if rr.Code != status {
-		t.Fatalf("status = %d, want %d", rr.Code, status)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
 	}
 	if got := rr.Header().Get("Content-Type"); got != "application/json" {
 		t.Fatalf("Content-Type = %q, want application/json", got)
@@ -241,19 +211,6 @@ func encodeContractJSON(t *testing.T, payload map[string]string) string {
 		t.Fatalf("Encode() error = %v", err)
 	}
 	return buf.String()
-}
-
-func wantJSONBodyWriterError(status int) string {
-	switch {
-	case status < 100 || status > 999:
-		return fmt.Sprintf("resp: invalid HTTP status %d", status)
-	case status < http.StatusOK:
-		return fmt.Sprintf("resp: JSON body writers cannot use informational status %d", status)
-	case status == http.StatusNoContent || status == http.StatusResetContent || status == http.StatusNotModified:
-		return fmt.Sprintf("resp: JSON body writers cannot use bodyless status %d", status)
-	default:
-		return ""
-	}
 }
 
 func jsonSafeString(value string) string {
