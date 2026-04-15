@@ -202,6 +202,30 @@ func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	}
 }
 
+func TestWriteErrorRespectsWrappedWriterContentLength(t *testing.T) {
+	inner := &headLikeResponseWriter{}
+	w := &transformingResponseWriter{
+		ResponseWriter: inner,
+		suffix:         []byte("\n"),
+	}
+	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
+		{Field: "name", Code: "required", Detail: "is required"},
+	})
+
+	if err := WriteError(w, httpErr); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+	if inner.status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", inner.status, http.StatusBadRequest)
+	}
+	if got := inner.Header().Get("Content-Length"); got != strconv.Itoa(len(w.lastWrite)) {
+		t.Fatalf("Content-Length = %q, want %d", got, len(w.lastWrite))
+	}
+	if w.writeCalls != 1 {
+		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
+	}
+}
+
 // 非法状态码会被标准化为 500，且内部 cause 不会泄漏到公开响应。
 func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
 	rr := httptest.NewRecorder()
@@ -356,13 +380,26 @@ func TestWriteErrorWriteFailureDoesNotWriteStandaloneLog(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
 	defer slog.SetDefault(previousDefault)
 
-	w := &failingWriter{}
+	cause := errors.New("socket closed")
+	w := &failingWriter{cause: cause}
 	err := WriteError(w, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"))
 	if err == nil {
 		t.Fatal("expected write error, got nil")
 	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("errors.Is(err, cause) = false, want true")
+	}
+	if got := err.Error(); got != "resp: write response failed: socket closed" {
+		t.Fatalf("error = %q, want %q", got, "resp: write response failed: socket closed")
+	}
 	if w.status != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.status, http.StatusInternalServerError)
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	}
+	if w.writes != 1 {
+		t.Fatalf("writes = %d, want 1", w.writes)
 	}
 	if defaultBuf.Len() != 0 {
 		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())

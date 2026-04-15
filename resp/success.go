@@ -21,6 +21,9 @@ func NoContent(w http.ResponseWriter) error {
 	if w == nil {
 		return errNilResponseWriter
 	}
+	header := w.Header()
+	header.Del("Content-Type")
+	header.Del("Content-Length")
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

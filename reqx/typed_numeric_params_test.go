@@ -344,6 +344,55 @@ func TestFloat64Param_ValidationAndRangeErrors(t *testing.T) {
 	})
 }
 
+func TestOrderedRangeParam_RepeatedBoundsUseLatestConfiguration(t *testing.T) {
+	t.Run("latest min overrides earlier min check", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=7", nil), "page").Int().
+			Min(10).
+			Min(5).
+			Max(7).
+			Get()
+		if err != nil {
+			t.Fatalf("Int().Min().Min().Max().Get() error = %v", err)
+		}
+		if got != 7 {
+			t.Fatalf("page = %d, want 7", got)
+		}
+	})
+
+	t.Run("later bounds can recover from earlier conflict", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=7", nil), "page").Int().
+			Min(10).
+			Max(7).
+			Min(5).
+			Get()
+		if err != nil {
+			t.Fatalf("Int().Min().Max().Min().Get() error = %v", err)
+		}
+		if got != 7 {
+			t.Fatalf("page = %d, want 7", got)
+		}
+	})
+
+	t.Run("repeated min after check preserves custom detail precedence", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=3", nil), "page").Int().
+			Min(1).
+			Check(func(value int) error {
+				if value == 3 {
+					return errors.New("custom numeric detail")
+				}
+				return nil
+			}).
+			Min(5).
+			Get()
+		assertViolation(t, err, errx.Violation{
+			Field:  "page",
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
+			Detail: "custom numeric detail",
+		})
+	})
+}
+
 func runNumericContract[T comparable](t *testing.T, contract numericContract[T]) {
 	t.Helper()
 

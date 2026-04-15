@@ -171,7 +171,17 @@ func bindQueryStructField(field reflect.Value, typeField reflect.StructField, da
 		return nil
 	}
 
-	return bindTaggedQueryField(field, values, typeField.Tag.Get("format"))
+	formatTag := typeField.Tag.Get("format")
+	if !queryBindingMayMutateField(field, formatTag) {
+		return bindTaggedQueryField(field, values, formatTag)
+	}
+
+	snapshot := cloneQueryFieldValue(field)
+	if err := bindTaggedQueryField(field, values, formatTag); err != nil {
+		field.Set(snapshot)
+		return err
+	}
+	return nil
 }
 
 func validateAnonymousQueryField(typeField reflect.StructField, fieldName string) error {
@@ -231,6 +241,86 @@ func bindTaggedQueryField(field reflect.Value, values []string, formatTag string
 	}
 
 	return setFieldValue(values[0], writeField, formatTag)
+}
+
+func queryBindingMayMutateField(field reflect.Value, formatTag string) bool {
+	if field.Kind() == reflect.Pointer {
+		return true
+	}
+
+	fieldValue := field.Addr().Interface()
+	if _, ok := fieldValue.(BindMultipleUnmarshaler); ok {
+		return true
+	}
+	if _, ok := fieldValue.(BindUnmarshaler); ok {
+		return true
+	}
+	if _, ok := fieldValue.(encoding.TextUnmarshaler); ok {
+		return true
+	}
+
+	return false
+}
+
+func cloneQueryFieldValue(field reflect.Value) reflect.Value {
+	switch field.Kind() {
+	case reflect.Pointer:
+		if field.IsNil() {
+			return reflect.Zero(field.Type())
+		}
+
+		clone := reflect.New(field.Type().Elem())
+		clone.Elem().Set(cloneQueryFieldValue(field.Elem()))
+		return clone
+	case reflect.Interface:
+		if field.IsNil() {
+			return reflect.Zero(field.Type())
+		}
+
+		clone := reflect.New(field.Type()).Elem()
+		clone.Set(cloneQueryFieldValue(field.Elem()))
+		return clone
+	case reflect.Slice:
+		if field.IsNil() {
+			return reflect.Zero(field.Type())
+		}
+
+		clone := reflect.MakeSlice(field.Type(), field.Len(), field.Len())
+		for i := 0; i < field.Len(); i++ {
+			clone.Index(i).Set(cloneQueryFieldValue(field.Index(i)))
+		}
+		return clone
+	case reflect.Array:
+		clone := reflect.New(field.Type()).Elem()
+		for i := 0; i < field.Len(); i++ {
+			clone.Index(i).Set(cloneQueryFieldValue(field.Index(i)))
+		}
+		return clone
+	case reflect.Map:
+		if field.IsNil() {
+			return reflect.Zero(field.Type())
+		}
+
+		clone := reflect.MakeMapWithSize(field.Type(), field.Len())
+		iter := field.MapRange()
+		for iter.Next() {
+			clone.SetMapIndex(cloneQueryFieldValue(iter.Key()), cloneQueryFieldValue(iter.Value()))
+		}
+		return clone
+	case reflect.Struct:
+		clone := reflect.New(field.Type()).Elem()
+		clone.Set(field)
+		for i := 0; i < field.NumField(); i++ {
+			if clone.Field(i).CanSet() {
+				clone.Field(i).Set(cloneQueryFieldValue(field.Field(i)))
+			}
+		}
+		return clone
+	default:
+		clone := reflect.New(field.Type()).Elem()
+		clone.Set(field)
+		return clone
+	}
 }
 
 func bindFieldValue(field reflect.Value) reflect.Value {

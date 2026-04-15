@@ -17,7 +17,6 @@ package resp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -86,7 +85,7 @@ func WriteError(w http.ResponseWriter, err error) error {
 	}
 
 	httpErr := asHTTPError(err)
-	body, err := json.Marshal(problemPayload{
+	body, err := encodeJSON(problemPayload{
 		Title:  httpErr.Title(),
 		Status: httpErr.Status(),
 		Detail: httpErr.Detail(),

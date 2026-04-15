@@ -88,10 +88,23 @@ func getParam[T any](value resolver[T]) (T, error) {
 	return value.resolve()
 }
 
+type rangeConstraint int
+
+const (
+	rangeConstraintNone rangeConstraint = iota
+	rangeConstraintMin
+	rangeConstraintMax
+	rangeConstraintAfter
+	rangeConstraintBefore
+	rangeConstraintMinLen
+	rangeConstraintMaxLen
+)
+
 type orderedRangeParam[T cmp.Ordered] struct {
-	value paramValue[T]
-	min   *T
-	max   *T
+	value          paramValue[T]
+	min            *T
+	max            *T
+	lastConstraint rangeConstraint
 }
 
 func newOrderedRangeParam[T cmp.Ordered](spec paramSpec, parse func(string) (T, error)) orderedRangeParam[T] {
@@ -111,16 +124,20 @@ func (p *orderedRangeParam[T]) addCheck(check func(T) error) {
 }
 
 func (p *orderedRangeParam[T]) resolve() (T, error) {
+	var zero T
+	if p.value.state.usageErr != nil {
+		return zero, p.value.state.usageErr
+	}
+	if err := p.constraintUsageErr(); err != nil {
+		return zero, err
+	}
 	return p.value.resolve()
 }
 
 func (p *orderedRangeParam[T]) setMin(value T) {
-	if p.max != nil && value > *p.max {
-		p.value.setUsageErr(usageErrorf("minimum must be less than or equal to maximum"))
-		return
-	}
 	p.min = &value
-	p.value.addCheck(func(v T) error {
+	p.lastConstraint = rangeConstraintMin
+	p.value.state.setNamedCheck("min", func(v T) error {
 		if v < value {
 			return errInvalidParamValue
 		}
@@ -129,12 +146,9 @@ func (p *orderedRangeParam[T]) setMin(value T) {
 }
 
 func (p *orderedRangeParam[T]) setMax(value T) {
-	if p.min != nil && *p.min > value {
-		p.value.setUsageErr(usageErrorf("maximum must be greater than or equal to minimum"))
-		return
-	}
 	p.max = &value
-	p.value.addCheck(func(v T) error {
+	p.lastConstraint = rangeConstraintMax
+	p.value.state.setNamedCheck("max", func(v T) error {
 		if v > value {
 			return errInvalidParamValue
 		}
@@ -142,10 +156,22 @@ func (p *orderedRangeParam[T]) setMax(value T) {
 	})
 }
 
+func (p *orderedRangeParam[T]) constraintUsageErr() error {
+	if p.min == nil || p.max == nil || *p.min <= *p.max {
+		return nil
+	}
+
+	if p.lastConstraint == rangeConstraintMin {
+		return usageErrorf("minimum must be less than or equal to maximum")
+	}
+	return usageErrorf("maximum must be greater than or equal to minimum")
+}
+
 type timeRangeParam struct {
-	value  paramValue[time.Time]
-	after  *time.Time
-	before *time.Time
+	value          paramValue[time.Time]
+	after          *time.Time
+	before         *time.Time
+	lastConstraint rangeConstraint
 }
 
 func newTimeRangeParam(spec paramSpec, parse func(string) (time.Time, error)) timeRangeParam {
@@ -165,16 +191,19 @@ func (p *timeRangeParam) addCheck(check func(time.Time) error) {
 }
 
 func (p *timeRangeParam) resolve() (time.Time, error) {
+	if p.value.state.usageErr != nil {
+		return time.Time{}, p.value.state.usageErr
+	}
+	if err := p.constraintUsageErr(); err != nil {
+		return time.Time{}, err
+	}
 	return p.value.resolve()
 }
 
 func (p *timeRangeParam) setAfter(value time.Time) {
-	if p.before != nil && value.After(*p.before) {
-		p.value.setUsageErr(usageErrorf("after time must be less than or equal to before time"))
-		return
-	}
 	p.after = &value
-	p.value.addCheck(func(v time.Time) error {
+	p.lastConstraint = rangeConstraintAfter
+	p.value.state.setNamedCheck("after", func(v time.Time) error {
 		if v.Before(value) {
 			return errInvalidParamValue
 		}
@@ -183,12 +212,9 @@ func (p *timeRangeParam) setAfter(value time.Time) {
 }
 
 func (p *timeRangeParam) setBefore(value time.Time) {
-	if p.after != nil && p.after.After(value) {
-		p.value.setUsageErr(usageErrorf("before time must be greater than or equal to after time"))
-		return
-	}
 	p.before = &value
-	p.value.addCheck(func(v time.Time) error {
+	p.lastConstraint = rangeConstraintBefore
+	p.value.state.setNamedCheck("before", func(v time.Time) error {
 		if v.After(value) {
 			return errInvalidParamValue
 		}
@@ -196,9 +222,23 @@ func (p *timeRangeParam) setBefore(value time.Time) {
 	})
 }
 
+func (p *timeRangeParam) constraintUsageErr() error {
+	if p.after == nil || p.before == nil || !p.after.After(*p.before) {
+		return nil
+	}
+
+	if p.lastConstraint == rangeConstraintAfter {
+		return usageErrorf("after time must be less than or equal to before time")
+	}
+	return usageErrorf("before time must be greater than or equal to after time")
+}
+
 // StringParam 读取并校验 string 参数。
 type StringParam struct {
-	value paramValue[string]
+	value          paramValue[string]
+	minLen         *int
+	maxLen         *int
+	lastConstraint rangeConstraint
 }
 
 // ValuesParam 读取并校验 query 多值参数的原始 []string。
@@ -235,7 +275,9 @@ func (p *StringParam) MinLen(n int) *StringParam {
 		p.value.setUsageErr(usageErrorf("minimum length must be >= 0"))
 		return p
 	}
-	p.value.addCheck(func(value string) error {
+	p.minLen = &n
+	p.lastConstraint = rangeConstraintMinLen
+	p.value.state.setNamedCheck("min_length", func(value string) error {
 		if utf8.RuneCountInString(value) < n {
 			return errInvalidParamValue
 		}
@@ -249,7 +291,9 @@ func (p *StringParam) MaxLen(n int) *StringParam {
 		p.value.setUsageErr(usageErrorf("maximum length must be >= 0"))
 		return p
 	}
-	p.value.addCheck(func(value string) error {
+	p.maxLen = &n
+	p.lastConstraint = rangeConstraintMaxLen
+	p.value.state.setNamedCheck("max_length", func(value string) error {
 		if utf8.RuneCountInString(value) > n {
 			return errInvalidParamValue
 		}
@@ -295,7 +339,24 @@ func (p *StringParam) Check(check func(string) error) *StringParam {
 }
 
 func (p *StringParam) Get() (string, error) {
+	if p.value.state.usageErr != nil {
+		return "", p.value.state.usageErr
+	}
+	if err := p.constraintUsageErr(); err != nil {
+		return "", err
+	}
 	return getParam(&p.value)
+}
+
+func (p *StringParam) constraintUsageErr() error {
+	if p.minLen == nil || p.maxLen == nil || *p.minLen <= *p.maxLen {
+		return nil
+	}
+
+	if p.lastConstraint == rangeConstraintMinLen {
+		return usageErrorf("minimum length must be less than or equal to maximum length")
+	}
+	return usageErrorf("maximum length must be greater than or equal to minimum length")
 }
 
 // IntParam 读取并校验 int 参数。

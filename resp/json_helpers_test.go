@@ -26,6 +26,12 @@ type writeCallbackResponseWriter struct {
 	http.ResponseWriter
 	writeCalls int
 }
+type transformingResponseWriter struct {
+	http.ResponseWriter
+	suffix     []byte
+	writeCalls int
+	lastWrite  []byte
+}
 
 func (w *failingWriter) Header() http.Header {
 	if w.header == nil {
@@ -74,6 +80,13 @@ func (w *writeCallbackResponseWriter) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
+func (w *transformingResponseWriter) Write(p []byte) (int, error) {
+	w.writeCalls++
+	out := append(append([]byte(nil), p...), w.suffix...)
+	w.lastWrite = append([]byte(nil), out...)
+	return w.ResponseWriter.Write(out)
+}
+
 func decodePayload(t *testing.T, body []byte) payloadMap {
 	t.Helper()
 
@@ -87,11 +100,17 @@ func decodePayload(t *testing.T, body []byte) payloadMap {
 func assertRecorderHasNoBodyOrContentType(t *testing.T, rr *httptest.ResponseRecorder) {
 	t.Helper()
 
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want recorder default %d", rr.Code, http.StatusOK)
+	}
 	if rr.Body.Len() != 0 {
 		t.Fatalf("body = %q, want empty", rr.Body.String())
 	}
 	if got := rr.Header().Get("Content-Type"); got != "" {
 		t.Fatalf("Content-Type = %q, want empty", got)
+	}
+	if len(rr.Header()) != 0 {
+		t.Fatalf("headers = %#v, want empty", rr.Header())
 	}
 }
 
