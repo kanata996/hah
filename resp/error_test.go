@@ -322,21 +322,21 @@ func TestWriteErrorRejectsPanickingDetails(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	defer func() {
-		if recovered := recover(); recovered != nil {
-			t.Fatalf("WriteError() panicked: %v", recovered)
+		recovered := recover()
+		if recovered != "panic during MarshalJSON" {
+			t.Fatalf("recover() = %#v, want panic during MarshalJSON", recovered)
 		}
+		assertRecorderHasNoBodyOrContentType(t, rr)
 	}()
 
-	err := WriteError(rr, errx.NewHTTPError(
+	if err := WriteError(rr, errx.NewHTTPError(
 		http.StatusBadRequest,
 		"bad_request",
 		"bad request",
 		panicJSONDetail{},
-	))
-	if err == nil || err.Error() != "resp: marshal problem payload panicked: panic during MarshalJSON" {
-		t.Fatalf("WriteError() error = %v, want panic recovery error", err)
+	)); err != nil {
+		t.Fatalf("WriteError() error = %v, want panic", err)
 	}
-	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
 // resp 自己的写响应错误再次传回 WriteError 时，应直接原样返回，避免重复写。

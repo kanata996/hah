@@ -18,29 +18,18 @@ func Created(w http.ResponseWriter, data any) error {
 
 // NoContent 写出 204 响应且不包含响应体。
 func NoContent(w http.ResponseWriter) error {
-	return writeStatus(w, http.StatusNoContent)
-}
-
-// writeStatus 仅写出状态码，不包含响应体。
-func writeStatus(w http.ResponseWriter, status int) error {
 	if w == nil {
 		return errNilResponseWriter
 	}
-	if err := validateHTTPStatus(status); err != nil {
-		return err
-	}
-	w.WriteHeader(status)
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }
 
 // writeSuccess 是 OK / Created 这类显式成功响应的核心路径。
-// 相比通用 JSON 写回，它额外要求状态码必须是非错误状态，且 payload 不能编码为 JSON null。
+// 相比通用 JSON 写回，它额外要求 payload 不能编码为 JSON null。
 func writeSuccess(w http.ResponseWriter, status int, data any) error {
-	if err := validateJSONBodyWrite(w, status); err != nil {
-		return err
-	}
-	if status >= http.StatusBadRequest {
-		return fmt.Errorf("resp: invalid success status %d", status)
+	if w == nil {
+		return errNilResponseWriter
 	}
 
 	dataJSON, err := encodeJSON(data)

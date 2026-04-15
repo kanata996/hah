@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/kanata996/hah/errx"
@@ -82,35 +81,21 @@ func WriteError(w http.ResponseWriter, err error) error {
 		return err
 	}
 
-	return writeErrorPayload(w, asHTTPError(err))
-}
-
-// writeErrorPayload 负责真正把错误对象编码并写到响应里。
-// 如果公开 errors 序列化失败，则直接返回编码错误。
-func writeErrorPayload(w http.ResponseWriter, httpErr *errx.HTTPError) error {
-	body, err := marshalProblemPayload(httpErr)
-	if err != nil {
-		return err
+	if w == nil {
+		return errNilResponseWriter
 	}
 
-	return writeJSONBytesWithContentType(w, httpErr.Status(), problemJSONContentType, body)
-}
-
-// marshalProblemPayload 把公共错误字段编码为最终的 JSON 响应体。
-// 该步骤只关心响应体结构，不处理日志、副作用或写出行为。
-func marshalProblemPayload(httpErr *errx.HTTPError) (body []byte, err error) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			body = nil
-			err = fmt.Errorf("resp: marshal problem payload panicked: %v", recovered)
-		}
-	}()
-
-	return json.Marshal(problemPayload{
+	httpErr := asHTTPError(err)
+	body, err := json.Marshal(problemPayload{
 		Title:  httpErr.Title(),
 		Status: httpErr.Status(),
 		Detail: httpErr.Detail(),
 		Code:   httpErr.Code(),
 		Errors: httpErr.Errors(),
 	})
+	if err != nil {
+		return err
+	}
+
+	return writePreparedJSONBytes(w, httpErr.Status(), problemJSONContentType, body)
 }

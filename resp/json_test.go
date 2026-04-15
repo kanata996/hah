@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
@@ -211,20 +210,20 @@ func TestJSONRejectsUnsupportedValue(t *testing.T) {
 	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
-func TestJSONRecoversFromMarshalPanic(t *testing.T) {
+func TestJSONPanicsOnMarshalPanic(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	defer func() {
-		if recovered := recover(); recovered != nil {
-			t.Fatalf("JSON() panicked: %v", recovered)
+		recovered := recover()
+		if recovered != "panic during MarshalJSON" {
+			t.Fatalf("recover() = %#v, want panic during MarshalJSON", recovered)
 		}
+		assertRecorderHasNoBodyOrContentType(t, rr)
 	}()
 
-	err := JSON(rr, http.StatusOK, panicSuccessJSONValue{})
-	if err == nil || err.Error() != "resp: encode JSON panicked: panic during MarshalJSON" {
-		t.Fatalf("JSON() error = %v, want panic recovery error", err)
+	if err := JSON(rr, http.StatusOK, panicSuccessJSONValue{}); err != nil {
+		t.Fatalf("JSON() error = %v, want panic", err)
 	}
-	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
 func TestJSONBodyWritersReturnWrappedWriteError(t *testing.T) {
@@ -269,7 +268,7 @@ func TestJSONBodyWritersReturnWrappedWriteError(t *testing.T) {
 	}
 }
 
-func TestJSONBodyWritersRecoverWriteErrorStringFromCausePanic(t *testing.T) {
+func TestJSONBodyWritersExposeCauseErrorPanic(t *testing.T) {
 	w := &failingWriter{cause: panicWriteCause{}}
 
 	err := JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`))
@@ -278,56 +277,11 @@ func TestJSONBodyWritersRecoverWriteErrorStringFromCausePanic(t *testing.T) {
 	}
 
 	defer func() {
-		if recovered := recover(); recovered != nil {
-			t.Fatalf("err.Error() panicked: %v", recovered)
+		recovered := recover()
+		if recovered != "panic during Error" {
+			t.Fatalf("recover() = %#v, want panic during Error", recovered)
 		}
 	}()
 
-	if got := err.Error(); !strings.Contains(got, "resp: write response failed: panic calling Error()") {
-		t.Fatalf("error = %q, want panic fallback text", got)
-	}
-}
-
-func TestJSONBodyWritersFallbackWriteErrorStringOnBlankCause(t *testing.T) {
-	w := &failingWriter{cause: blankWriteCause{}}
-
-	err := JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`))
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	if got := err.Error(); got != "resp: write response failed" {
-		t.Fatalf("error = %q, want fallback text", got)
-	}
-}
-
-func TestResponseWriteErrorFallbackMessageWithoutCause(t *testing.T) {
-	cases := []struct {
-		name string
-		err  *responseWriteError
-	}{
-		{name: "nil receiver", err: nil},
-		{name: "nil cause", err: &responseWriteError{}},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.err.Error(); got != "resp: write response failed" {
-				t.Fatalf("Error() = %q, want fallback text", got)
-			}
-		})
-	}
-}
-
-func TestResponseWriteErrorUnwrapNilReceiver(t *testing.T) {
-	var err *responseWriteError
-
-	if got := err.Unwrap(); got != nil {
-		t.Fatalf("Unwrap() = %#v, want nil", got)
-	}
-}
-
-func TestSafeErrorStringNil(t *testing.T) {
-	if got := safeErrorString(nil); got != "" {
-		t.Fatalf("safeErrorString(nil) = %q, want empty", got)
-	}
+	_ = err.Error()
 }

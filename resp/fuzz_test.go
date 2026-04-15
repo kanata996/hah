@@ -64,7 +64,7 @@ func fuzzSuccessWriterContracts(t *testing.T, variant uint8, status int, value, 
 func assertJSONWriterResult(t *testing.T, rr *httptest.ResponseRecorder, err error, status int, payload map[string]string) {
 	t.Helper()
 
-	if wantErr := wantBodyWriterError("JSON body writers", status); wantErr != "" {
+	if wantErr := wantJSONBodyWriterError(status); wantErr != "" {
 		if err == nil || err.Error() != wantErr {
 			t.Fatalf("writer error = %v, want %q", err, wantErr)
 		}
@@ -78,7 +78,7 @@ func assertJSONWriterResult(t *testing.T, rr *httptest.ResponseRecorder, err err
 func assertJSONNullWriterResult(t *testing.T, rr *httptest.ResponseRecorder, err error, status int) {
 	t.Helper()
 
-	if wantErr := wantBodyWriterError("JSON body writers", status); wantErr != "" {
+	if wantErr := wantJSONBodyWriterError(status); wantErr != "" {
 		if err == nil || err.Error() != wantErr {
 			t.Fatalf("writer error = %v, want %q", err, wantErr)
 		}
@@ -125,7 +125,7 @@ func fuzzJSONBlobContracts(t *testing.T, status int, body []byte) {
 	rr := httptest.NewRecorder()
 	err := JSONBlob(rr, status, body)
 
-	if wantErr := wantBodyWriterError("JSON body writers", status); wantErr != "" {
+	if wantErr := wantJSONBodyWriterError(status); wantErr != "" {
 		if err == nil || err.Error() != wantErr {
 			t.Fatalf("JSONBlob() error = %v, want %q", err, wantErr)
 		}
@@ -243,14 +243,14 @@ func encodeContractJSON(t *testing.T, payload map[string]string) string {
 	return buf.String()
 }
 
-func wantBodyWriterError(writerName string, status int) string {
+func wantJSONBodyWriterError(status int) string {
 	switch {
 	case status < 100 || status > 999:
 		return fmt.Sprintf("resp: invalid HTTP status %d", status)
 	case status < http.StatusOK:
-		return fmt.Sprintf("resp: %s cannot use informational status %d", writerName, status)
+		return fmt.Sprintf("resp: JSON body writers cannot use informational status %d", status)
 	case status == http.StatusNoContent || status == http.StatusResetContent || status == http.StatusNotModified:
-		return fmt.Sprintf("resp: %s cannot use bodyless status %d", writerName, status)
+		return fmt.Sprintf("resp: JSON body writers cannot use bodyless status %d", status)
 	default:
 		return ""
 	}

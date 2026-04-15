@@ -12,7 +12,6 @@ import (
 type payloadMap map[string]any
 type panicSuccessJSONValue struct{}
 type panicWriteCause struct{}
-type blankWriteCause struct{}
 type failingWriter struct {
 	header http.Header
 	status int
@@ -36,10 +35,6 @@ func (panicSuccessJSONValue) MarshalJSON() ([]byte, error) {
 
 func (panicWriteCause) Error() string {
 	panic("panic during Error")
-}
-
-func (blankWriteCause) Error() string {
-	return "   "
 }
 
 func (w *failingWriter) Header() http.Header {

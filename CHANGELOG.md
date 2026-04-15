@@ -13,6 +13,10 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+### Changed
+
+- Stopped converting panics from caller-provided JSON marshaling or error stringification into ordinary `resp` errors; panic recovery remains caller-owned, consistent with the package's documented boundary.
+
 ## [v0.5.0] - 2026-04-15
 
 ### Breaking
