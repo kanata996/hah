@@ -19,26 +19,45 @@ func (r errorReadCloser) Close() error {
 }
 
 func TestRequireBody(t *testing.T) {
-	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
-	if err := RequireBody(req); err != nil {
-		t.Fatalf("RequireBody(non-empty) error = %v", err)
-	}
+	t.Run("non-empty body passes and can still be bound", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+			Age  int    `json:"age"`
+		}
 
-	emptyReq := newJSONRequest(http.MethodPost, "/", "")
-	emptyReq.ContentLength = 0
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+		if err := RequireBody(req); err != nil {
+			t.Fatalf("RequireBody(non-empty) error = %v", err)
+		}
 
-	violation := assertSingleViolation(t, RequireBody(emptyReq))
-	if violation.Field != "body" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
-		t.Fatalf("violation = %#v", violation)
-	}
+		dst := request{Name: "existing", Age: 17}
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() after RequireBody() error = %v", err)
+		}
+		if dst.Name != "kanata" || dst.Age != 17 {
+			t.Fatalf("dst = %#v, want bound body fields with omitted fields preserved", dst)
+		}
+	})
 
-	unknownLengthReq := newJSONRequest(http.MethodPost, "/", "")
-	unknownLengthReq.ContentLength = -1
+	t.Run("content length zero body is required violation", func(t *testing.T) {
+		req := newJSONRequest(http.MethodPost, "/", "")
+		req.ContentLength = 0
 
-	violation = assertSingleViolation(t, RequireBody(unknownLengthReq))
-	if violation.Field != "body" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
-		t.Fatalf("violation = %#v", violation)
-	}
+		violation := assertSingleViolation(t, RequireBody(req))
+		if violation.Field != "body" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
+
+	t.Run("unknown length empty body is required violation", func(t *testing.T) {
+		req := newJSONRequest(http.MethodPost, "/", "")
+		req.ContentLength = -1
+
+		violation := assertSingleViolation(t, RequireBody(req))
+		if violation.Field != "body" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+			t.Fatalf("violation = %#v", violation)
+		}
+	})
 }
 
 func TestRequireBodyNilRequest(t *testing.T) {
@@ -99,4 +118,24 @@ func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("multiple violations are preserved in order", func(t *testing.T) {
+		got := assertViolations(t, InvalidRequest(
+			Violation{Field: "page", In: ViolationInQuery},
+			Violation{Field: "body", In: ViolationInBody, Code: ViolationCodeRequired},
+		))
+
+		want := []Violation{
+			{Field: "page", In: ViolationInQuery, Code: ViolationCodeInvalid, Detail: "is invalid"},
+			{Field: "body", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"},
+		}
+		if len(got) != len(want) {
+			t.Fatalf("violations len = %d, want %d", len(got), len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("violations[%d] = %#v, want %#v", i, got[i], want[i])
+			}
+		}
+	})
 }

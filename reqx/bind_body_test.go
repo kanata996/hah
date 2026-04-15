@@ -278,6 +278,23 @@ func TestBindBody_JSONContract(t *testing.T) {
 		}
 	})
 
+	t.Run("omitted fields preserve existing values on success", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+			Age  int    `json:"age"`
+		}
+
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+		dst := request{Name: "existing", Age: 17}
+
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst.Name != "kanata" || dst.Age != 17 {
+			t.Fatalf("dst = %#v, want updated name with omitted age preserved", dst)
+		}
+	})
+
 	t.Run("unknown fields are accepted by default", func(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`

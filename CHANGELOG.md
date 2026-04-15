@@ -13,6 +13,18 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.5.1] - 2026-04-15
+
+### Documentation
+
+- Clarified the `BindBody(...)` contract in the public docs: decoding happens onto the caller-provided target, omitted JSON fields preserve existing values, and earlier successful field writes stay visible if a later field fails to decode.
+- Clarified that `RequireBody(...)` and `BindBody(...)` share the same non-destructive body-presence probe, so callers may enforce a required body before or after binding without consuming the request stream twice.
+
+### Testing
+
+- Tightened the `reqx` request-side contract coverage around body-required checks, body-presence probing, and `BindBody(...)` field-preservation semantics.
+- Simplified `resp` contract tests so the suite stays centered on documented response behavior and caller-owned panic semantics.
+
 ## [v0.5.0] - 2026-04-15
 
 ### Breaking

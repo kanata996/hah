@@ -18,7 +18,8 @@ func InvalidRequest(violations ...Violation) error {
 // RequireBody 按 body 绑定契约要求请求必须显式提交 body。
 //
 // 在当前实现里，实际读取到零字节 body 会被视为“没有 body”，与 BindBody 的
-// empty-body no-op 语义保持一致。
+// empty-body no-op 语义保持一致。它和 BindBody 共享同一个非破坏性 body
+// 探测，因此可按调用方需要在绑定前后调用。
 func RequireBody(r *http.Request) error {
 	if r == nil {
 		return usageErrorf("request must not be nil")

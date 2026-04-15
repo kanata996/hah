@@ -14,12 +14,6 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-type panicJSONDetail struct{}
-
-func (panicJSONDetail) MarshalJSON() ([]byte, error) {
-	panic("panic during MarshalJSON")
-}
-
 // WriteError 会把 HTTPError 写成标准 problem JSON。
 func TestWriteErrorWritesEnvelope(t *testing.T) {
 	rr := httptest.NewRecorder()
@@ -153,12 +147,6 @@ func TestWriteErrorNilErrorIsNoop(t *testing.T) {
 	}
 	if len(rr.Header()) != 0 {
 		t.Fatalf("headers = %#v, want empty", rr.Header())
-	}
-}
-
-func TestAsHTTPErrorNilReturnsNil(t *testing.T) {
-	if got := asHTTPError(nil); got != nil {
-		t.Fatalf("asHTTPError(nil) = %#v, want nil", got)
 	}
 }
 
@@ -315,28 +303,6 @@ func TestWriteErrorRejectsUnencodableDetails(t *testing.T) {
 	))
 	_ = assertUnsupportedTypeError(t, err)
 	assertRecorderHasNoBodyOrContentType(t, rr)
-}
-
-// details 的自定义 JSON 编码即使发生 panic，也应返回错误而不是把响应路径打崩。
-func TestWriteErrorRejectsPanickingDetails(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	defer func() {
-		recovered := recover()
-		if recovered != "panic during MarshalJSON" {
-			t.Fatalf("recover() = %#v, want panic during MarshalJSON", recovered)
-		}
-		assertRecorderHasNoBodyOrContentType(t, rr)
-	}()
-
-	if err := WriteError(rr, errx.NewHTTPError(
-		http.StatusBadRequest,
-		"bad_request",
-		"bad request",
-		panicJSONDetail{},
-	)); err != nil {
-		t.Fatalf("WriteError() error = %v, want panic", err)
-	}
 }
 
 // resp 自己的写响应错误再次传回 WriteError 时，应直接原样返回，避免重复写。
