@@ -209,7 +209,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 ## 请求输入文档
 
 - [`REQUESTS.md`](./REQUESTS.md)：`reqx` 的 request helper、binding、显式 post-bind validation 模式和常见组合方式
-  其中也包含 `reqx` 的自定义解码契约，例如 `UnmarshalParam`、`encoding.TextUnmarshaler`、`time.Time` + `format:"..."`，以及重复值输入的处理方式
+  其中也包含 `reqx` 的自定义解码契约，例如 `UnmarshalParam`、`encoding.TextUnmarshaler`、`time.Duration`、`time.Time` + `format:"..."`，以及重复值输入的处理方式
 
 ## 错误响应
 

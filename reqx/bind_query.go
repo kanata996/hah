@@ -14,6 +14,7 @@ import (
 var (
 	queryMapKeyType    = reflect.TypeOf("")
 	queryStringMapType = reflect.TypeOf([]string(nil))
+	queryDurationType  = reflect.TypeOf(time.Duration(0))
 )
 
 type queryMapBindingMode int
@@ -305,6 +306,14 @@ func setFieldValue(value string, field reflect.Value, formatTag string) error {
 	}
 
 	if ok, err := unmarshalSingleInput(value, field, formatTag); ok {
+		return err
+	}
+
+	if field.Type() == queryDurationType {
+		durationValue, err := parseDurationValue(value)
+		if err == nil {
+			field.SetInt(int64(durationValue))
+		}
 		return err
 	}
 

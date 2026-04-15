@@ -170,6 +170,7 @@ func (t *Timestamp) UnmarshalParam(src string) error {
 除 `UnmarshalParam(string) error` 外，当前默认 query binder 还支持：
 
 - 字段实现 `encoding.TextUnmarshaler`
+- `time.Duration` 字段，使用和 `Query(...).Duration()` 一致的 duration 字符串语法
 - `time.Time` 字段配合 `format:"..."` tag 做按格式解析
 - 重复 query 值绑定到切片字段
 - 如果目标字段需要自行消费全部重复值，可以实现 `UnmarshalParams([]string) error`
@@ -178,8 +179,9 @@ func (t *Timestamp) UnmarshalParam(src string) error {
 
 ```go
 type SearchQuery struct {
-	At   time.Time `query:"at" format:"2006-01-02"`
-	Tags []string  `query:"tag"`
+	At      time.Time     `query:"at" format:"2006-01-02"`
+	Timeout time.Duration `query:"timeout"`
+	Tags    []string      `query:"tag"`
 }
 ```
 

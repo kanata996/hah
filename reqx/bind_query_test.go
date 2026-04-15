@@ -562,6 +562,8 @@ func TestBindQuery_BindsComplexTypesEndToEnd(t *testing.T) {
 		IDs    []int             `query:"id"`
 		When   time.Time         `query:"when" format:"2006-01-02"`
 		Whens  []time.Time       `query:"whens" format:"15:04:05"`
+		Wait   time.Duration     `query:"wait"`
+		Waits  []time.Duration   `query:"waits"`
 		Custom customParamValue  `query:"custom"`
 		Multi  customParamsValue `query:"multi"`
 		State  customTextValue   `query:"state"`
@@ -569,7 +571,7 @@ func TestBindQuery_BindsComplexTypesEndToEnd(t *testing.T) {
 
 	req := httptest.NewRequest(
 		http.MethodGet,
-		"/?name=kanata&age=17&id=1&id=2&when=2026-04-09&whens=10:11:12&whens=13:14:15&custom=x&multi=a&multi=b&state=open",
+		"/?name=kanata&age=17&id=1&id=2&when=2026-04-09&whens=10:11:12&whens=13:14:15&wait=5s&waits=1s&waits=250ms&custom=x&multi=a&multi=b&state=open",
 		nil,
 	)
 
@@ -590,6 +592,12 @@ func TestBindQuery_BindsComplexTypesEndToEnd(t *testing.T) {
 	if len(dst.Whens) != 2 || dst.Whens[0].Format("15:04:05") != "10:11:12" || dst.Whens[1].Format("15:04:05") != "13:14:15" {
 		t.Fatalf("Whens = %v, want 10:11:12 and 13:14:15", dst.Whens)
 	}
+	if dst.Wait != 5*time.Second {
+		t.Fatalf("Wait = %v, want 5s", dst.Wait)
+	}
+	if !reflect.DeepEqual(dst.Waits, []time.Duration{time.Second, 250 * time.Millisecond}) {
+		t.Fatalf("Waits = %#v, want [1s 250ms]", dst.Waits)
+	}
 	if dst.Custom.value != "x" {
 		t.Fatalf("Custom = %#v, want x", dst.Custom)
 	}
@@ -599,6 +607,27 @@ func TestBindQuery_BindsComplexTypesEndToEnd(t *testing.T) {
 	if dst.State != "open" {
 		t.Fatalf("State = %q, want open", dst.State)
 	}
+}
+
+func TestBindQuery_DurationBindingErrorsAreBadRequest(t *testing.T) {
+	type request struct {
+		Wait  time.Duration   `query:"wait"`
+		Waits []time.Duration `query:"waits"`
+	}
+
+	t.Run("invalid duration scalar returns bad request", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/?wait=soon", nil)
+
+		var dst request
+		_ = assertBadRequest(t, BindQuery(req, &dst))
+	})
+
+	t.Run("invalid duration slice element returns bad request", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/?waits=1s&waits=soon", nil)
+
+		var dst request
+		_ = assertBadRequest(t, BindQuery(req, &dst))
+	})
 }
 
 func TestBindQuery_PartialUpdatesPersistOnFieldFailure(t *testing.T) {
