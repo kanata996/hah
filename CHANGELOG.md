@@ -13,6 +13,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.5.2] - 2026-04-15
+
 ### Breaking
 
 - Refactored `errx.HTTPError` violation handling to use a fixed typed `Violation` list instead of the old `errors ...any` constructor parameters. `NewHTTPError(...)` / `NewHTTPErrorWithCause(...)` no longer accept detail payload arguments; callers now bind violations explicitly via `WithViolations(...)`.
