@@ -79,6 +79,52 @@ func (v *customTextValue) UnmarshalText(text []byte) error {
 	return nil
 }
 
+type mutatingFailingTextState struct {
+	Labels     []string
+	Index      map[string]int
+	Meta       any
+	Flags      any
+	History    [2]string
+	Pointer    *int
+	NilLabels  []string
+	NilIndex   map[string]int
+	NilMeta    any
+	NilPointer *int
+}
+
+func (v *mutatingFailingTextState) UnmarshalText(text []byte) error {
+	if len(v.Labels) > 0 {
+		v.Labels[0] = "mutated"
+	}
+	if v.Index != nil {
+		v.Index["count"] = 99
+	}
+	if meta, ok := v.Meta.(map[string]string); ok {
+		meta["phase"] = "mutated"
+	}
+	if flags, ok := v.Flags.([]string); ok && len(flags) > 0 {
+		flags[0] = "mutated"
+	}
+	v.History[0] = string(text)
+	if v.Pointer != nil {
+		*v.Pointer = 42
+	}
+	if v.NilLabels == nil {
+		v.NilLabels = []string{"allocated"}
+	}
+	if v.NilIndex == nil {
+		v.NilIndex = map[string]int{"added": 1}
+	}
+	if v.NilMeta == nil {
+		v.NilMeta = map[string]string{"added": "yes"}
+	}
+	if v.NilPointer == nil {
+		value := 9
+		v.NilPointer = &value
+	}
+	return errors.New("bad text")
+}
+
 type nestedBindUnmarshaler struct {
 	Name string `query:"name"`
 }
@@ -872,5 +918,37 @@ func TestBindQuery_PartialUpdatesPersistOnFieldFailure(t *testing.T) {
 	_ = assertBadRequest(t, err)
 	if dst.Name != "kanata" || dst.Page != 3 || dst.Note != "existing-note" {
 		t.Fatalf("dst = %#v, want earlier query writes preserved and later field untouched", dst)
+	}
+}
+
+func TestBindQuery_CustomTextDecoderFailureRestoresDeepMutableFieldState(t *testing.T) {
+	type request struct {
+		Name  string                   `query:"name"`
+		State mutatingFailingTextState `query:"state"`
+		Note  string                   `query:"note"`
+	}
+
+	newState := func() mutatingFailingTextState {
+		value := 7
+		return mutatingFailingTextState{
+			Labels:  []string{"stable"},
+			Index:   map[string]int{"count": 1},
+			Meta:    map[string]string{"phase": "stable"},
+			Flags:   []string{"keep"},
+			History: [2]string{"before", "still"},
+			Pointer: &value,
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?name=kanata&state=bad&note=after-error", nil)
+	wantState := newState()
+	dst := request{Name: "existing-name", State: newState(), Note: "existing-note"}
+
+	_ = assertBadRequest(t, BindQuery(req, &dst))
+	if dst.Name != "kanata" || dst.Note != "existing-note" {
+		t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
+	}
+	if !reflect.DeepEqual(dst.State, wantState) {
+		t.Fatalf("State = %#v, want %#v", dst.State, wantState)
 	}
 }

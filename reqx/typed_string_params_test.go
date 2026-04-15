@@ -133,6 +133,11 @@ func TestStringParam_ValidationAndUsageErrors(t *testing.T) {
 		assertUsageErrorContains(t, err, "maximum length must be greater than or equal to minimum length")
 	})
 
+	t.Run("max len before larger min len is usage error", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=abcd", nil), "name").String().MaxLen(3).MinLen(5).Get()
+		assertUsageErrorContains(t, err, "minimum length must be less than or equal to maximum length")
+	})
+
 	t.Run("max len smaller than min len can be corrected by later min len", func(t *testing.T) {
 		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=abc", nil), "name").String().
 			MaxLen(2).
