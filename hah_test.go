@@ -12,12 +12,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/errx"
 	"github.com/kanata996/hah/reqx"
 )
 
 // 测试清单：
-// [✓] 根包 facade 会把 bind / reqx / resp 的核心能力稳定透传出来
+// [✓] 根包 facade 会把 reqx / resp 的核心能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
 // [✓] 根包 facade 公开常用绑定入口：BindBody、BindQuery
 // [✓] 根包 facade 继续暴露 body-required helper 与统一错误响应写回
@@ -46,7 +45,7 @@ func (r *partialReadErrorCloser) Close() error {
 }
 
 // BindBody 只从 JSON body 绑定数据。
-func TestBindBody_DelegatesToBind(t *testing.T) {
+func TestBindBody_DelegatesToReqx(t *testing.T) {
 	req := newJSONRequest(http.MethodPost, "/accounts", `{"name":"kanata"}`)
 
 	var dst struct {
@@ -62,7 +61,7 @@ func TestBindBody_DelegatesToBind(t *testing.T) {
 }
 
 // BindQuery 只从 query 参数绑定数据。
-func TestBindQuery_DelegatesToBind(t *testing.T) {
+func TestBindQuery_DelegatesToReqx(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/accounts?cursor=next", nil)
 
 	var dst struct {
@@ -167,45 +166,6 @@ func TestWriteError_DelegatesToResp(t *testing.T) {
 	}
 	if got := body["title"]; got != http.StatusText(http.StatusGatewayTimeout) {
 		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
-	}
-}
-
-// AsHTTPError 会通过根包 facade 暴露 resp 的公开错误标准化 helper。
-func TestAsHTTPError_DelegatesToResp(t *testing.T) {
-	httpErr := AsHTTPError(context.DeadlineExceeded)
-	if httpErr == nil {
-		t.Fatal("AsHTTPError() = nil")
-	}
-	if got := httpErr.Status(); got != http.StatusGatewayTimeout {
-		t.Fatalf("status = %d, want %d", got, http.StatusGatewayTimeout)
-	}
-	if got := httpErr.Code(); got != "timeout" {
-		t.Fatalf("code = %q, want timeout", got)
-	}
-}
-
-// NewErrorResponder 会通过根包 facade 公开 resp 的可定制错误响应器。
-func TestNewErrorResponder_DelegatesToResp(t *testing.T) {
-	responder := NewErrorResponder()
-	if responder == nil {
-		t.Fatal("NewErrorResponder() = nil")
-	}
-
-	rr := httptest.NewRecorder()
-
-	if err := responder.Respond(rr, errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")); err != nil {
-		t.Fatalf("Respond() error = %v", err)
-	}
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
-	}
-
-	body := decodeRootPayload(t, rr.Body.Bytes())
-	if got := body["code"]; got != "bad_request" {
-		t.Fatalf("code = %#v, want bad_request", got)
-	}
-	if got := body["detail"]; got != "bad request" {
-		t.Fatalf("detail = %#v, want bad request", got)
 	}
 }
 

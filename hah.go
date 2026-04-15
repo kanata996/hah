@@ -3,31 +3,27 @@ package hah
 import (
 	"net/http"
 
-	"github.com/kanata996/hah/bind"
-	"github.com/kanata996/hah/errx"
 	"github.com/kanata996/hah/reqx"
 	"github.com/kanata996/hah/resp"
 )
 
 type (
 	// BindUnmarshaler 允许字段从单个字符串输入值自定义解码。
-	BindUnmarshaler = bind.BindUnmarshaler
+	BindUnmarshaler = reqx.BindUnmarshaler
 	// PathParam 表示一个待解析的 path 单参数。
 	PathParam = reqx.PathParam
 	// QueryParam 表示一个待解析的 query 单参数。
 	QueryParam = reqx.QueryParam
-	// ErrorResponder 协调错误收敛与错误响应写回。
-	ErrorResponder = resp.ErrorResponder
 )
 
 // BindBody 只从请求 body 绑定数据。
 func BindBody(r *http.Request, target any) error {
-	return bind.BindBody(r, target)
+	return reqx.BindBody(r, target)
 }
 
 // BindQuery 只从 query 参数绑定数据。
 func BindQuery(r *http.Request, target any) error {
-	return bind.BindQuery(r, target)
+	return reqx.BindQuery(r, target)
 }
 
 // Path 创建 path 单参数读取与校验 builder。
@@ -48,16 +44,6 @@ func RequireBody(r *http.Request) error {
 // WriteError 按统一错误对象写回响应。
 func WriteError(w http.ResponseWriter, err error) error {
 	return resp.WriteError(w, err)
-}
-
-// AsHTTPError 把任意 error 标准化为稳定的 HTTPError。
-func AsHTTPError(err error) *errx.HTTPError {
-	return resp.AsHTTPError(err)
-}
-
-// NewErrorResponder 返回默认错误响应器，可按需定制错误归一化策略。
-func NewErrorResponder() *ErrorResponder {
-	return resp.NewErrorResponder()
 }
 
 // JSON 写回 JSON 响应。

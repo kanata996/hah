@@ -26,7 +26,7 @@
 3. handler 入口先把 `chi.RouteContext` 回填到 `net/http` 的 `PathValue` / `Pattern` 契约。
 4. handler 用 `hah.Path(...)` 读取 path，用 `hah.BindQuery(...)` / `hah.BindBody(...)` 处理 DTO 输入，再显式做最小请求校验。
 5. `DELETE` 路由额外演示直接读取 header 后的手写 header 校验。
-6. 领域层直接返回 `errx` 公共错误；失败路径先用 `hah.AsHTTPError(...)` 显式记录 `5xx`，再走 `hah.WriteError(...)`。
+6. 领域层直接返回 `errx` 公共错误；失败路径统一走 `hah.WriteError(...)`。
 7. 成功路径统一走 `hah.OK(...)`、`hah.Created(...)` 和 `hah.NoContent(...)`。
 
 响应层观察点：
@@ -34,7 +34,7 @@
 - 响应头包含 `X-Request-Id`
 - 响应头包含 `TraceId`
 - `GET /orgs/{org_id}/accounts` 的 JSON 响应会回显 `request_id` / `trace_id`
-- `main.go` 里把 `slog.Default()` 设为带 `traceid.LogHandler(...)` 的 logger，方便示例里显式记录的 `5xx` 日志复用同一个 `trace.id`
+- `main.go` 里把 `slog.Default()` 设为带 `traceid.LogHandler(...)` 的 logger，方便响应写回失败日志复用同一个 `trace.id`
 
 入口文件：
 

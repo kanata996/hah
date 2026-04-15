@@ -126,9 +126,6 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 
-	if httpErr := hah.AsHTTPError(err); httpErr != nil && httpErr.Status() >= http.StatusInternalServerError {
-		log.Printf("request failed: status=%d code=%s err=%v", httpErr.Status(), httpErr.Code(), err)
-	}
 	if writeErr := hah.WriteError(w, err); writeErr != nil {
 		log.Printf("write error response failed: %v", writeErr)
 	}

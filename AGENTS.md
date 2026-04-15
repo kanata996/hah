@@ -9,8 +9,7 @@
 ## 包边界
 
 - `hah`：根包 facade，对外行为需与底层契约一致。
-- `bind`：path / query / header / body 绑定。
-- `reqx`：request helper、Normalize、请求级规则和校验。
+- `reqx`：request helper、query/body binding、请求级规则和输入错误建模。
 - `errx`：公共 HTTP 错误模型。
 - `resp`：JSON 成功响应和 `application/problem+json` 错误响应。
 

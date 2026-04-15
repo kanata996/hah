@@ -16,8 +16,7 @@
 - 聚焦 HTTP 输入绑定与边界错误，不内建 validation engine
 - 把常见请求违规收敛为稳定的公开 HTTP 错误
 - 内置 JSON 成功响应与 `application/problem+json` 错误响应
-- 通过 `AsHTTPError(...)` 暴露公开错误标准化 helper，日志策略留给调用方决定
-- 根包提供常用 facade，也支持直接使用 `bind`、`reqx`、`resp`、`errx`
+- 根包提供常用 facade，也支持直接使用 `reqx`、`resp`、`errx`
 - 适合渐进接入现有服务，不要求整体迁移
 
 ## 安装
@@ -42,7 +41,6 @@ import "github.com/kanata996/hah"
 
 ```go
 import (
-	"github.com/kanata996/hah/bind"
 	"github.com/kanata996/hah/errx"
 	"github.com/kanata996/hah/reqx"
 	"github.com/kanata996/hah/resp"
@@ -51,11 +49,10 @@ import (
 
 ## 包边界
 
-仓库分成五个包：
+仓库分成四个包：
 
 - `hah`：根包 facade，聚合常用的 request helper、绑定与响应写回入口
-- `reqx`：请求侧核心 helper，负责 `Path` / `Query`、`RequireBody`、`InvalidRequest` 和公开 violations
-- `bind`：DTO 绑定补充层，负责 query/body 到目标值的映射
+- `reqx`：输入侧核心包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`RequireBody`、`InvalidRequest` 和公开 violations
 - `errx`：共享公共 HTTP 错误模型
 - `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
 
@@ -66,8 +63,7 @@ import (
 - 请求侧：`reqx.Path(...)` / `reqx.Query(...)`
 - 响应侧：`resp.WriteError(...)` / `resp.OK(...)` / `resp.Created(...)` / `resp.NoContent(...)`
 
-其中 `bind.BindQuery` / `bind.BindBody` 与对应的根包 facade，是 DTO 场景下的补充能力，而不是请求侧主心智。  
-后续如果继续演进，默认应优先稳定这两条核心表面的语义和用法。
+其中 `reqx.BindQuery` / `reqx.BindBody` 与对应的根包 facade，是同一输入侧 API 中面向 DTO 的补充能力。后续如果继续演进，默认应优先稳定 `Path / Query` 这条核心主路径的语义和用法。
 
 ## 适用范围
 
@@ -78,8 +74,6 @@ import (
 - 把常见请求违规收敛成稳定的公开 HTTP 错误
 - 写回标准 JSON 成功响应
 - 写回 `application/problem+json` 错误响应
-- 通过 `AsHTTPError(...)` 先做错误标准化，再由调用方决定是否记录日志
-- 通过 `ErrorResponder` 自定义错误归一化
 
 `hah` 不负责：
 
@@ -124,10 +118,7 @@ func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) er
 	return nil
 }
 
-func writeError(w http.ResponseWriter, r *http.Request, err error) {
-	if httpErr := hah.AsHTTPError(err); httpErr != nil && httpErr.Status() >= http.StatusInternalServerError {
-		log.Printf("request failed: status=%d code=%s err=%v", httpErr.Status(), httpErr.Code(), err)
-	}
+func writeError(w http.ResponseWriter, err error) {
 	if writeErr := hah.WriteError(w, err); writeErr != nil {
 		log.Printf("write error response failed: %v", writeErr)
 	}
@@ -139,17 +130,17 @@ func main() {
 	mux.HandleFunc("POST /orgs/{org_id}/accounts", func(w http.ResponseWriter, r *http.Request) {
 		orgID, err := hah.Path(r, "org_id").String().Required().Get()
 		if err != nil {
-			writeError(w, r, err)
+			writeError(w, err)
 			return
 		}
 
 		var req createAccountRequest
 		if err := hah.BindBody(r, &req); err != nil {
-			writeError(w, r, err)
+			writeError(w, err)
 			return
 		}
 		if err := validateCreateAccountRequest(r, &req); err != nil {
-			writeError(w, r, err)
+			writeError(w, err)
 			return
 		}
 
@@ -174,9 +165,6 @@ func main() {
 - `BindQuery`
 - `RequireBody`
 - `WriteError`
-- `AsHTTPError`
-- `ErrorResponder`
-- `NewErrorResponder`
 - `JSON`
 - `JSONBlob`
 - `OK`
@@ -186,7 +174,7 @@ func main() {
 ## 来源绑定与后续校验
 
 - `hah.BindQuery` / `hah.BindBody`
-- `bind.BindQuery` / `bind.BindBody`
+- `reqx.BindQuery` / `reqx.BindBody`
 - `reqx.RequireBody(...)` / `reqx.InvalidRequest(...)`
 
 `hah` 只负责把 HTTP 输入绑定到 DTO，不负责选择 validation 方式。绑定完成后，你可以：
@@ -200,12 +188,13 @@ func main() {
 - `hah.Path(...)` 面向 path segment 中的资源标识，只保留 `String()`、`UUID()`、`Int()`、`Int64()`、`Uint()`、`Uint64()`
 - `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`、`UnixMilliTime()`
 - `hah.Query(...).String()` / `Int()` / `UUID()` 等标量 helper 在重复 query key 上默认只消费第一个值
-- `hah.Query(...).Values()` / `Strings()` 可直接读取同名 query 参数的全部原始值；如果你需要批量结构化解码，优先用 `bind.BindQuery`
+- `hah.Query(...).Values()` 可直接读取同名 query 参数的全部原始值；如果你需要批量结构化解码，优先用 `reqx.BindQuery`
 
 DTO binding 的边界：
 
-- `hah.BindQuery(...)` / `bind.BindQuery(...)` 只负责 query -> DTO 的映射，不内建请求级校验
-- `hah.BindBody(...)` / `bind.BindBody(...)` 只负责 JSON body -> DTO 的解码
+- `hah.BindQuery(...)` / `reqx.BindQuery(...)` 只负责 query -> DTO 的映射，不内建请求级校验
+- `hah.BindQuery(...)` / `reqx.BindQuery(...)` 的目标必须是 struct、`map[string]string`、`map[string][]string` 或 `map[string]any`；如果 DTO/tag 形状本身非法，会直接返回普通错误
+- `hah.BindBody(...)` / `reqx.BindBody(...)` 只负责 JSON body -> DTO 的解码
 - header 通常直接使用标准库 `r.Header.Get(...)` / `r.Header.Values(...)`
 
 示例：
@@ -219,8 +208,8 @@ tags, err := hah.Query(r, "tag").Values().Get()
 
 ## 请求输入文档
 
-- [`REQUESTS.md`](./REQUESTS.md)：`bind` / `reqx` 的 request helper、binding、显式 post-bind validation 模式和常见组合方式
-  其中也包含 `bind` 的自定义解码契约，例如 `UnmarshalParam`、`encoding.TextUnmarshaler`、`time.Time` + `format:"..."`，以及重复值输入的处理方式
+- [`REQUESTS.md`](./REQUESTS.md)：`reqx` 的 request helper、binding、显式 post-bind validation 模式和常见组合方式
+  其中也包含 `reqx` 的自定义解码契约，例如 `UnmarshalParam`、`encoding.TextUnmarshaler`、`time.Time` + `format:"..."`，以及重复值输入的处理方式
 
 ## 错误响应
 
@@ -243,19 +232,11 @@ tags, err := hah.Query(r, "tag").Values().Get()
 }
 ```
 
-默认场景直接用 `WriteError(...)` 即可。需要在写回前先做统一日志或指标判断时，用 `AsHTTPError(...)` 先拿到稳定的 `status/code/detail`，再由调用方决定要不要记录。
+默认场景直接用 `WriteError(...)` 即可。
 
-`WriteError(...)` / `ErrorResponder.Respond(...)` 的返回值表示响应边界自身异常。比如响应已开始写出、公开错误对象无法编码，或错误响应写出失败。生产代码通常至少要记录这个错误。
+`WriteError(...)` 的返回值表示响应边界自身异常。比如公开错误对象无法编码，或错误响应写出失败。生产代码通常至少要记录这个错误。
 
 ```go
-if httpErr := hah.AsHTTPError(err); httpErr != nil && httpErr.Status() >= http.StatusInternalServerError {
-	slog.Error("request failed",
-		"http.response.status_code", httpErr.Status(),
-		"error.code", httpErr.Code(),
-		"err", err,
-	)
-}
-
 if writeErr := hah.WriteError(w, err); writeErr != nil {
 	slog.Error("write error response failed", "err", writeErr)
 }
@@ -263,10 +244,10 @@ if writeErr := hah.WriteError(w, err); writeErr != nil {
 
 约束：
 
-- `WriteError(...)` / `ErrorResponder.Respond(...)` 只负责错误标准化与响应写回，不内建独立错误日志
-- 如果你需要统一的 `5xx` 日志策略，先用 `AsHTTPError(...)` 做标准化，再在调用方记录
+- `WriteError(...)` 只负责错误标准化与响应写回，不内建独立错误日志
+- 如果你需要统一的日志或指标策略，在调用方基于原始 error 和业务上下文自行处理
 - `HEAD` 场景沿用 `net/http` 默认语义：handler 正常写回，对外是否发送响应体由底层决定
-- 如果响应已经开始写出，不再尝试二次改写响应
+- 调用方应在开始写出响应前调用 `WriteError(...)`
 
 ## 示例与命令
 

@@ -6,7 +6,6 @@
 适用范围：
 
 - 根包 `hah`
-- `bind`
 - `reqx`
 - `errx`
 - `resp`
@@ -160,26 +159,21 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 至少覆盖：
 
-- facade 是否正确暴露 `bind` / `reqx` / `resp` 的核心入口
+- facade 是否正确暴露 `reqx` / `resp` 的核心入口
 - 根包对底层包的包装是否保持契约一致
 - README 中承诺的示例路径是否有代表性支撑
 
-### 7.2 `bind`
+### 7.2 `reqx`
 
 至少覆盖：
 
+- `Path` / `Query` 作为请求侧核心 API 的稳定语义
 - query/body 的独立绑定
 - `BindQuery(...)` / `BindBody(...)` 的公开入口契约
 - 空 body、错误 `Content-Type`、超大 body、未知字段
 - DTO 已有值时的保留语义
 - 绑定失败时的已写入值保留规则
 - query 字符串解码的多值、自定义解码和复杂类型契约
-
-### 7.3 `reqx`
-
-至少覆盖：
-
-- `Path` / `Query` 作为请求侧核心 API 的稳定语义
 - `InvalidRequest` / `Violation` 的公开错误语义
 - `RequireBody` 的 body-required 契约
 - 公开 builder 的稳定契约
@@ -187,10 +181,11 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 说明：
 
 - 优先测试 `Path` / `Query` / `RequireBody` / `InvalidRequest` 的公开行为
+- 优先测试 `BindQuery` / `BindBody` 的公开行为，而不是反射 helper 本身
 - `Path` / `Query` 的类型面、链式方法和 source-aware 错误语义变化，应视为核心 public API 变化
 - 不要求为私有 helper 单独补“分支覆盖测试”
 
-### 7.4 `errx`
+### 7.3 `errx`
 
 至少覆盖：
 
@@ -200,7 +195,7 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 - 公开 detail/errors 的防御性切片拷贝
 - 构造器与快捷构造器的稳定输出
 
-### 7.5 `resp`
+### 7.4 `resp`
 
 至少覆盖：
 
@@ -208,9 +203,9 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 - `JSON` / `JSONBlob`
 - `WriteError(...)` 的错误收敛与 problem JSON 写回
 - `errx.HTTPError` 的对外响应契约
-- `nil writer`、非法状态码、无响应体状态、已开始写出等退化路径
+- `nil writer`、非法状态码、无响应体状态、响应写回失败等退化路径
 - 内部 cause 不泄漏到公开响应
-- 5xx 与错误写回失败日志的契约
+- 不内建独立错误日志的契约
 
 ## 8. 评审清单
 

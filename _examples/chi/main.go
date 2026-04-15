@@ -287,13 +287,6 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 
-	if httpErr := hah.AsHTTPError(err); httpErr != nil && httpErr.Status() >= http.StatusInternalServerError {
-		slog.ErrorContext(r.Context(), "request failed",
-			"http.response.status_code", httpErr.Status(),
-			"error.code", httpErr.Code(),
-			"err", err,
-		)
-	}
 	if writeErr := hah.WriteError(w, err); writeErr != nil {
 		slog.ErrorContext(r.Context(), "write error response failed", "err", writeErr)
 	}
