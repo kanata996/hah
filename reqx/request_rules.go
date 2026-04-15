@@ -2,8 +2,6 @@ package reqx
 
 import (
 	"net/http"
-
-	"github.com/kanata996/hah/internal/req"
 )
 
 // 本文件负责请求输入辅助错误与 body-required helper。
@@ -17,16 +15,16 @@ func InvalidRequest(violations ...Violation) error {
 	return invalidFieldsError(violations)
 }
 
-// RequireBody 按默认 binder 的 body 契约要求请求必须显式提交 body。
+// RequireBody 按 body 绑定契约要求请求必须显式提交 body。
 //
-// 在当前实现里，实际读取到零字节 body 会被视为“没有 body”，与 Bind/BindBody
-// 的 empty-body no-op 语义保持一致。
+// 在当前实现里，实际读取到零字节 body 会被视为“没有 body”，与 BindBody 的
+// empty-body no-op 语义保持一致。
 func RequireBody(r *http.Request) error {
 	if r == nil {
 		return errorsf("request must not be nil")
 	}
 
-	hasBody, err := req.HasBody(r)
+	hasBody, err := hasRequestBody(r)
 	if err != nil {
 		return err
 	}

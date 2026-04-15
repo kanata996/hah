@@ -2,6 +2,7 @@ package reqx
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -11,10 +12,29 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
+const (
+	wantNilRequestErr     = "reqx: request must not be nil"
+	wantNilDestinationErr = "reqx: destination must not be nil"
+)
+
 func newJSONRequest(method, target, body string) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	return req
+}
+
+func setRequestBody(req *http.Request, contentType, body string) {
+	req.Header.Set("Content-Type", contentType)
+	req.Body = io.NopCloser(strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+}
+
+func mustBindQuery(t *testing.T, req *http.Request, target any) {
+	t.Helper()
+
+	if err := BindQuery(req, target); err != nil {
+		t.Fatalf("BindQuery() error = %v", err)
+	}
 }
 
 func requestWithPathParams(params map[string][]string) *http.Request {
@@ -85,6 +105,29 @@ func assertNotHTTPError(t *testing.T, err error) {
 	if errors.As(err, &httpErr) && httpErr != nil {
 		t.Fatalf("error type = %T, want non-HTTP usage error", err)
 	}
+}
+
+func assertErrorString(t *testing.T, err error, want string) {
+	t.Helper()
+
+	if err == nil {
+		t.Fatalf("error = nil, want %q", want)
+	}
+	if got := err.Error(); got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+func assertUsageError(t *testing.T, err error, want string) {
+	t.Helper()
+
+	assertErrorString(t, err, want)
+}
+
+func assertBadRequest(t *testing.T, err error) *errx.HTTPError {
+	t.Helper()
+
+	return assertHTTPError(t, err, http.StatusBadRequest, "bad_request", "Bad Request")
 }
 
 func assertViolations(t *testing.T, err error) []Violation {
