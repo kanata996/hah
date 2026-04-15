@@ -14,16 +14,84 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-type failingWriter struct {
-	header http.Header
-	status int
-	writes int
-}
+func TestNormalizeHTTPErrorCommonErrors(t *testing.T) {
+	t.Parallel()
 
-type stateTrackingWriter struct {
-	inner        http.ResponseWriter
-	status       int
-	bytesWritten int
+	cases := []struct {
+		name       string
+		input      error
+		wantStatus int
+		wantCode   string
+		wantTitle  string
+		wantDetail string
+	}{
+		{
+			name:       "nil",
+			input:      nil,
+			wantStatus: 0,
+		},
+		{
+			name:       "wrapped http error",
+			input:      errors.Join(errors.New("handler failed"), errx.NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")),
+			wantStatus: http.StatusBadRequest,
+			wantCode:   "bad_request",
+			wantTitle:  http.StatusText(http.StatusBadRequest),
+			wantDetail: "bad request",
+		},
+		{
+			name:       "context canceled",
+			input:      context.Canceled,
+			wantStatus: 499,
+			wantCode:   "client_closed_request",
+			wantTitle:  "Client Closed Request",
+			wantDetail: "Client Closed Request",
+		},
+		{
+			name:       "deadline exceeded",
+			input:      context.DeadlineExceeded,
+			wantStatus: http.StatusGatewayTimeout,
+			wantCode:   "timeout",
+			wantTitle:  http.StatusText(http.StatusGatewayTimeout),
+			wantDetail: http.StatusText(http.StatusGatewayTimeout),
+		},
+		{
+			name:       "generic error",
+			input:      errors.New("db timeout"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "internal_error",
+			wantTitle:  http.StatusText(http.StatusInternalServerError),
+			wantDetail: http.StatusText(http.StatusInternalServerError),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := asHTTPError(tc.input)
+			if tc.wantStatus == 0 {
+				if got != nil {
+					t.Fatalf("asHTTPError() = %#v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("asHTTPError() = nil")
+			}
+			if got.Status() != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", got.Status(), tc.wantStatus)
+			}
+			if got.Code() != tc.wantCode {
+				t.Fatalf("code = %q, want %q", got.Code(), tc.wantCode)
+			}
+			if got.Title() != tc.wantTitle {
+				t.Fatalf("title = %q, want %q", got.Title(), tc.wantTitle)
+			}
+			if got.Detail() != tc.wantDetail {
+				t.Fatalf("detail = %q, want %q", got.Detail(), tc.wantDetail)
+			}
+		})
+	}
 }
 
 type panicJSONDetail struct{}
@@ -31,91 +99,6 @@ type panicJSONDetail struct{}
 func (panicJSONDetail) MarshalJSON() ([]byte, error) {
 	panic("panic during MarshalJSON")
 }
-
-func (w *failingWriter) Header() http.Header {
-	if w.header == nil {
-		w.header = make(http.Header)
-	}
-	return w.header
-}
-
-func (w *failingWriter) WriteHeader(status int) {
-	w.status = status
-}
-
-func (w *failingWriter) Write(_ []byte) (int, error) {
-	w.writes++
-	return 0, errors.New("socket closed")
-}
-
-func (w *stateTrackingWriter) Header() http.Header {
-	return w.inner.Header()
-}
-
-func (w *stateTrackingWriter) WriteHeader(status int) {
-	w.status = status
-	w.inner.WriteHeader(status)
-}
-
-func (w *stateTrackingWriter) Write(p []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	n, err := w.inner.Write(p)
-	w.bytesWritten += n
-	return n, err
-}
-
-func (w *stateTrackingWriter) Status() int {
-	return w.status
-}
-
-func (w *stateTrackingWriter) BytesWritten() int {
-	return w.bytesWritten
-}
-
-func (w *stateTrackingWriter) Unwrap() http.ResponseWriter {
-	return w.inner
-}
-
-type explicitStatusWriter struct {
-	inner        http.ResponseWriter
-	status       int
-	bytesWritten int
-}
-
-type unwrapOnlyWriter struct {
-	inner http.ResponseWriter
-}
-
-func (w *explicitStatusWriter) Header() http.Header { return w.inner.Header() }
-func (w *explicitStatusWriter) WriteHeader(status int) {
-	w.status = status
-	w.inner.WriteHeader(status)
-}
-func (w *explicitStatusWriter) Write(p []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	n, err := w.inner.Write(p)
-	w.bytesWritten += n
-	return n, err
-}
-func (w *explicitStatusWriter) Status() int                 { return w.status }
-func (w *explicitStatusWriter) BytesWritten() int           { return w.bytesWritten }
-func (w *explicitStatusWriter) Unwrap() http.ResponseWriter { return w.inner }
-
-func (w *unwrapOnlyWriter) Header() http.Header { return w.inner.Header() }
-
-func (w *unwrapOnlyWriter) WriteHeader(status int) {
-	w.inner.WriteHeader(status)
-}
-
-func (w *unwrapOnlyWriter) Write(p []byte) (int, error) {
-	return w.inner.Write(p)
-}
-
-func (w *unwrapOnlyWriter) Unwrap() http.ResponseWriter { return w.inner }
 
 // WriteError 会把 HTTPError 写成标准 problem JSON。
 func TestWriteErrorWritesEnvelope(t *testing.T) {
@@ -400,9 +383,7 @@ func TestWriteErrorRejectsUnencodableDetails(t *testing.T) {
 		"bad request",
 		func() {},
 	))
-	if err == nil || err.Error() != "json: unsupported type: func()" {
-		t.Fatalf("WriteError() error = %v, want unsupported type error", err)
-	}
+	assertUnsupportedTypeError(t, err)
 	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
@@ -428,8 +409,8 @@ func TestWriteErrorRejectsPanickingDetails(t *testing.T) {
 	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
-// 响应一旦已经开始写出，WriteError 不会再次重写响应。
-func TestWriteErrorSkipsRewriteAfterResponseStarted(t *testing.T) {
+// resp 自己的写响应错误再次传回 WriteError 时，应直接原样返回，避免重复写。
+func TestWriteErrorReturnsRespWriteErrorWithoutRewrite(t *testing.T) {
 	w := &failingWriter{}
 	var defaultBuf bytes.Buffer
 	previousDefault := slog.Default()
@@ -456,82 +437,6 @@ func TestWriteErrorSkipsRewriteAfterResponseStarted(t *testing.T) {
 	}
 	if defaultBuf.Len() != 0 {
 		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
-	}
-}
-
-// 显式暴露状态的包装 ResponseWriter 一旦已经发出状态或字节，WriteError 不应再改写响应。
-func TestWriteErrorSkipsRewriteAfterWrappedResponseStarted(t *testing.T) {
-	rr := httptest.NewRecorder()
-	w := &stateTrackingWriter{inner: rr}
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusAccepted)
-	if _, err := w.Write([]byte("partial")); err != nil {
-		t.Fatalf("w.Write() error = %v", err)
-	}
-
-	cause := errors.New("boom")
-	err := WriteError(w, cause)
-	if !errors.Is(err, cause) {
-		t.Errorf("WriteError() error = %v, want original error %v", err, cause)
-	}
-	if rr.Code != http.StatusAccepted {
-		t.Errorf("status = %d, want %d", rr.Code, http.StatusAccepted)
-	}
-	if got := rr.Header().Get("Content-Type"); got != "text/plain" {
-		t.Errorf("Content-Type = %q, want text/plain", got)
-	}
-	if got := rr.Body.String(); got != "partial" {
-		t.Errorf("body = %q, want partial", got)
-	}
-}
-
-func TestWriteErrorTreatsExplicit200StatusAsStartedWhenNoWrittenMethodExists(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	// 初始化为 status=0 的标准代理 Writer，但由于业务逻辑调用了 WriteHeader(200) 导致状态变化为 200
-	w := &explicitStatusWriter{inner: rr, status: 0}
-	w.WriteHeader(http.StatusOK)
-
-	cause := errors.New("boom after headers sent")
-	err := WriteError(w, cause)
-
-	// 这里应当判断为已开始响应并原样抛出 cause
-	if !errors.Is(err, cause) {
-		t.Fatalf("WriteError() error = %v, want %v", err, cause)
-	}
-	// 不应重写成 500 status 导致 superfluous 写出
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
-	}
-}
-
-func TestWriteErrorSkipsRewriteAfterDeepWrappedResponseStarted(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	var w http.ResponseWriter = &stateTrackingWriter{inner: rr}
-	for range 9 {
-		w = &unwrapOnlyWriter{inner: w}
-	}
-
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusAccepted)
-	if _, err := w.Write([]byte("partial")); err != nil {
-		t.Fatalf("w.Write() error = %v", err)
-	}
-
-	cause := errors.New("boom after deep wrappers")
-	err := WriteError(w, cause)
-	if !errors.Is(err, cause) {
-		t.Fatalf("WriteError() error = %v, want %v", err, cause)
-	}
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
-	}
-	if got := rr.Header().Get("Content-Type"); got != "text/plain" {
-		t.Fatalf("Content-Type = %q, want text/plain", got)
-	}
-	if got := rr.Body.String(); got != "partial" {
-		t.Fatalf("body = %q, want partial", got)
 	}
 }
 
@@ -570,22 +475,5 @@ func TestWriteErrorWriteFailureDoesNotWriteStandaloneLog(t *testing.T) {
 	}
 	if defaultBuf.Len() != 0 {
 		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
-	}
-}
-
-func assertPublicErrorObject(t *testing.T, got any, want map[string]any) {
-	t.Helper()
-
-	gotMap, ok := got.(map[string]any)
-	if !ok {
-		t.Fatalf("error item = %#v, want object", got)
-	}
-	for key, wantValue := range want {
-		if gotValue := gotMap[key]; gotValue != wantValue {
-			t.Fatalf("error item %q = %#v, want %#v", key, gotValue, wantValue)
-		}
-	}
-	if len(gotMap) != len(want) {
-		t.Fatalf("error item = %#v, want only %#v", gotMap, want)
 	}
 }

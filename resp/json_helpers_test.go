@@ -1,16 +1,24 @@
 package resp
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 )
 
+type payloadMap map[string]any
 type panicSuccessJSONValue struct{}
 type panicWriteCause struct{}
 type blankWriteCause struct{}
+type failingWriter struct {
+	header http.Header
+	status int
+	writes int
+}
 type headLikeResponseWriter struct {
 	header           http.Header
 	writeHeaderCalls int
@@ -32,6 +40,22 @@ func (panicWriteCause) Error() string {
 
 func (blankWriteCause) Error() string {
 	return "   "
+}
+
+func (w *failingWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *failingWriter) WriteHeader(status int) {
+	w.status = status
+}
+
+func (w *failingWriter) Write(_ []byte) (int, error) {
+	w.writes++
+	return 0, errors.New("socket closed")
 }
 
 func (w *headLikeResponseWriter) Header() http.Header {
@@ -101,4 +125,84 @@ func TestResponseWriteErrorErrorFallsBackOnBlankCause(t *testing.T) {
 	if got := (&responseWriteError{cause: blankWriteCause{}}).Error(); got != "resp: write response failed" {
 		t.Fatalf("Error() = %q, want fallback text", got)
 	}
+}
+
+func decodePayload(t *testing.T, body []byte) payloadMap {
+	t.Helper()
+
+	var payload payloadMap
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	return payload
+}
+
+func assertRecorderHasNoBodyOrContentType(t *testing.T, rr *httptest.ResponseRecorder) {
+	t.Helper()
+
+	if rr.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "" {
+		t.Fatalf("Content-Type = %q, want empty", got)
+	}
+}
+
+func assertWrappedResponseWriteError(t *testing.T, err error) *responseWriteError {
+	t.Helper()
+
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	var writeErr *responseWriteError
+	if !errors.As(err, &writeErr) {
+		t.Fatalf("error = %T, want *responseWriteError", err)
+	}
+	return writeErr
+}
+
+func assertUnsupportedTypeError(t *testing.T, err error) *json.UnsupportedTypeError {
+	t.Helper()
+
+	if err == nil {
+		t.Fatal("expected unsupported type error, got nil")
+	}
+
+	var unsupportedErr *json.UnsupportedTypeError
+	if !errors.As(err, &unsupportedErr) {
+		t.Fatalf("error = %T, want *json.UnsupportedTypeError", err)
+	}
+	return unsupportedErr
+}
+
+func assertPublicErrorObject(t *testing.T, got any, want map[string]any) {
+	t.Helper()
+
+	gotMap, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("error item = %#v, want object", got)
+	}
+	for key, wantValue := range want {
+		if gotValue := gotMap[key]; gotValue != wantValue {
+			t.Fatalf("error item %q = %#v, want %#v", key, gotValue, wantValue)
+		}
+	}
+	if len(gotMap) != len(want) {
+		t.Fatalf("error item = %#v, want only %#v", gotMap, want)
+	}
+}
+
+func mustEncodeJSON(t *testing.T, data any) []byte {
+	t.Helper()
+
+	body, err := encodeJSON(data)
+	if err != nil {
+		t.Fatalf("encodeJSON() error = %v", err)
+	}
+	return body
+}
+
+func stringLen(body []byte) string {
+	return strconv.Itoa(len(body))
 }
