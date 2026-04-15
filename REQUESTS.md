@@ -146,6 +146,14 @@ if err := hah.BindBody(r, &body); err != nil {
 - 非空 body 只接受 `application/json`
 - 默认使用标准库 `encoding/json`
 - 不接受 `application/*+json`
+- 解码直接作用在传入目标上；JSON 里缺失的字段不会覆盖 DTO 现有值
+- 如果解码在中途失败，前面已经成功写入的字段保持已写状态，失败字段保持其原值
+
+`reqx.RequireBody` / `hah.RequireBody` 与 `BindBody` 共享同一个非破坏性 body-presence probe：
+
+- 可以先 `RequireBody(...)` 再 `BindBody(...)`
+- 也可以先 `BindBody(...)` 再决定是否显式要求 body 必填
+- 这两条路径都不会因为额外探测而把 body 提前消费掉
 
 如果 body 非法，会返回稳定的公开错误，例如：
 

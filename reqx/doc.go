@@ -46,6 +46,8 @@
 // body-required 契约：
 //   - RequireBody 沿用 BindBody 的 empty-body 判定：实际读取到零字节 body 视为“没有 body”。
 //   - BindBody 对空 body 不主动报错；是否必填由调用方显式决定。
+//   - RequireBody 与 BindBody 共享同一个非破坏性 body 探测；二者可按调用方需要自由前后组合。
+//   - BindBody 直接解码到传入目标；JSON 缺失字段不会清空目标已有值。
 //
 // path 输入只依赖 net/http 暴露的 PathValue / Pattern 命名 wildcard 语义。
 // 如果上层 router 有自定义 pattern 语法，应在桥接层先归一化后再写入 Pattern。

@@ -36,6 +36,9 @@ const (
 const mimeApplicationJSON = "application/json"
 
 // BindBody 只从请求 body 绑定数据。
+//
+// 解码直接作用在调用方传入的 target 上；JSON 中缺失的字段不会覆盖 target
+// 已有值。
 func BindBody(r *http.Request, target any) error {
 	if err := validateBindInputs(r, target); err != nil {
 		return err
