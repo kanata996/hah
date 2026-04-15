@@ -155,7 +155,7 @@ func TestSuccessWritersRejectUnsupportedValue(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rr := httptest.NewRecorder()
-			assertUnsupportedTypeError(t, tc.write(rr))
+			_ = assertUnsupportedTypeError(t, tc.write(rr))
 			assertRecorderHasNoBodyOrContentType(t, rr)
 		})
 	}

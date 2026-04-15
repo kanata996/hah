@@ -383,7 +383,7 @@ func TestWriteErrorRejectsUnencodableDetails(t *testing.T) {
 		"bad request",
 		func() {},
 	))
-	assertUnsupportedTypeError(t, err)
+	_ = assertUnsupportedTypeError(t, err)
 	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 

@@ -13,16 +13,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-04-15
+
 ### Breaking
 
 - Merged the standalone `bind` package into `reqx`. `reqx` now owns `BindQuery(...)`, `BindBody(...)`, `BindUnmarshaler`, and the public body decode error-code constants; direct `bind` imports should migrate to `reqx`.
-- Removed the redundant `Query(...).Strings()` alias from `reqx` and `hah`; repeated query values now use the single canonical `Values()` entry point.
-- Narrowed `bind` to two explicit public entry points: `BindQuery(...)` and `BindBody(...)`. Removed `bind.Bind(...)`, `bind.BindPathValues(...)`, and `bind.BindHeaders(...)`, and renamed `bind.BindQueryParams(...)` to `bind.BindQuery(...)`.
-- Narrowed the root `hah` facade accordingly: removed `hah.Bind(...)`, `hah.BindPathValues(...)`, and `hah.BindHeaders(...)`, and renamed `hah.BindQueryParams(...)` to `hah.BindQuery(...)`.
+- Narrowed the root `hah` facade to the explicit query/body binding entry points. Removed `hah.Bind(...)`, `hah.BindPathValues(...)`, and `hah.BindHeaders(...)`; `hah.BindQueryParams(...)` is now `hah.BindQuery(...)`.
 - Removed the built-in `validator/v10` integration from the core `hah` module.
 - Removed `hah.BindAndValidate(...)` and `reqx.Validate(...)`; request binding now stops at `Bind*`, and post-bind validation is fully caller-defined.
 - Removed the `reqx.Normalizer` and `reqx.RequestValidator` DTO lifecycle hooks from the public API.
 - Removed `reqx.ViolationInRequest`; public invalid-request helpers now expose only concrete input locations (`body`, `query`, `path`, `header`).
+- Removed the redundant `Query(...).Strings()` alias from `reqx` and `hah`; repeated query values now use the single canonical `Values()` entry point.
 - Removed `resp.AsHTTPError(...)`, `hah.AsHTTPError(...)`, `resp.ErrorResponder`, `resp.NewErrorResponder()`, and the corresponding root-package facade exports. `resp` now exposes only concrete response writers, and caller-owned logging or error classification stays outside the package.
 - Removed the request parameter from `resp.WriteError(...)` and `hah.WriteError(...)`; the response writer alone now carries the write semantics.
 - Removed the public `resp.ErrorWriteDegraded` type. If a public error payload cannot be JSON-encoded, `WriteError(...)` now returns that encoding error directly instead of attempting a degraded fallback response.
@@ -30,11 +31,11 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 ### Changed
 
 - Repositioned `reqx` around request helpers and explicit invalid-request helpers such as `RequireBody(...)` and `InvalidRequest(...)`.
-- Reworked the bundled `net/http` and `chi` examples to demonstrate explicit `Path/Query` helpers plus `BindQuery(...)` / `BindBody(...)` flows instead of mixed-source binding.
 - Clarified `reqx.Path(...)` / `reqx.Query(...)` as request-side core APIs and tightened their contract-focused documentation/testing.
 - Tightened `reqx.BindQuery(...)` to fail fast on unsupported root targets and invalid DTO/tag shapes instead of silently no-oping or reporting those programmer errors as client `400` responses.
 - Repositioned `resp` as a pure response-boundary package: it now exposes only success-response and error-response writers without choosing an application logging policy.
 - Simplified `resp` internals around a stricter `net/http`-first model: `WriteError(...)` no longer inspects wrapped `ResponseWriter` state and should be called before a handler starts writing the response.
+- Reworked the bundled `net/http` and `chi` examples to demonstrate explicit `Path/Query` helpers plus `BindQuery(...)` / `BindBody(...)` flows instead of mixed-source binding.
 
 ### Documentation
 

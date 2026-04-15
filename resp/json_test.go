@@ -205,7 +205,7 @@ func TestJSONBodyWritersRejectInvalidStatusOrBodylessStatus(t *testing.T) {
 func TestJSONRejectsUnsupportedValue(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	assertUnsupportedTypeError(t, JSON(rr, http.StatusOK, make(chan int)))
+	_ = assertUnsupportedTypeError(t, JSON(rr, http.StatusOK, make(chan int)))
 	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
