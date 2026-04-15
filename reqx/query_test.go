@@ -211,6 +211,26 @@ func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("default nil stays nil across calls", func(t *testing.T) {
+		builder := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().Default(nil)
+
+		got, err := builder.Get()
+		if err != nil {
+			t.Fatalf("Query().Values().Default(nil).Get() error = %v", err)
+		}
+		if got != nil {
+			t.Fatalf("tag = %#v, want nil", got)
+		}
+
+		again, err := builder.Get()
+		if err != nil {
+			t.Fatalf("builder.Get() second call error = %v", err)
+		}
+		if again != nil {
+			t.Fatalf("tag second call = %#v, want nil", again)
+		}
+	})
+
 	t.Run("required missing returns query violation", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items", nil)
 
@@ -239,6 +259,14 @@ func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?tag=a", nil), "tag").Values().Check(nil).Get()
 		assertUsageErrorContains(t, err, "check must not be nil")
 	})
+
+	t.Run("required and default conflict in both orders", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().Default([]string{"a"}).Required().Get()
+		assertUsageErrorContains(t, err, "required and default are mutually exclusive")
+
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().Required().Default([]string{"a"}).Get()
+		assertUsageErrorContains(t, err, "required and default are mutually exclusive")
+	})
 }
 
 func TestQueryBuilder_UsageAndOptionalBehavior(t *testing.T) {
@@ -262,6 +290,22 @@ func TestQueryBuilder_UsageAndOptionalBehavior(t *testing.T) {
 		if got != "" {
 			t.Fatalf("name = %q, want empty string", got)
 		}
+	})
+
+	t.Run("nil url behaves as missing query input", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items", nil)
+		req.URL = nil
+
+		got, err := Query(req, "name").String().Get()
+		if err != nil {
+			t.Fatalf("Query(req with nil URL).String().Get() error = %v", err)
+		}
+		if got != "" {
+			t.Fatalf("name = %q, want empty string", got)
+		}
+
+		_, err = Query(req, "name").String().Required().Get()
+		assertRequiredViolationAt(t, err, "name", ViolationInQuery)
 	})
 
 	t.Run("default then required conflict", func(t *testing.T) {

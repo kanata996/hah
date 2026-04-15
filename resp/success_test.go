@@ -179,6 +179,26 @@ func TestNoContentWritesStatusOnly(t *testing.T) {
 	}
 }
 
+func TestWriteStatusRejectsInvalidStatus(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	err := writeStatus(rr, 1000)
+	if err == nil || err.Error() != "resp: invalid HTTP status 1000" {
+		t.Fatalf("writeStatus() error = %v, want invalid status error", err)
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
+func TestWriteSuccessRejectsErrorStatus(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	err := writeSuccess(rr, http.StatusBadRequest, map[string]any{"id": "u_1"})
+	if err == nil || err.Error() != "resp: invalid success status 400" {
+		t.Fatalf("writeSuccess() error = %v, want invalid success status error", err)
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
 func TestSuccessWritersReturnWrappedWriteError(t *testing.T) {
 	cases := []struct {
 		name       string

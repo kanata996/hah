@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/kanata996/hah/errx"
 )
 
 type customParamValue struct {
@@ -111,6 +113,13 @@ func TestBindQuery_RejectsUnsupportedTargets(t *testing.T) {
 	if unsupportedMap != nil {
 		t.Fatalf("unsupportedMap = %#v, want nil preserved on failure", unsupportedMap)
 	}
+
+	unsupportedKeyMap := map[int]string(nil)
+	err = BindQuery(req, &unsupportedKeyMap)
+	assertUsageErrorContains(t, err, "destination must point to struct or supported map")
+	if unsupportedKeyMap != nil {
+		t.Fatalf("unsupportedKeyMap = %#v, want nil preserved on failure", unsupportedKeyMap)
+	}
 }
 
 func TestBindQuery_UsesOnlyQuerySource(t *testing.T) {
@@ -193,6 +202,20 @@ func TestBindQuery_EmptyUnsignedAndFloatValuesBindZero(t *testing.T) {
 	}
 }
 
+func TestBindQuery_EmptyBoolValueBindsFalse(t *testing.T) {
+	type request struct {
+		Enabled bool `query:"enabled"`
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/?enabled=", nil)
+	dst := request{Enabled: true}
+
+	mustBindQuery(t, req, &dst)
+	if dst.Enabled {
+		t.Fatalf("enabled = %v, want false", dst.Enabled)
+	}
+}
+
 func TestBindQuery_BindsSupportedMapTargets(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/?name=kanata&tag=a&tag=b", nil)
 
@@ -216,6 +239,33 @@ func TestBindQuery_BindsSupportedMapTargets(t *testing.T) {
 	if got := anyMap["name"]; got != "kanata" {
 		t.Fatalf("anyMap[name] = %#v, want kanata", got)
 	}
+}
+
+func TestBindQuery_NoQueryDataIsNoop(t *testing.T) {
+	t.Run("struct preserves existing values", func(t *testing.T) {
+		type request struct {
+			Page int    `query:"page"`
+			Name string `query:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		dst := request{Page: 7, Name: "existing"}
+
+		mustBindQuery(t, req, &dst)
+		if dst.Page != 7 || dst.Name != "existing" {
+			t.Fatalf("dst = %#v, want existing values preserved", dst)
+		}
+	})
+
+	t.Run("nil map is not allocated", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+
+		var dst map[string]string
+		mustBindQuery(t, req, &dst)
+		if dst != nil {
+			t.Fatalf("dst = %#v, want nil map preserved", dst)
+		}
+	})
 }
 
 func TestBindQuery_MissingParamsPreserveExistingValues(t *testing.T) {
@@ -329,6 +379,23 @@ func TestBindQuery_EmbeddedFieldContracts(t *testing.T) {
 		assertUsageErrorContains(t, BindQuery(req, &dst), "query tags are not allowed with anonymous struct field")
 	})
 
+	t.Run("ignores nil anonymous embedded pointer", func(t *testing.T) {
+		type Embedded struct {
+			Name string `query:"name"`
+		}
+		type request struct {
+			*Embedded
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
+
+		var dst request
+		mustBindQuery(t, req, &dst)
+		if dst.Embedded != nil {
+			t.Fatalf("Embedded = %#v, want nil preserved", dst.Embedded)
+		}
+	})
+
 	t.Run("traverses non nil anonymous embedded pointer", func(t *testing.T) {
 		type Embedded struct {
 			Name string `query:"name"`
@@ -342,6 +409,21 @@ func TestBindQuery_EmbeddedFieldContracts(t *testing.T) {
 		mustBindQuery(t, req, &dst)
 		if dst.Embedded == nil || dst.Name != "kanata" {
 			t.Fatalf("dst = %#v, want embedded name to bind", dst)
+		}
+	})
+
+	t.Run("allows query tag on anonymous non-struct field", func(t *testing.T) {
+		type Alias string
+		type request struct {
+			Alias `query:"alias"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?alias=kanata", nil)
+
+		var dst request
+		mustBindQuery(t, req, &dst)
+		if dst.Alias != "kanata" {
+			t.Fatalf("Alias = %q, want kanata", dst.Alias)
 		}
 	})
 
@@ -425,6 +507,22 @@ func TestBindQuery_DecodeFailuresAreBadRequest(t *testing.T) {
 
 		var dst request
 		_ = assertBadRequest(t, BindQuery(req, &dst))
+	})
+
+	t.Run("custom decoder http errors are preserved", func(t *testing.T) {
+		type request struct {
+			Custom customParamValue `query:"custom"`
+		}
+
+		wantErr := errx.NewHTTPError(http.StatusUnprocessableEntity, "custom_invalid", "custom invalid")
+		req := httptest.NewRequest(http.MethodGet, "/?custom=x", nil)
+		dst := request{Custom: customParamValue{err: wantErr}}
+
+		gotErr := BindQuery(req, &dst)
+		if gotErr != wantErr {
+			t.Fatalf("BindQuery() error = %v, want original %v", gotErr, wantErr)
+		}
+		_ = assertHTTPError(t, gotErr, http.StatusUnprocessableEntity, "custom_invalid", "custom invalid")
 	})
 }
 
@@ -548,6 +646,38 @@ func TestBindQuery_PointerFieldFailuresDoNotAllocate(t *testing.T) {
 		_ = assertBadRequest(t, BindQuery(req, &dst))
 		if dst.Custom != nil {
 			t.Fatalf("Custom = %#v, want nil after failed bind", dst.Custom)
+		}
+	})
+}
+
+func TestBindQuery_PointerSliceFailuresDoNotCommit(t *testing.T) {
+	intPtr := func(v int) *int { return &v }
+
+	t.Run("nil pointer slice stays nil on element failure", func(t *testing.T) {
+		type request struct {
+			IDs []*int `query:"id"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?id=1&id=oops", nil)
+
+		var dst request
+		_ = assertBadRequest(t, BindQuery(req, &dst))
+		if dst.IDs != nil {
+			t.Fatalf("IDs = %#v, want nil after failed bind", dst.IDs)
+		}
+	})
+
+	t.Run("existing pointer slice is preserved on element failure", func(t *testing.T) {
+		type request struct {
+			IDs []*int `query:"id"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?id=1&id=oops", nil)
+		dst := request{IDs: []*int{intPtr(7)}}
+
+		_ = assertBadRequest(t, BindQuery(req, &dst))
+		if len(dst.IDs) != 1 || dst.IDs[0] == nil || *dst.IDs[0] != 7 {
+			t.Fatalf("IDs = %#v, want existing slice preserved", dst.IDs)
 		}
 	})
 }

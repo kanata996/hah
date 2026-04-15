@@ -228,6 +228,26 @@ func TestBindBody_UnknownLengthNonEmptyBodyStillBinds(t *testing.T) {
 	}
 }
 
+func TestBindBody_PresenceProbeErrorsSurfaceBeforeRead(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	wantErr := errors.New("probe failed")
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.ContentLength = -1
+	req.Header.Set("Content-Type", mimeApplicationJSON)
+	req.Body = probeErrorReadCloser{err: wantErr}
+
+	dst := request{Name: "existing"}
+	if err := BindBody(req, &dst); !errors.Is(err, wantErr) {
+		t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+	}
+	if dst.Name != "existing" {
+		t.Fatalf("name = %q, want existing value preserved when presence probe fails", dst.Name)
+	}
+}
+
 func TestBindBody_JSONContract(t *testing.T) {
 	t.Run("array binds to slice target", func(t *testing.T) {
 		type item struct {

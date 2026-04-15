@@ -299,3 +299,35 @@ func TestJSONBodyWritersFallbackWriteErrorStringOnBlankCause(t *testing.T) {
 		t.Fatalf("error = %q, want fallback text", got)
 	}
 }
+
+func TestResponseWriteErrorFallbackMessageWithoutCause(t *testing.T) {
+	cases := []struct {
+		name string
+		err  *responseWriteError
+	}{
+		{name: "nil receiver", err: nil},
+		{name: "nil cause", err: &responseWriteError{}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.err.Error(); got != "resp: write response failed" {
+				t.Fatalf("Error() = %q, want fallback text", got)
+			}
+		})
+	}
+}
+
+func TestResponseWriteErrorUnwrapNilReceiver(t *testing.T) {
+	var err *responseWriteError
+
+	if got := err.Unwrap(); got != nil {
+		t.Fatalf("Unwrap() = %#v, want nil", got)
+	}
+}
+
+func TestSafeErrorStringNil(t *testing.T) {
+	if got := safeErrorString(nil); got != "" {
+		t.Fatalf("safeErrorString(nil) = %q, want empty", got)
+	}
+}

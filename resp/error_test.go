@@ -156,6 +156,12 @@ func TestWriteErrorNilErrorIsNoop(t *testing.T) {
 	}
 }
 
+func TestAsHTTPErrorNilReturnsNil(t *testing.T) {
+	if got := asHTTPError(nil); got != nil {
+		t.Fatalf("asHTTPError(nil) = %#v, want nil", got)
+	}
+}
+
 // ResponseWriter 为空时，WriteError 会把底层写回失败作为普通 error 返回。
 func TestWriteErrorRejectsNilWriter(t *testing.T) {
 	defer func() {
