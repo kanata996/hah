@@ -1,23 +1,26 @@
 # 请求输入指南
 
-这份文档聚焦 `hah` 的输入侧能力，覆盖两个核心包：
+这份文档聚焦 `hah` 的输入侧能力，核心包是：
 
-- `bind`：负责把 path / query / header / body 绑定到 Go 目标值
-- `reqx`：负责 request helper、Normalize、请求级规则和字段校验
+- `reqx`：负责 request helper、query/body binding、`RequireBody`、`InvalidRequest` 和公开 violations
 
-`hah` 是 `net/http`-first 的设计，不提供额外的请求上下文抽象，而是围绕标准库 `*http.Request`、显式 binding 和显式 validation 组合能力来组织 API。
+`hah` 是 `net/http`-first 的设计，不提供额外的请求上下文抽象，也不内建 validation engine。它围绕标准库 `*http.Request`、显式读取和显式 post-bind validation 组织 API。
+
+当前设计里：
+
+- `reqx.Path(...)` / `reqx.Query(...)` 是请求侧核心 API
+- `reqx.BindQuery(...)` / `reqx.BindBody(...)` 是 DTO 场景下的补充能力
 
 ## 先看选型
 
 | 目标 | 推荐 API | 说明 |
 | --- | --- | --- |
-| 单字段 path / query 读取并顺手做常见验证 | `hah.Path` / `hah.Query` | 适合不定义 DTO，但希望直接返回 source-aware `required` / `invalid` 错误 |
-| 自定义类型或结构化输入 | `bind.Bind*` | 复杂类型、多值 query、自定义解码统一走 `bind`，避免再扩单字段 helper |
-| 标准 handler 的默认 happy path | `hah.BindAndValidate` | 默认执行 `path -> query(GET/DELETE/HEAD) -> body`，再做 Normalize / RequestValidator / validator |
-| 只做 body 绑定，不做校验 | `hah.BindBody` | 适合只需要 JSON 解码的场景 |
-| 显式只绑定 query / path / header / body | `hah.BindQueryParams` / `hah.BindPathValues` / `hah.BindHeaders` / `hah.BindBody` | 常用 source-specific binding；底层实现仍在 `bind` 包 |
-| 显式只校验某一类来源 | `reqx.Validate(..., reqx.SourceQuery)` / `reqx.SourcePath` / `reqx.SourceHeader` / `reqx.SourceBody` | 通常和 `bind.Bind*` 配合使用 |
-| body 是否必须存在 | `reqx.RequireBody` | 适合在 `RequestValidator` 里声明 body-required 契约 |
+| 单字段 path / query 读取并顺手做常见校验 | `hah.Path` / `hah.Query` | 主路径，直接返回 source-aware `required` / `invalid` 错误 |
+| 批量 query DTO 绑定 | `hah.BindQuery` / `reqx.BindQuery` | 适合筛选条件、分页参数、复杂多值 query |
+| 只做 JSON body 绑定 | `hah.BindBody` / `reqx.BindBody` | 适合 body DTO 解码 |
+| body 是否必须存在 | `hah.RequireBody` / `reqx.RequireBody` | 适合在 body 绑定后显式声明 body-required 契约 |
+| 手写字段级请求违规 | `reqx.InvalidRequest` | 适合把业务前的输入错误收敛成统一 `422 invalid_request` |
+| 读取 header | `r.Header.Get(...)` / `r.Header.Values(...)` | header 默认直接走标准库 |
 
 ## 读取 request 数据
 
@@ -28,27 +31,23 @@
 ```go
 id := r.PathValue("id")
 cursor := r.URL.Query().Get("cursor")
+actor := r.Header.Get("X-Actor")
 ```
 
-这类读取保持 `net/http` 原生形态，不额外包装 request reader 类型。
-
-### 单参数读取与常见验证
+### 单参数读取与常见校验
 
 如果你不想定义 DTO，但希望 path/query 单字段读取时直接得到 `required` / `invalid` 风格错误，优先用 `reqx` 或根包 facade：
 
 ```go
-import (
-	"github.com/google/uuid"
-	"github.com/kanata996/hah"
-)
+import "github.com/kanata996/hah"
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	accountID, err := hah.Path(r, "account_id").
-		UUID().
+		String().
 		Required().
 		Get()
 	if err != nil {
-		_ = hah.WriteError(w, r, err)
+		_ = hah.WriteError(w, err)
 		return
 	}
 
@@ -59,7 +58,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		Max(100).
 		Get()
 	if err != nil {
-		_ = hah.WriteError(w, r, err)
+		_ = hah.WriteError(w, err)
 		return
 	}
 
@@ -67,127 +66,71 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-如果 query 需要保留重复 key 的全部原始值，可以直接走 `Values()` / `Strings()`：
+如果 query 需要保留重复 key 的全部原始值，可以直接走 `Values()`：
 
 ```go
 tags, err := hah.Query(r, "tag").Values().Get()
 ```
 
-几个公开语义需要注意：
+公开语义：
 
-- `Path(r, name)` / `Query(r, name)` 先指定来源，再选择类型；`Path` 只暴露 path 适用的单值能力，`Query` 额外支持 `Values()` / `Strings()` 读取重复 query 的原始值
-- `Path` 只支持更适合资源标识的类型：`String()`、`UUID()`、`Int()`、`Int64()`、`Uint()`、`Uint64()`
-- `Query` 继续承载更宽的参数语义，例如布尔、浮点、时长、时间戳和原始重复值
-- 这些链式 builder 的返回类型（例如 `reqx.StringParam`、`reqx.IntParam`、`reqx.TimeParam`）也是公开 API，但大多数调用方不需要直接声明它们
+- `Path(r, name)` / `Query(r, name)` 先指定来源，再选择类型
+- `Path` 只暴露 path 适用的单值能力
+- `Query` 额外支持 `Values()` 读取重复 query 的原始值
 - `Required()`：参数缺失时返回 `required` violation
 - `Default(v)`：参数缺失时使用默认值；与 `Required()` 互斥
 - 常见快捷校验直接链式表达，例如 `Min`、`Max`、`MinLen`、`MaxLen`、`OneOf`、`Match`、`Before`、`After`
 - `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` violation
 - `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
 - `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
-- query 中同名参数重复出现时，`Query(...).String()` / `Int()` / `UUID()` 这类标量 helper 默认只消费第一个值；如果你需要全部原始值，改用 `Query(...).Values()` / `Strings()`；如果你需要结构化多值解码，改用 `bind.Bind*`
 
-#### `Path` 能力表
+这套 `Path / Query` 分工是当前请求侧核心设计：
 
-| 类型选择器 | 返回值类型 | 输入格式 | 可链式校验 | 备注 |
-| --- | --- | --- | --- | --- |
-| `String()` | `string` | 原样读取字符串 | `MinLen` / `MaxLen` / `OneOf` / `Match` / `Check` | 适合 slug、业务 ID、枚举型 segment |
-| `Int()` | `int` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析；宽度跟随当前平台的 `int` |
-| `Int64()` | `int64` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
-| `Uint()` | `uint` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
-| `Uint64()` | `uint64` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
-| `UUID()` | `uuid.UUID` | 符合 `github.com/google/uuid.Parse` 的 UUID 字符串 | `Check` | 适合 path 中的资源 ID |
+- `Path` 代表资源标识型输入，保持窄而清晰
+- `Query` 代表更宽的参数语义，允许 richer scalar helpers 与重复值读取
+- 调整它们的类型面、链式方法或错误语义时，应按核心 public API 变更对待
 
-#### `Query` 能力表
+## 用 `reqx` 绑定 DTO
 
-| 类型选择器 | 返回值类型 | 输入格式 | 可链式校验 | 备注 |
-| --- | --- | --- | --- | --- |
-| `String()` | `string` | 原样读取字符串 | `MinLen` / `MaxLen` / `OneOf` / `Match` / `Check` | 长度按 rune 数计算；`?name=` 解析为空字符串且算“存在” |
-| `Int()` | `int` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析；宽度跟随当前平台的 `int` |
-| `Int64()` | `int64` | 十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
-| `Uint()` | `uint` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
-| `Uint64()` | `uint64` | 无符号十进制整数 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
-| `Bool()` | `bool` | 符合 `strconv.ParseBool` 的布尔字面量 | `Check` | 空串按 `false` 解析 |
-| `Float64()` | `float64` | 符合 `strconv.ParseFloat(..., 64)` 的数字字面量 | `Min` / `Max` / `Check` | 空串按 `0.0` 解析 |
-| `Duration()` | `time.Duration` | 符合 `time.ParseDuration` 的时长字面量 | `Min` / `Max` / `Check` | 空串按 `0` 解析 |
-| `UUID()` | `uuid.UUID` | 符合 `github.com/google/uuid.Parse` 的 UUID 字符串 | `Check` | 适合 path / query 中的 ID 字段 |
-| `Time()` | `time.Time` | RFC3339 时间字符串 | `After` / `Before` / `Check` | `After` / `Before` 为含边界比较 |
-| `UnixTime()` | `time.Time` | 10 位秒级 Unix 时间戳 | `After` / `Before` / `Check` | 解析结果为 UTC 时间 |
-| `UnixMilliTime()` | `time.Time` | 13 位毫秒级 Unix 时间戳 | `After` / `Before` / `Check` | 解析结果为 UTC 时间 |
-| `Values()` / `Strings()` | `[]string` | query 同名参数的全部原始值 | `Check` | 仅 `Query` 支持；保留重复值顺序；`Required` / `Default` 仍可用 |
+`reqx` 里的 DTO binder 只负责 source-to-DTO 映射，不做 Normalize、请求级规则或字段校验。
 
-补充说明：
+### query DTO 绑定
 
-- 所有类型都支持 `Required()`、`Default(v)`、`Get()`；其中 `Required()` 和 `Default(v)` 互斥
-- 参数缺失时，`Required()` 返回 `required` violation；参数存在但解析失败或校验失败时，返回 `invalid` violation
-- `Query(...).Values()` / `Strings()` 只提供原始 `[]string` 读取；如果输入已经超出这些常见标量类型，例如自定义类型、结构化多值 query、重复参数解码或 DTO 映射，优先改用 `bind.Bind*`
-
-### 自定义类型输入
-
-如果单参数不是内建标量，或者你已经需要自定义解码、结构化多值 query 语义，直接交给 `bind`。`reqx.Query(...).Values()` / `Strings()` 只覆盖“读取原始重复值”这一层，不负责复杂解码。
-
-## 用 `bind` 绑定 DTO
-
-`bind` 只负责 source-to-DTO 映射，不做 Normalize、请求级规则或字段校验。
-
-### struct tag 绑定
+`reqx.BindQuery` / `hah.BindQuery` 只从 query 参数绑定数据。
 
 ```go
-type ListAccountsRequest struct {
-	OrgID string `param:"org_id"`
-	Name  string `query:"name"`
-}
-```
-
-标签含义：
-
-- `param`：path 参数
-- `query`：query 参数
-- `header`：header
-- `json`：JSON body
-
-### 默认 mixed-source binding
-
-`bind.Bind` 和 `hah.Bind` 会按固定顺序绑定：
-
-1. path
-2. query，仅对 `GET` / `DELETE` / `HEAD`
-3. body
-
-后一个来源会覆盖前一个来源的同名字段。
-
-```go
-type Request struct {
-	ID   string `param:"id" query:"id" json:"id"`
-	Name string `json:"name"`
+type ListAccountsQuery struct {
+	Name  string   `query:"name"`
+	Tags  []string `query:"tag"`
+	Limit int      `query:"limit"`
 }
 
-var req Request
-if err := hah.Bind(r, &req); err != nil {
-	return err
-}
-```
-
-这就是默认的 mixed-source 绑定模型。
-
-### 显式单一来源 binding
-
-当你只想绑定某一类来源时，优先用根包 facade；需要 `bind` 的错误码常量或更底层类型时，再直接导入 `bind` 包：
-
-```go
 var query ListAccountsQuery
-if err := hah.BindQueryParams(r, &query); err != nil {
+if err := hah.BindQuery(r, &query); err != nil {
 	return err
 }
+```
 
-var path AccountPath
-if err := hah.BindPathValues(r, &path); err != nil {
-	return err
-}
+当前 query binder 的公开语义：
 
-var headers DeleteHeaders
-if err := hah.BindHeaders(r, &headers); err != nil {
-	return err
+- 只消费 `query:"..."` tag
+- 目标必须是 struct、`map[string]string`、`map[string][]string` 或 `map[string]any`
+- query 名字按精确值匹配
+- 重复 query 绑定到切片字段时会保留全部值
+- 重复 query 绑定到标量字段时默认只消费第一个值
+- 缺失参数不会覆盖 DTO 现有值
+- 绑定失败时，前面已经成功写入的字段保持已写状态
+- 如果目标 DTO/tag 形状本身非法，直接返回普通错误，不收敛成 `400 bad_request`
+
+它适合“批量投影”，不适合表达请求级规则。像 `Required`、`Default`、`OneOf`、`Min/Max` 这类规则，仍然优先放在 `reqx.Query(...)` 或绑定后的显式校验里。
+
+### body DTO 绑定
+
+`reqx.BindBody` / `hah.BindBody` 只从请求 body 绑定数据。
+
+```go
+type CreateAccountBody struct {
+	Name string `json:"name"`
 }
 
 var body CreateAccountBody
@@ -196,14 +139,7 @@ if err := hah.BindBody(r, &body); err != nil {
 }
 ```
 
-注意：
-
-- header 不参与默认 `Bind`
-- 如果你需要 header，请显式调用 `BindHeaders`
-
-### body 契约
-
-`bind.BindBody` 当前的公开契约是：
+`reqx.BindBody` 当前的公开契约是：
 
 - 实际读取到零字节 body 时视为 no-op
 - 这个 no-op 发生在 `Content-Type` 检查之前
@@ -219,7 +155,7 @@ if err := hah.BindBody(r, &body); err != nil {
 
 ### 自定义解码
 
-对于 path / query / header 这类字符串输入，`bind` 支持自定义解码：
+对于 query 这类字符串输入，`reqx` 支持自定义解码：
 
 ```go
 type Timestamp time.Time
@@ -231,237 +167,132 @@ func (t *Timestamp) UnmarshalParam(src string) error {
 }
 ```
 
-除 `UnmarshalParam(string) error` 外，当前默认 binder 还支持：
+除 `reqx.BindUnmarshaler`（`UnmarshalParam(string) error`）外，当前默认 query binder 还支持：
 
 - 字段实现 `encoding.TextUnmarshaler`
+- `time.Duration` 字段，使用和 `Query(...).Duration()` 一致的 duration 字符串语法
 - `time.Time` 字段配合 `format:"..."` tag 做按格式解析
-- 重复 query/header 值绑定到切片字段；如果目标字段需要自行消费全部重复值，可以实现 `UnmarshalParams([]string) error`
+- 重复 query 值绑定到切片字段
+- 如果目标字段需要自行消费全部重复值，可以实现 `reqx.BindMultipleUnmarshaler`（`UnmarshalParams([]string) error`）
 
 示例：
 
 ```go
 type SearchQuery struct {
-	At   time.Time `query:"at" format:"2006-01-02"`
-	Tags []string  `query:"tag"`
+	At      time.Time     `query:"at" format:"2006-01-02"`
+	Timeout time.Duration `query:"timeout"`
+	Tags    []string      `query:"tag"`
 }
 ```
 
-这类自定义解码主要服务于 `bind.Bind*`。如果输入已经超出常见标量，优先定义 DTO 并让 `bind` 接管，而不是继续堆单字段 helper。
+## 绑定后的显式校验
 
-## 用 `reqx` 做校验和请求级规则
+`hah` 不预设 DTO 的校验方式。绑定完成后，调用方自己决定下一步是手写校验、接入第三方库，还是映射到应用层命令再校验。
 
-`reqx` 负责 request helper、Normalize、请求级规则、字段校验和 violation 包络，把输入后的校验流程集中在同一层。
-
-### 默认 mixed-source happy path
-
-默认推荐入口是：
+### 1. 手写校验
 
 ```go
-if err := hah.BindAndValidate(r, &req); err != nil {
-	_ = hah.WriteError(w, r, err)
-	return
-}
-```
-
-这个入口内部会执行：
-
-1. `bind.Bind`
-2. `Normalize()`
-3. `ValidateRequest(*http.Request)`
-4. `validator/v10`
-
-### 显式来源校验
-
-如果你显式用了单一来源 binding，校验阶段应明确告诉 `reqx` 当前来源：
-
-```go
-var headers DeleteHeaders
-if err := hah.BindHeaders(r, &headers); err != nil {
-	return err
-}
-if err := reqx.Validate(r, &headers, reqx.SourceHeader); err != nil {
-	return err
-}
-```
-
-`Source` 会影响两件事：
-
-- validator 字段别名优先读取哪些 tag
-- violation 的 `in` 字段写成 `body` / `query` / `path` / `header` / `request`
-
-其中 `reqx.SourceRequest` 还有一个额外约束：
-
-- 如果同一字段在多个来源 tag 上用了同一个输入名，violation 会继续使用这个共享输入名
-- 如果同一字段在多个来源 tag 上用了不同输入名，violation 会回退为 struct 字段名，避免把某个来源名误报为 request 级字段名
-- 对默认 `BindAndValidate` 路径，推荐多来源复用字段保持同名；如果来源名本来就不同，优先拆成不同 DTO 字段再自行归并
-
-当前可用值：
-
-- `reqx.SourceBody`
-- `reqx.SourceQuery`
-- `reqx.SourcePath`
-- `reqx.SourceHeader`
-- `reqx.SourceRequest`
-
-### Normalize
-
-DTO 如果实现了 `Normalize()`，会在字段校验前执行：
-
-```go
-type CreateAccountRequest struct {
-	Name string `json:"name" validate:"required,min=3"`
+type CreateAccountBody struct {
+	Name string `json:"name"`
 }
 
-func (r *CreateAccountRequest) Normalize() {
-	r.Name = strings.TrimSpace(r.Name)
-}
-```
+func validateCreateAccountBody(r *http.Request, body *CreateAccountBody) error {
+	if err := hah.RequireBody(r); err != nil {
+		return err
+	}
 
-### RequestValidator
-
-如果 DTO 需要字段之间的组合规则，或要访问原始 request，可以实现 `RequestValidator`：
-
-```go
-type SearchRequest struct {
-	Query  string `query:"query"`
-	Cursor string `query:"cursor"`
-}
-
-func (r *SearchRequest) ValidateRequest(*http.Request) error {
-	if r.Query == "" && r.Cursor == "" {
+	body.Name = strings.TrimSpace(body.Name)
+	if body.Name == "" {
 		return reqx.InvalidRequest(reqx.Violation{
-			Field: "query",
-			In:    reqx.ViolationInQuery,
+			Field: "name",
+			In:    reqx.ViolationInBody,
 			Code:  reqx.ViolationCodeRequired,
 		})
 	}
 	return nil
 }
-```
-
-### body 必填
-
-默认情况下，空 body 会沿用 `bind` 的 no-op 语义，不会自动报错。  
-如果某个 DTO 需要“必须显式提交 body”，在 `ValidateRequest` 里调用 `reqx.RequireBody(r)`：
-
-```go
-type CreateRequest struct {
-	Name string `json:"name" validate:"required"`
-}
-
-func (*CreateRequest) ValidateRequest(r *http.Request) error {
-	return reqx.RequireBody(r)
-}
-```
-
-### violation 包络
-
-`reqx` 会把字段校验错误统一映射为稳定的 violation 结构：
-
-```json
-{
-  "field": "name",
-  "in": "body",
-  "code": "required",
-  "detail": "is required"
-}
-```
-
-常用公开常量：
-
-- `reqx.CodeInvalidRequest`
-- `reqx.ViolationCodeInvalid`
-- `reqx.ViolationCodeRequired`
-- `reqx.ViolationCodeUnknown`
-- `reqx.ViolationCodeType`
-- `reqx.ViolationCodeMultiple`
-
-## 常见模式
-
-### 1. GET：path + query
-
-```go
-type ListAccountsRequest struct {
-	OrgID string `param:"org_id" validate:"required"`
-	Name  string `query:"name"`
-}
-
-func (r *ListAccountsRequest) Normalize() {
-	r.Name = strings.TrimSpace(r.Name)
-}
 
 func handler(w http.ResponseWriter, r *http.Request) {
-	var req ListAccountsRequest
-	if err := hah.BindAndValidate(r, &req); err != nil {
-		_ = hah.WriteError(w, r, err)
+	orgID, err := hah.Path(r, "org_id").String().Required().Get()
+	if err != nil {
+		_ = hah.WriteError(w, err)
 		return
 	}
+
+	var body CreateAccountBody
+	if err := hah.BindBody(r, &body); err != nil {
+		_ = hah.WriteError(w, err)
+		return
+	}
+	if err := validateCreateAccountBody(r, &body); err != nil {
+		_ = hah.WriteError(w, err)
+		return
+	}
+
+	_ = orgID
 }
 ```
 
-### 2. POST：path + body
+### 2. 继续用你自己的验证库
+
+`hah` 不解析 `validate:"..."` 这类 tag，但也不会阻止你继续用它们。struct tag 可以并存：
 
 ```go
-type CreateAccountRequest struct {
-	OrgID string `param:"org_id" validate:"required"`
-	Name  string `json:"name" validate:"required,min=3,max=64"`
-}
-
-func (r *CreateAccountRequest) Normalize() {
-	r.Name = strings.TrimSpace(r.Name)
+type CreateAccountBody struct {
+	Name string `json:"name" validate:"required,min=3,max=64"`
 }
 ```
 
-这类 handler 仍然优先用 `hah.BindAndValidate`。
+绑定后直接调用你自己的验证库即可。
 
-### 3. 显式 header 绑定 + header 校验
+## 典型组合
 
-```go
-type DeleteHeaders struct {
-	Actor string `header:"x-actor" validate:"required,nospace"`
-}
-
-func handler(w http.ResponseWriter, r *http.Request) {
-	var headers DeleteHeaders
-	if err := hah.BindHeaders(r, &headers); err != nil {
-		_ = hah.WriteError(w, r, err)
-		return
-	}
-	if err := reqx.Validate(r, &headers, reqx.SourceHeader); err != nil {
-		_ = hah.WriteError(w, r, err)
-		return
-	}
-}
-```
-
-### 4. 只拿一个 path / query 参数
+### path 用 helper，query 用 DTO
 
 ```go
 orgID, err := hah.Path(r, "org_id").String().Required().Get()
-limit, err := hah.Query(r, "limit").Int().Default(20).Min(1).Max(100).Get()
+if err != nil {
+	return err
+}
+
+var query struct {
+	Name  string `query:"name"`
+	Limit int    `query:"limit"`
+}
+if err := hah.BindQuery(r, &query); err != nil {
+	return err
+}
+
+_ = orgID
 ```
 
-这种场景不必为了一两个参数单独创建 DTO。
+### path 用 helper，body 用 DTO
 
-## 注意事项
+```go
+orgID, err := hah.Path(r, "org_id").String().Required().Get()
+if err != nil {
+	return err
+}
 
-### 为 binding 定义单独 DTO
+var body struct {
+	Name string `json:"name"`
+}
+if err := hah.BindBody(r, &body); err != nil {
+	return err
+}
 
-建议把“外部输入 DTO”与“内部业务对象”分开，避免把不应该由请求写入的字段暴露出去。
+_ = orgID
+```
 
-### `reqx.Validate` 目标必须是 `*struct`
+### header 直接读取
 
-`bind.BindBody` 可以绑定到 `map`、`slice` 等 JSON 目标；但 `reqx.Validate` / `hah.BindAndValidate` 最终会执行结构校验，因此要求目标是非 nil 的 `*struct`。
-
-### path 依赖 `net/http` 的 `PathValue` / `Pattern`
-
-`reqx` 和 `bind` 的 path 语义依赖标准库 `PathValue` / `Pattern`。  
-如果你接在 `chi` 后面，需要先把 `chi.RouteContext` 回填到 `net/http` 契约；可以参考：
-
-- [_examples/chi/main.go](./_examples/chi/main.go)
-
-## 相关文件
-
-- [README.md](./README.md)
-- [_examples/nethttp](./_examples/nethttp)
-- [_examples/chi](./_examples/chi)
+```go
+actor := strings.TrimSpace(r.Header.Get("X-Actor"))
+if actor == "" {
+	return reqx.InvalidRequest(reqx.Violation{
+		Field: "X-Actor",
+		In:    reqx.ViolationInHeader,
+		Code:  reqx.ViolationCodeRequired,
+	})
+}
+```

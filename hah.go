@@ -3,49 +3,29 @@ package hah
 import (
 	"net/http"
 
-	"github.com/kanata996/hah/bind"
 	"github.com/kanata996/hah/reqx"
 	"github.com/kanata996/hah/resp"
 )
 
 type (
 	// BindUnmarshaler 允许字段从单个字符串输入值自定义解码。
-	BindUnmarshaler = bind.BindUnmarshaler
-	// RequestValidator 允许 DTO 在 binding 之后声明请求级规则。
-	RequestValidator = reqx.RequestValidator
-	// Normalizer 允许 DTO 在校验前做标准化处理。
-	Normalizer = reqx.Normalizer
+	BindUnmarshaler = reqx.BindUnmarshaler
+	// BindMultipleUnmarshaler 允许字段一次性接收同名输入的全部值。
+	BindMultipleUnmarshaler = reqx.BindMultipleUnmarshaler
 	// PathParam 表示一个待解析的 path 单参数。
 	PathParam = reqx.PathParam
 	// QueryParam 表示一个待解析的 query 单参数。
 	QueryParam = reqx.QueryParam
-	// ErrorResponder 协调错误收敛、错误响应写回与 5xx 独立错误日志。
-	ErrorResponder = resp.ErrorResponder
 )
-
-// Bind 按默认顺序绑定请求数据：path -> query(GET/DELETE/HEAD) -> body。
-func Bind(r *http.Request, target any) error {
-	return bind.Bind(r, target)
-}
 
 // BindBody 只从请求 body 绑定数据。
 func BindBody(r *http.Request, target any) error {
-	return bind.BindBody(r, target)
+	return reqx.BindBody(r, target)
 }
 
-// BindQueryParams 只从 query 参数绑定数据。
-func BindQueryParams(r *http.Request, target any) error {
-	return bind.BindQueryParams(r, target)
-}
-
-// BindPathValues 只从 path 参数绑定数据。
-func BindPathValues(r *http.Request, target any) error {
-	return bind.BindPathValues(r, target)
-}
-
-// BindHeaders 只从 header 绑定数据。
-func BindHeaders(r *http.Request, target any) error {
-	return bind.BindHeaders(r, target)
+// BindQuery 只从 query 参数绑定数据。
+func BindQuery(r *http.Request, target any) error {
+	return reqx.BindQuery(r, target)
 }
 
 // Path 创建 path 单参数读取与校验 builder。
@@ -58,24 +38,14 @@ func Query(r *http.Request, name string) *QueryParam {
 	return reqx.Query(r, name)
 }
 
-// BindAndValidate 绑定后执行 Normalize、请求级规则和字段校验。
-func BindAndValidate(r *http.Request, target any) error {
-	return reqx.BindAndValidate(r, target)
-}
-
 // RequireBody 按默认 binder 契约要求请求必须显式提交 body。
 func RequireBody(r *http.Request) error {
 	return reqx.RequireBody(r)
 }
 
 // WriteError 按统一错误对象写回响应。
-func WriteError(w http.ResponseWriter, r *http.Request, err error) error {
-	return resp.WriteError(w, r, err)
-}
-
-// NewErrorResponder 返回默认错误响应器，可按需定制错误归一化与日志策略。
-func NewErrorResponder() *ErrorResponder {
-	return resp.NewErrorResponder()
+func WriteError(w http.ResponseWriter, err error) error {
+	return resp.WriteError(w, err)
 }
 
 // JSON 写回 JSON 响应。

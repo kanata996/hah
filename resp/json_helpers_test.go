@@ -1,16 +1,23 @@
 package resp
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
-	"strings"
 	"testing"
 )
 
+type payloadMap map[string]any
 type panicSuccessJSONValue struct{}
 type panicWriteCause struct{}
-type blankWriteCause struct{}
+type failingWriter struct {
+	header http.Header
+	status int
+	writes int
+	cause  error
+}
 type headLikeResponseWriter struct {
 	header           http.Header
 	writeHeaderCalls int
@@ -30,8 +37,23 @@ func (panicWriteCause) Error() string {
 	panic("panic during Error")
 }
 
-func (blankWriteCause) Error() string {
-	return "   "
+func (w *failingWriter) Header() http.Header {
+	if w.header == nil {
+		w.header = make(http.Header)
+	}
+	return w.header
+}
+
+func (w *failingWriter) WriteHeader(status int) {
+	w.status = status
+}
+
+func (w *failingWriter) Write(_ []byte) (int, error) {
+	w.writes++
+	if w.cause != nil {
+		return 0, w.cause
+	}
+	return 0, errors.New("socket closed")
 }
 
 func (w *headLikeResponseWriter) Header() http.Header {
@@ -62,43 +84,58 @@ func (w *writeCallbackResponseWriter) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
-// responseWriteError 在 nil 接收者和普通错误场景下都应提供稳定的错误语义。
-func TestResponseWriteErrorMethods(t *testing.T) {
-	var nilErr *responseWriteError
-	if got := nilErr.Error(); got != "resp: write response failed" {
-		t.Fatalf("nil Error() = %q", got)
-	}
-	if got := nilErr.Unwrap(); got != nil {
-		t.Fatalf("nil Unwrap() = %v, want nil", got)
-	}
+func decodePayload(t *testing.T, body []byte) payloadMap {
+	t.Helper()
 
-	cause := errors.New("socket closed")
-	err := &responseWriteError{cause: cause}
-	if got := err.Error(); got != "resp: write response failed: socket closed" {
-		t.Fatalf("Error() = %q", got)
+	var payload payloadMap
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	if got := err.Unwrap(); !errors.Is(got, cause) {
-		t.Fatalf("Unwrap() = %v, want %v", got, cause)
+	return payload
+}
+
+func assertRecorderHasNoBodyOrContentType(t *testing.T, rr *httptest.ResponseRecorder) {
+	t.Helper()
+
+	if rr.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", rr.Body.String())
+	}
+	if got := rr.Header().Get("Content-Type"); got != "" {
+		t.Fatalf("Content-Type = %q, want empty", got)
 	}
 }
 
-// 即使底层写错误本身的 Error() 实现不安全，responseWriteError 也不应再 panic。
-func TestResponseWriteErrorErrorRecoversFromCausePanic(t *testing.T) {
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			t.Fatalf("responseWriteError.Error() panicked: %v", recovered)
+func assertUnsupportedTypeError(t *testing.T, err error) *json.UnsupportedTypeError {
+	t.Helper()
+
+	if err == nil {
+		t.Fatal("expected unsupported type error, got nil")
+	}
+
+	var unsupportedErr *json.UnsupportedTypeError
+	if !errors.As(err, &unsupportedErr) {
+		t.Fatalf("error = %T, want *json.UnsupportedTypeError", err)
+	}
+	return unsupportedErr
+}
+
+func assertPublicErrorObject(t *testing.T, got any, want map[string]any) {
+	t.Helper()
+
+	gotMap, ok := got.(map[string]any)
+	if !ok {
+		t.Fatalf("error item = %#v, want object", got)
+	}
+	for key, wantValue := range want {
+		if gotValue := gotMap[key]; gotValue != wantValue {
+			t.Fatalf("error item %q = %#v, want %#v", key, gotValue, wantValue)
 		}
-	}()
-
-	got := (&responseWriteError{cause: panicWriteCause{}}).Error()
-	if !strings.Contains(got, "resp: write response failed: panic calling Error()") {
-		t.Fatalf("Error() = %q, want panic fallback text", got)
+	}
+	if len(gotMap) != len(want) {
+		t.Fatalf("error item = %#v, want only %#v", gotMap, want)
 	}
 }
 
-// 底层错误文本为空白时，responseWriteError 也应回退到稳定默认文案。
-func TestResponseWriteErrorErrorFallsBackOnBlankCause(t *testing.T) {
-	if got := (&responseWriteError{cause: blankWriteCause{}}).Error(); got != "resp: write response failed" {
-		t.Fatalf("Error() = %q, want fallback text", got)
-	}
+func stringLen(body []byte) string {
+	return strconv.Itoa(len(body))
 }

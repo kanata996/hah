@@ -12,19 +12,11 @@
 //   - 使用 JSON / JSONBlob 进行底层 JSON 输出
 //   - 使用 OK / Created / NoContent 写成功响应
 //   - 使用 WriteError 写结构化错误响应
-//   - 使用 ErrorResponder 在 5xx 场景输出独立错误日志，并按需接入 request log
 //   - 与 errx.HTTPError 配合，按统一错误模型写回响应
 //
 // 公开 API：
 //   - 成功响应入口：JSON、JSONBlob、OK、Created、NoContent
 //   - 错误响应入口：WriteError
-//   - 自定义错误响应器：ErrorResponder、NewErrorResponder
-//   - ErrorResponder 公开字段：Logger、AsHTTPError、ContextAttrs、
-//     AnnotateRequestLog、RequestLogAttrs
-//   - ErrorResponder 公开方法：Respond
-//   - 公开写回降级类型：ErrorWriteDegraded
-//   - ErrorWriteDegraded 公开字段：Cause、PreservedPublicResponse
-//   - ErrorWriteDegraded 公开方法：Error、Unwrap
 //
 // 新增、移除、重命名以上导出符号，或改变其公开语义时，应同步更新本注释与 CHANGELOG。
 package resp

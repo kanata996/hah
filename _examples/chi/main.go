@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -127,36 +128,74 @@ type app struct {
 }
 
 type listAccountsRequest struct {
-	OrgID string `param:"org_id" validate:"required"`
-	Limit int    `query:"limit" validate:"min=1,max=100"`
+	Limit int `query:"limit"`
 }
 
-func (r *listAccountsRequest) Normalize() {
+func (r *listAccountsRequest) normalize() {
 	if r.Limit == 0 {
 		r.Limit = 20
 	}
 }
 
 type createAccountRequest struct {
-	OrgID string `param:"org_id" validate:"required"`
-	Name  string `json:"name" validate:"required,min=3,max=64"`
+	Name string `json:"name"`
 }
 
-func (r *createAccountRequest) Normalize() {
+func (r *createAccountRequest) normalize() {
 	r.Name = strings.TrimSpace(r.Name)
 }
 
-type accountPathRequest struct {
-	OrgID     string `param:"org_id" validate:"required"`
-	AccountID string `param:"account_id" validate:"required"`
+func validateListAccountsRequest(req *listAccountsRequest) error {
+	req.normalize()
+	if req.Limit < 1 || req.Limit > 100 {
+		return reqx.InvalidRequest(reqx.Violation{
+			Field:  "limit",
+			In:     reqx.ViolationInQuery,
+			Detail: "must be between 1 and 100",
+		})
+	}
+	return nil
 }
 
-type deleteAccountHeaders struct {
-	Actor string `header:"x-actor" validate:"required"`
+func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) error {
+	if err := hah.RequireBody(r); err != nil {
+		return err
+	}
+
+	req.normalize()
+	switch nameLen := utf8.RuneCountInString(req.Name); {
+	case req.Name == "":
+		return reqx.InvalidRequest(reqx.Violation{
+			Field: "name",
+			In:    reqx.ViolationInBody,
+			Code:  reqx.ViolationCodeRequired,
+		})
+	case nameLen < 3:
+		return reqx.InvalidRequest(reqx.Violation{
+			Field:  "name",
+			In:     reqx.ViolationInBody,
+			Detail: "must be at least 3 characters",
+		})
+	case nameLen > 64:
+		return reqx.InvalidRequest(reqx.Violation{
+			Field:  "name",
+			In:     reqx.ViolationInBody,
+			Detail: "must be at most 64 characters",
+		})
+	default:
+		return nil
+	}
 }
 
-func (r *deleteAccountHeaders) Normalize() {
-	r.Actor = strings.TrimSpace(r.Actor)
+func validateDeleteActor(actor string) error {
+	if strings.TrimSpace(actor) == "" {
+		return reqx.InvalidRequest(reqx.Violation{
+			Field: "X-Actor",
+			In:    reqx.ViolationInHeader,
+			Code:  reqx.ViolationCodeRequired,
+		})
+	}
+	return nil
 }
 
 func newRouter(store *accountStore) http.Handler {
@@ -243,19 +282,39 @@ func bridgeChiPathValues(r *http.Request) {
 	}
 }
 
+func writeError(w http.ResponseWriter, r *http.Request, err error) {
+	if err == nil {
+		return
+	}
+
+	if writeErr := hah.WriteError(w, err); writeErr != nil {
+		slog.ErrorContext(r.Context(), "write error response failed", "err", writeErr)
+	}
+}
+
 func (a *app) listAccounts(w http.ResponseWriter, r *http.Request) {
 	bridgeChiPathValues(r)
 
+	orgID, err := hah.Path(r, "org_id").String().Required().Get()
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+
 	var req listAccountsRequest
-	if err := hah.BindAndValidate(r, &req); err != nil {
-		_ = hah.WriteError(w, r, err)
+	if err := hah.BindQuery(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := validateListAccountsRequest(&req); err != nil {
+		writeError(w, r, err)
 		return
 	}
 
 	payload := map[string]any{
-		"org_id": req.OrgID,
-		"count":  len(a.store.list(req.OrgID, 0)),
-		"items":  a.store.list(req.OrgID, req.Limit),
+		"org_id": orgID,
+		"count":  len(a.store.list(orgID, 0)),
+		"items":  a.store.list(orgID, req.Limit),
 	}
 	if requestID := middleware.GetReqID(r.Context()); requestID != "" {
 		payload["request_id"] = requestID
@@ -265,77 +324,95 @@ func (a *app) listAccounts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := hah.OK(w, payload); err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
 	}
 }
 
 func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
 	bridgeChiPathValues(r)
 
-	var req createAccountRequest
-	if err := hah.BindAndValidate(r, &req); err != nil {
-		_ = hah.WriteError(w, r, err)
+	orgID, err := hah.Path(r, "org_id").String().Required().Get()
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 
-	acct, err := a.store.create(req.OrgID, req.Name)
+	var req createAccountRequest
+	if err := hah.BindBody(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+	if err := validateCreateAccountRequest(r, &req); err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	acct, err := a.store.create(orgID, req.Name)
 	if err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
 		return
 	}
 
 	if err := hah.Created(w, acct); err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
 	}
 }
 
 func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
 	bridgeChiPathValues(r)
 
-	var req accountPathRequest
-	if err := hah.BindAndValidate(r, &req); err != nil {
-		_ = hah.WriteError(w, r, err)
+	orgID, err := hah.Path(r, "org_id").String().Required().Get()
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 
-	acct, err := a.store.get(req.OrgID, req.AccountID)
+	accountID, err := hah.Path(r, "account_id").String().Required().Get()
 	if err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
+		return
+	}
+
+	acct, err := a.store.get(orgID, accountID)
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 
 	if err := hah.OK(w, acct); err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
 	}
 }
 
 func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	bridgeChiPathValues(r)
 
-	var pathReq accountPathRequest
-	if err := hah.BindAndValidate(r, &pathReq); err != nil {
-		_ = hah.WriteError(w, r, err)
+	orgID, err := hah.Path(r, "org_id").String().Required().Get()
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 
-	var headers deleteAccountHeaders
-	if err := hah.BindHeaders(r, &headers); err != nil {
-		_ = hah.WriteError(w, r, err)
-		return
-	}
-	if err := reqx.Validate(r, &headers, reqx.SourceHeader); err != nil {
-		_ = hah.WriteError(w, r, err)
+	accountID, err := hah.Path(r, "account_id").String().Required().Get()
+	if err != nil {
+		writeError(w, r, err)
 		return
 	}
 
-	if err := a.store.delete(pathReq.OrgID, pathReq.AccountID); err != nil {
-		_ = hah.WriteError(w, r, err)
+	actor := strings.TrimSpace(r.Header.Get("X-Actor"))
+	if err := validateDeleteActor(actor); err != nil {
+		writeError(w, r, err)
 		return
 	}
 
-	w.Header().Set("X-Deleted-By", headers.Actor)
+	if err := a.store.delete(orgID, accountID); err != nil {
+		writeError(w, r, err)
+		return
+	}
+
+	w.Header().Set("X-Deleted-By", actor)
 	if err := hah.NoContent(w); err != nil {
-		_ = hah.WriteError(w, r, err)
+		writeError(w, r, err)
 	}
 }
 

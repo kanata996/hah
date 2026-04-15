@@ -1,18 +1,8 @@
 package resp
 
-// 测试清单：
-// - 标记说明：[✓] 已核对且已有真实覆盖；[x] 尚未完成，不得作为验收依据。
-// - [✓] `JSON` 在典型小型响应体上的基准性能。
-// - [✓] `JSONBlob` 直写原始 JSON 字节的基准性能。
-// - [✓] `WriteError` 在 4xx 校验错误场景下的基准性能。
-// - [✓] `WriteError` 在 5xx 服务端错误场景下的基准性能。
-
 import (
 	"errors"
-	"io"
-	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/kanata996/hah/errx"
@@ -105,11 +95,10 @@ func BenchmarkJSONBlob_Typical(b *testing.B) {
 func BenchmarkWriteError_ClientError422(b *testing.B) {
 	b.ReportAllocs()
 
-	req := httptest.NewRequest(http.MethodPost, "/accounts", nil)
 	w := &benchmarkResponseWriter{header: make(http.Header, 1)}
 
 	for b.Loop() {
-		if err := WriteError(w, req, benchmarkClientHTTPError); err != nil {
+		if err := WriteError(w, benchmarkClientHTTPError); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -118,23 +107,11 @@ func BenchmarkWriteError_ClientError422(b *testing.B) {
 func BenchmarkWriteError_ServerError500(b *testing.B) {
 	b.ReportAllocs()
 
-	restore := setBenchmarkDefaultLogger()
-	defer restore()
-
-	req := httptest.NewRequest(http.MethodGet, "/accounts/acct_123456", nil)
 	w := &benchmarkResponseWriter{header: make(http.Header, 1)}
 
 	for b.Loop() {
-		if err := WriteError(w, req, errBenchmarkServer); err != nil {
+		if err := WriteError(w, errBenchmarkServer); err != nil {
 			b.Fatal(err)
 		}
-	}
-}
-
-func setBenchmarkDefaultLogger() func() {
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(io.Discard, nil)))
-	return func() {
-		slog.SetDefault(previousDefault)
 	}
 }

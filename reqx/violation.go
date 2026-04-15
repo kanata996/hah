@@ -33,11 +33,10 @@ const (
 )
 
 const (
-	ViolationInBody    = "body"
-	ViolationInQuery   = "query"
-	ViolationInPath    = "path"
-	ViolationInHeader  = "header"
-	ViolationInRequest = "request"
+	ViolationInBody   = "body"
+	ViolationInQuery  = "query"
+	ViolationInPath   = "path"
+	ViolationInHeader = "header"
 )
 
 // Violation 描述单个请求字段违规。
