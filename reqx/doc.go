@@ -18,7 +18,8 @@
 // 典型用法：
 //   - 读取单个 path/query 参数时，优先使用 Path(...) / Query(...)
 //   - 绑定 query/body DTO 时，使用 BindQuery / BindBody 或根包 hah 的对应 facade
-//   - 需要返回统一 invalid_request 错误时，使用 InvalidRequest(...)
+//   - 需要返回统一 invalid_request 错误时，使用 InvalidRequest(errx.Violation{...})
+//     或根包 hah 的对应 facade
 //   - 需要显式要求 body 必填时，使用 RequireBody(...)
 //
 // 公开 API：
@@ -32,14 +33,8 @@
 //     UintParam、Uint64Param、BoolParam、Float64Param、DurationParam、
 //     UUIDParam、TimeParam、ValuesParam
 //   - 请求级规则 helper：RequireBody、InvalidRequest
-//   - 公开错误码常量：CodeInvalidRequest
 //   - 公开 body decode 错误码常量：CodeInvalidJSON、CodeUnsupportedMediaType、
 //     CodeRequestTooLarge
-//   - 公开违规模型：Violation（字段为 Field、In、Code、Detail）
-//   - 公开 violation code 常量：ViolationCodeInvalid、ViolationCodeRequired、
-//     ViolationCodeUnknown、ViolationCodeType、ViolationCodeMultiple
-//   - 公开 violation in 常量：ViolationInBody、ViolationInQuery、
-//     ViolationInPath、ViolationInHeader
 //
 // 新增、移除、重命名以上导出符号，或改变其公开语义时，应同步更新本注释与 CHANGELOG。
 //

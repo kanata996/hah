@@ -16,30 +16,39 @@ type HTTPError struct {
 	code string
 	// detail 是公开错误详情；缺省时会回退到稳定的标题文案。
 	detail string
-	// errors 是公开结构化错误详情列表；这里只做切片浅拷贝，不尝试深拷贝元素。
-	errors []any
+	// errors 是公开结构化错误详情列表；这里固定为 Violation 列表。
+	errors []Violation
 	// cause 仅用于内部错误链，不直接暴露给客户端。
 	cause error
 }
 
 // NewHTTPError 构造一个不带底层 cause 的公共 HTTP 错误。
-// 它会统一补齐默认 status/code/detail，并对 errors 做防御性浅拷贝。
-func NewHTTPError(status int, code, detail string, errors ...any) *HTTPError {
-	return NewHTTPErrorWithCause(status, code, detail, nil, errors...)
+// 它会统一补齐默认 status/code/detail。
+func NewHTTPError(status int, code, detail string) *HTTPError {
+	return NewHTTPErrorWithCause(status, code, detail, nil)
 }
 
 // NewHTTPErrorWithCause 基于给定 cause 构造公共 HTTP 错误。
 // 非法状态码会被归一化，缺省 code/detail 也会按状态码补全。
 // 这里在入口一次性做标准化，保证后续使用时不会因为原始输入脏数据而漂移。
-func NewHTTPErrorWithCause(status int, code, detail string, cause error, errors ...any) *HTTPError {
+func NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPError {
 	status = normalizeErrorStatus(status)
 	return &HTTPError{
 		status: status,
 		code:   normalizeErrorCode(status, code),
 		detail: normalizeErrorDetail(status, detail),
-		errors: cloneErrors(errors),
 		cause:  cause,
 	}
+}
+
+// WithViolations 绑定公开 violation 列表。
+// 调用方后续修改传入切片时，不会影响已构造的 HTTPError。
+func (e *HTTPError) WithViolations(violations []Violation) *HTTPError {
+	if e == nil {
+		return nil
+	}
+	e.errors = cloneViolations(violations)
+	return e
 }
 
 // Error 实现 error 接口。
@@ -108,59 +117,59 @@ func (e *HTTPError) Detail() string {
 
 // Errors 返回公开结构化错误详情列表的防御性浅拷贝。
 // 调用方修改返回切片时，不会影响已构造的 HTTPError。
-func (e *HTTPError) Errors() []any {
+func (e *HTTPError) Errors() []Violation {
 	if e == nil || len(e.errors) == 0 {
 		return nil
 	}
-	return cloneErrors(e.errors)
+	return cloneViolations(e.errors)
 }
 
 // BadRequest 构造 400 Bad Request 公共错误。
-func BadRequest(code, detail string, errors ...any) *HTTPError {
-	return NewHTTPError(http.StatusBadRequest, code, detail, errors...)
+func BadRequest(code, detail string) *HTTPError {
+	return NewHTTPError(http.StatusBadRequest, code, detail)
 }
 
 // Unauthorized 构造 401 Unauthorized 公共错误。
-func Unauthorized(code, detail string, errors ...any) *HTTPError {
-	return NewHTTPError(http.StatusUnauthorized, code, detail, errors...)
+func Unauthorized(code, detail string) *HTTPError {
+	return NewHTTPError(http.StatusUnauthorized, code, detail)
 }
 
 // Forbidden 构造 403 Forbidden 公共错误。
-func Forbidden(code, detail string, errors ...any) *HTTPError {
-	return NewHTTPError(http.StatusForbidden, code, detail, errors...)
+func Forbidden(code, detail string) *HTTPError {
+	return NewHTTPError(http.StatusForbidden, code, detail)
 }
 
 // NotFound 构造 404 Not Found 公共错误。
-func NotFound(code, detail string, errors ...any) *HTTPError {
-	return NewHTTPError(http.StatusNotFound, code, detail, errors...)
+func NotFound(code, detail string) *HTTPError {
+	return NewHTTPError(http.StatusNotFound, code, detail)
 }
 
 // MethodNotAllowed 构造 405 Method Not Allowed 公共错误。
-func MethodNotAllowed(code, detail string, errors ...any) *HTTPError {
-	return NewHTTPError(http.StatusMethodNotAllowed, code, detail, errors...)
+func MethodNotAllowed(code, detail string) *HTTPError {
+	return NewHTTPError(http.StatusMethodNotAllowed, code, detail)
 }
 
 // Conflict 构造 409 Conflict 公共错误。
-func Conflict(code, detail string, errors ...any) *HTTPError {
-	return NewHTTPError(http.StatusConflict, code, detail, errors...)
+func Conflict(code, detail string) *HTTPError {
+	return NewHTTPError(http.StatusConflict, code, detail)
 }
 
 // UnprocessableEntity 构造 422 Unprocessable Entity 公共错误。
-func UnprocessableEntity(code, detail string, errors ...any) *HTTPError {
-	return NewHTTPError(http.StatusUnprocessableEntity, code, detail, errors...)
+func UnprocessableEntity(code, detail string) *HTTPError {
+	return NewHTTPError(http.StatusUnprocessableEntity, code, detail)
 }
 
 // TooManyRequests 构造 429 Too Many Requests 公共错误。
-func TooManyRequests(code, detail string, errors ...any) *HTTPError {
-	return NewHTTPError(http.StatusTooManyRequests, code, detail, errors...)
+func TooManyRequests(code, detail string) *HTTPError {
+	return NewHTTPError(http.StatusTooManyRequests, code, detail)
 }
 
-// cloneErrors 返回 errors 的浅拷贝，避免调用方后续修改影响已构造的错误对象。
-func cloneErrors(errors []any) []any {
-	if len(errors) == 0 {
+// cloneViolations 返回 violations 的浅拷贝，避免调用方后续修改影响已构造的错误对象。
+func cloneViolations(violations []Violation) []Violation {
+	if len(violations) == 0 {
 		return nil
 	}
-	return slices.Clone(errors)
+	return slices.Clone(violations)
 }
 
 // normalizeErrorStatus 把非法或越界状态码收敛到 500。

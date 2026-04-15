@@ -130,35 +130,26 @@ func assertBadRequest(t *testing.T, err error) *errx.HTTPError {
 	return assertHTTPError(t, err, http.StatusBadRequest, "bad_request", "Bad Request")
 }
 
-func assertViolations(t *testing.T, err error) []Violation {
+func assertViolations(t *testing.T, err error) []errx.Violation {
 	t.Helper()
 
 	httpErr := assertHTTPError(
 		t,
 		err,
 		http.StatusUnprocessableEntity,
-		CodeInvalidRequest,
+		invalidRequestCode,
 		"request contains invalid fields",
 	)
 
-	details := httpErr.Errors()
-	violations := make([]Violation, 0, len(details))
-	for i, detail := range details {
-		violation, ok := detail.(Violation)
-		if !ok {
-			t.Fatalf("detail[%d] type = %T, want reqx.Violation", i, detail)
-		}
-		violations = append(violations, violation)
-	}
-	return violations
+	return httpErr.Errors()
 }
 
-func assertSingleViolation(t *testing.T, err error) Violation {
+func assertSingleViolation(t *testing.T, err error) errx.Violation {
 	t.Helper()
 
 	violations := assertViolations(t, err)
 	if len(violations) != 1 {
-		t.Fatalf("details len = %d, want 1", len(violations))
+		t.Fatalf("violations len = %d, want 1", len(violations))
 	}
 	return violations[0]
 }

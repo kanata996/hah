@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/kanata996/hah/errx"
 )
 
 func TestPath_SuccessPaths(t *testing.T) {
@@ -91,21 +92,21 @@ func TestPath_RequiredAndInvalidViolations(t *testing.T) {
 		req := requestWithPathParams(nil)
 
 		_, err := Path(req, "id").String().Required().Get()
-		assertRequiredViolationAt(t, err, "id", ViolationInPath)
+		assertRequiredViolationAt(t, err, "id", errx.ViolationInPath)
 	})
 
 	t.Run("invalid path uuid", func(t *testing.T) {
 		req := requestWithPathParams(map[string][]string{"id": {"not-a-uuid"}})
 
 		_, err := Path(req, "id").UUID().Get()
-		assertInvalidViolationAt(t, err, "id", ViolationInPath)
+		assertInvalidViolationAt(t, err, "id", errx.ViolationInPath)
 	})
 
 	t.Run("invalid path int", func(t *testing.T) {
 		req := requestWithPathParams(map[string][]string{"id": {"oops"}})
 
 		_, err := Path(req, "id").Int().Get()
-		assertInvalidViolationAt(t, err, "id", ViolationInPath)
+		assertInvalidViolationAt(t, err, "id", errx.ViolationInPath)
 	})
 
 	t.Run("undeclared or malformed wildcard remains missing", func(t *testing.T) {
@@ -129,7 +130,7 @@ func TestPath_RequiredAndInvalidViolations(t *testing.T) {
 				req.Pattern = tc.pattern
 
 				_, err := Path(req, tc.param).String().Required().Get()
-				assertRequiredViolationAt(t, err, tc.param, ViolationInPath)
+				assertRequiredViolationAt(t, err, tc.param, errx.ViolationInPath)
 			})
 		}
 	})

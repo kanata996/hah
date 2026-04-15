@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+
+	"github.com/kanata996/hah/errx"
 )
 
 var errInvalidParamValue = errors.New("invalid param value")
@@ -89,7 +91,7 @@ func (p *paramState[T]) resolveMissing(spec paramSpec) (T, error) {
 	case p.hasDefault:
 		return p.runChecks(spec, p.cloneValue(p.defaultValue))
 	case p.required:
-		return zero, InvalidRequest(newViolation(spec.name, spec.input, ViolationCodeRequired, ""))
+		return zero, InvalidRequest(newViolation(spec.name, spec.input, errx.ViolationCodeRequired, ""))
 	default:
 		return zero, nil
 	}
@@ -102,7 +104,7 @@ func (p *paramState[T]) runChecks(spec paramSpec, value T) (T, error) {
 			if !errors.Is(err, errInvalidParamValue) {
 				detail = strings.TrimSpace(err.Error())
 			}
-			return value, InvalidRequest(newViolation(spec.name, spec.input, ViolationCodeInvalid, detail))
+			return value, InvalidRequest(newViolation(spec.name, spec.input, errx.ViolationCodeInvalid, detail))
 		}
 	}
 	return value, nil
@@ -154,7 +156,7 @@ func (p *paramValue[T]) resolve() (T, error) {
 
 	value, err := p.parse(values[0])
 	if err != nil {
-		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, ViolationCodeInvalid, ""))
+		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.ViolationCodeInvalid, ""))
 	}
 
 	return p.state.runChecks(p.spec, value)
@@ -162,11 +164,11 @@ func (p *paramValue[T]) resolve() (T, error) {
 
 type multiParamValue[T any] struct {
 	spec  paramSpec
-	parse func([]string) (T, error)
+	parse func([]string) T
 	state paramState[T]
 }
 
-func newMultiParamValue[T any](spec paramSpec, parse func([]string) (T, error), clone func(T) T) multiParamValue[T] {
+func newMultiParamValue[T any](spec paramSpec, parse func([]string) T, clone func(T) T) multiParamValue[T] {
 	return multiParamValue[T]{
 		spec:  spec,
 		parse: parse,
@@ -200,11 +202,7 @@ func (p *multiParamValue[T]) resolve() (T, error) {
 		return p.state.resolveMissing(p.spec)
 	}
 
-	value, err := p.parse(values)
-	if err != nil {
-		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, ViolationCodeInvalid, ""))
-	}
-
+	value := p.parse(values)
 	return p.state.runChecks(p.spec, value)
 }
 

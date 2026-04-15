@@ -3,8 +3,24 @@ package hah
 import (
 	"net/http"
 
+	"github.com/kanata996/hah/errx"
 	"github.com/kanata996/hah/reqx"
 	"github.com/kanata996/hah/resp"
+)
+
+const (
+	ViolationCodeInvalid  = errx.ViolationCodeInvalid
+	ViolationCodeRequired = errx.ViolationCodeRequired
+	ViolationCodeUnknown  = errx.ViolationCodeUnknown
+	ViolationCodeType     = errx.ViolationCodeType
+	ViolationCodeMultiple = errx.ViolationCodeMultiple
+)
+
+const (
+	ViolationInBody   = errx.ViolationInBody
+	ViolationInQuery  = errx.ViolationInQuery
+	ViolationInPath   = errx.ViolationInPath
+	ViolationInHeader = errx.ViolationInHeader
 )
 
 type (
@@ -12,10 +28,10 @@ type (
 	BindUnmarshaler = reqx.BindUnmarshaler
 	// BindMultipleUnmarshaler 允许字段一次性接收同名输入的全部值。
 	BindMultipleUnmarshaler = reqx.BindMultipleUnmarshaler
-	// PathParam 表示一个待解析的 path 单参数。
-	PathParam = reqx.PathParam
-	// QueryParam 表示一个待解析的 query 单参数。
-	QueryParam = reqx.QueryParam
+	// Violation 描述单个公开请求违规。
+	Violation = errx.Violation
+	// HTTPError 表示 HTTP 边界上的公共错误。
+	HTTPError = errx.HTTPError
 )
 
 // BindBody 只从请求 body 绑定数据。
@@ -32,12 +48,12 @@ func BindQuery(r *http.Request, target any) error {
 }
 
 // Path 创建 path 单参数读取与校验 builder。
-func Path(r *http.Request, name string) *PathParam {
+func Path(r *http.Request, name string) *reqx.PathParam {
 	return reqx.Path(r, name)
 }
 
 // Query 创建 query 单参数读取与校验 builder。
-func Query(r *http.Request, name string) *QueryParam {
+func Query(r *http.Request, name string) *reqx.QueryParam {
 	return reqx.Query(r, name)
 }
 
@@ -46,6 +62,21 @@ func Query(r *http.Request, name string) *QueryParam {
 // 它和 BindBody 共享同一个非破坏性 body 探测，因此可按调用方需要在绑定前后调用。
 func RequireBody(r *http.Request) error {
 	return reqx.RequireBody(r)
+}
+
+// InvalidRequest 生成统一的 invalid_request 错误包络。
+func InvalidRequest(violations ...Violation) error {
+	return reqx.InvalidRequest(violations...)
+}
+
+// NewHTTPError 构造一个不带底层 cause 的公共 HTTP 错误。
+func NewHTTPError(status int, code, detail string) *HTTPError {
+	return errx.NewHTTPError(status, code, detail)
+}
+
+// NewHTTPErrorWithCause 基于给定 cause 构造公共 HTTP 错误。
+func NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPError {
+	return errx.NewHTTPErrorWithCause(status, code, detail, cause)
 }
 
 // WriteError 按统一错误对象写回响应。

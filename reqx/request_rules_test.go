@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+
+	"github.com/kanata996/hah/errx"
 )
 
 type errorReadCloser struct {
@@ -44,7 +46,7 @@ func TestRequireBody(t *testing.T) {
 		req.ContentLength = 0
 
 		violation := assertSingleViolation(t, RequireBody(req))
-		if violation.Field != "body" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+		if violation.Field != "body" || violation.In != errx.ViolationInBody || violation.Code != errx.ViolationCodeRequired || violation.Detail != "is required" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -54,7 +56,7 @@ func TestRequireBody(t *testing.T) {
 		req.ContentLength = -1
 
 		violation := assertSingleViolation(t, RequireBody(req))
-		if violation.Field != "body" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+		if violation.Field != "body" || violation.In != errx.ViolationInBody || violation.Code != errx.ViolationCodeRequired || violation.Detail != "is required" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -80,33 +82,33 @@ func TestRequireBodyReadError(t *testing.T) {
 func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
 	testCases := []struct {
 		name string
-		in   Violation
-		want Violation
+		in   errx.Violation
+		want errx.Violation
 	}{
 		{
 			name: "default invalid",
-			in:   Violation{Field: "name"},
-			want: Violation{Field: "name", Code: ViolationCodeInvalid, Detail: "is invalid"},
+			in:   errx.Violation{Field: "name"},
+			want: errx.Violation{Field: "name", Code: errx.ViolationCodeInvalid, Detail: "is invalid"},
 		},
 		{
 			name: "required",
-			in:   Violation{Field: "body", In: ViolationInBody, Code: ViolationCodeRequired},
-			want: Violation{Field: "body", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"},
+			in:   errx.Violation{Field: "body", In: errx.ViolationInBody, Code: errx.ViolationCodeRequired},
+			want: errx.Violation{Field: "body", In: errx.ViolationInBody, Code: errx.ViolationCodeRequired, Detail: "is required"},
 		},
 		{
 			name: "unknown",
-			in:   Violation{Field: "extra", In: ViolationInQuery, Code: ViolationCodeUnknown},
-			want: Violation{Field: "extra", In: ViolationInQuery, Code: ViolationCodeUnknown, Detail: "unknown field"},
+			in:   errx.Violation{Field: "extra", In: errx.ViolationInQuery, Code: errx.ViolationCodeUnknown},
+			want: errx.Violation{Field: "extra", In: errx.ViolationInQuery, Code: errx.ViolationCodeUnknown, Detail: "unknown field"},
 		},
 		{
 			name: "type",
-			in:   Violation{Field: "limit", In: ViolationInBody, Code: ViolationCodeType},
-			want: Violation{Field: "limit", In: ViolationInBody, Code: ViolationCodeType, Detail: "has invalid type"},
+			in:   errx.Violation{Field: "limit", In: errx.ViolationInBody, Code: errx.ViolationCodeType},
+			want: errx.Violation{Field: "limit", In: errx.ViolationInBody, Code: errx.ViolationCodeType, Detail: "has invalid type"},
 		},
 		{
 			name: "multiple",
-			in:   Violation{Field: "X-Trace-Id", In: ViolationInHeader, Code: ViolationCodeMultiple},
-			want: Violation{Field: "X-Trace-Id", In: ViolationInHeader, Code: ViolationCodeMultiple, Detail: "must not be repeated"},
+			in:   errx.Violation{Field: "X-Trace-Id", In: errx.ViolationInHeader, Code: errx.ViolationCodeMultiple},
+			want: errx.Violation{Field: "X-Trace-Id", In: errx.ViolationInHeader, Code: errx.ViolationCodeMultiple, Detail: "must not be repeated"},
 		},
 	}
 
@@ -121,13 +123,13 @@ func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
 
 	t.Run("multiple violations are preserved in order", func(t *testing.T) {
 		got := assertViolations(t, InvalidRequest(
-			Violation{Field: "page", In: ViolationInQuery},
-			Violation{Field: "body", In: ViolationInBody, Code: ViolationCodeRequired},
+			errx.Violation{Field: "page", In: errx.ViolationInQuery},
+			errx.Violation{Field: "body", In: errx.ViolationInBody, Code: errx.ViolationCodeRequired},
 		))
 
-		want := []Violation{
-			{Field: "page", In: ViolationInQuery, Code: ViolationCodeInvalid, Detail: "is invalid"},
-			{Field: "body", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"},
+		want := []errx.Violation{
+			{Field: "page", In: errx.ViolationInQuery, Code: errx.ViolationCodeInvalid, Detail: "is invalid"},
+			{Field: "body", In: errx.ViolationInBody, Code: errx.ViolationCodeRequired, Detail: "is required"},
 		}
 		if len(got) != len(want) {
 			t.Fatalf("violations len = %d, want %d", len(got), len(want))

@@ -557,8 +557,8 @@ func (p *TimeParam) Get() (time.Time, error) {
 	return getParam(&p.value)
 }
 
-func parseRawValues(values []string) ([]string, error) {
-	return cloneStringSlice(values), nil
+func parseRawValues(values []string) []string {
+	return cloneStringSlice(values)
 }
 
 func parseStringValue(value string) (string, error) {

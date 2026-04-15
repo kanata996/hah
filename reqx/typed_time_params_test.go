@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/kanata996/hah/errx"
 )
 
 func TestTimeParam_UnixBuilders(t *testing.T) {
@@ -77,7 +79,7 @@ func TestTimeParam_UnixBuilders(t *testing.T) {
 			Default(def).
 			Before(def.Add(-time.Millisecond)).
 			Get()
-		assertInvalidViolationAt(t, err, "ms", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "ms", errx.ViolationInQuery)
 	})
 
 	t.Run("unix time default check invalid uses custom detail", func(t *testing.T) {
@@ -90,10 +92,10 @@ func TestTimeParam_UnixBuilders(t *testing.T) {
 				return errors.New("default unix time must be rejected")
 			}).
 			Get()
-		assertViolation(t, err, Violation{
+		assertViolation(t, err, errx.Violation{
 			Field:  "sec",
-			In:     ViolationInQuery,
-			Code:   ViolationCodeInvalid,
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
 			Detail: "default unix time must be rejected",
 		})
 	})
@@ -102,7 +104,7 @@ func TestTimeParam_UnixBuilders(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items", nil)
 
 		_, err := Query(req, "sec").UnixTime().Required().Get()
-		assertRequiredViolationAt(t, err, "sec", ViolationInQuery)
+		assertRequiredViolationAt(t, err, "sec", errx.ViolationInQuery)
 	})
 
 	t.Run("unix milli before invalid returns query violation", func(t *testing.T) {
@@ -111,21 +113,21 @@ func TestTimeParam_UnixBuilders(t *testing.T) {
 		_, err := Query(req, "ms").UnixMilliTime().
 			Before(time.Date(2024, 4, 12, 8, 30, 0, 122*int(time.Millisecond), time.UTC)).
 			Get()
-		assertInvalidViolationAt(t, err, "ms", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "ms", errx.ViolationInQuery)
 	})
 
 	t.Run("unix time invalid width returns query violation", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?sec=123", nil)
 
 		_, err := Query(req, "sec").UnixTime().Get()
-		assertInvalidViolationAt(t, err, "sec", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "sec", errx.ViolationInQuery)
 	})
 
 	t.Run("unix milli non numeric returns query violation", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?ms=abcdefghijklm", nil)
 
 		_, err := Query(req, "ms").UnixMilliTime().Get()
-		assertInvalidViolationAt(t, err, "ms", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "ms", errx.ViolationInQuery)
 	})
 }
 
@@ -166,22 +168,22 @@ func TestDurationParam_ValidationAndRangeErrors(t *testing.T) {
 				return errors.New("default duration must be rejected")
 			}).
 			Get()
-		assertViolation(t, err, Violation{
+		assertViolation(t, err, errx.Violation{
 			Field:  "timeout",
-			In:     ViolationInQuery,
-			Code:   ViolationCodeInvalid,
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
 			Detail: "default duration must be rejected",
 		})
 	})
 
 	t.Run("duration min invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?timeout=1s", nil), "timeout").Duration().Min(2 * time.Second).Get()
-		assertInvalidViolationAt(t, err, "timeout", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "timeout", errx.ViolationInQuery)
 	})
 
 	t.Run("duration max invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?timeout=3s", nil), "timeout").Duration().Max(2 * time.Second).Get()
-		assertInvalidViolationAt(t, err, "timeout", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "timeout", errx.ViolationInQuery)
 	})
 
 	t.Run("duration max then min conflict", func(t *testing.T) {
@@ -196,7 +198,7 @@ func TestDurationParam_ValidationAndRangeErrors(t *testing.T) {
 
 	t.Run("duration parse invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?timeout=soon", nil), "timeout").Duration().Get()
-		assertInvalidViolationAt(t, err, "timeout", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "timeout", errx.ViolationInQuery)
 	})
 }
 
@@ -233,7 +235,7 @@ func TestTimeParam_ValidationAndRangeErrors(t *testing.T) {
 			Default(at).
 			After(at.Add(time.Minute)).
 			Get()
-		assertInvalidViolationAt(t, err, "at", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "at", errx.ViolationInQuery)
 	})
 
 	t.Run("time after invalid", func(t *testing.T) {
@@ -241,7 +243,7 @@ func TestTimeParam_ValidationAndRangeErrors(t *testing.T) {
 		at := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
 
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?at="+from.Format(time.RFC3339), nil), "at").Time().After(at).Get()
-		assertInvalidViolationAt(t, err, "at", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "at", errx.ViolationInQuery)
 	})
 
 	t.Run("time before invalid", func(t *testing.T) {
@@ -249,7 +251,7 @@ func TestTimeParam_ValidationAndRangeErrors(t *testing.T) {
 		to := time.Date(2026, 4, 13, 11, 0, 0, 0, time.UTC)
 
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?at="+to.Format(time.RFC3339), nil), "at").Time().Before(at).Get()
-		assertInvalidViolationAt(t, err, "at", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "at", errx.ViolationInQuery)
 	})
 
 	t.Run("time before then after conflict", func(t *testing.T) {
@@ -270,6 +272,6 @@ func TestTimeParam_ValidationAndRangeErrors(t *testing.T) {
 
 	t.Run("time parse invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?at=not-a-time", nil), "at").Time().Get()
-		assertInvalidViolationAt(t, err, "at", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "at", errx.ViolationInQuery)
 	})
 }

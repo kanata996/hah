@@ -2,6 +2,8 @@ package reqx
 
 import (
 	"net/http"
+
+	"github.com/kanata996/hah/errx"
 )
 
 // 本文件负责请求输入辅助错误与 body-required helper。
@@ -11,7 +13,7 @@ import (
 //   - RequireBody helper，用于显式声明 body-required 契约
 
 // InvalidRequest 生成统一的 invalid_request 错误包络。
-func InvalidRequest(violations ...Violation) error {
+func InvalidRequest(violations ...errx.Violation) error {
 	return invalidFieldsError(violations)
 }
 
@@ -33,9 +35,9 @@ func RequireBody(r *http.Request) error {
 		return nil
 	}
 
-	return InvalidRequest(Violation{
+	return InvalidRequest(errx.Violation{
 		Field: "body",
-		In:    ViolationInBody,
-		Code:  ViolationCodeRequired,
+		In:    errx.ViolationInBody,
+		Code:  errx.ViolationCodeRequired,
 	})
 }

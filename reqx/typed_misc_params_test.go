@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/kanata996/hah/errx"
 )
 
 func TestBoolParam_ValidationAndErrors(t *testing.T) {
@@ -44,17 +45,17 @@ func TestBoolParam_ValidationAndErrors(t *testing.T) {
 				return errors.New("default bool must be rejected")
 			}).
 			Get()
-		assertViolation(t, err, Violation{
+		assertViolation(t, err, errx.Violation{
 			Field:  "active",
-			In:     ViolationInQuery,
-			Code:   ViolationCodeInvalid,
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
 			Detail: "default bool must be rejected",
 		})
 	})
 
 	t.Run("bool parse invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?active=maybe", nil), "active").Bool().Get()
-		assertInvalidViolationAt(t, err, "active", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "active", errx.ViolationInQuery)
 	})
 }
 
@@ -77,10 +78,10 @@ func TestUUIDParam_ValidationAndErrors(t *testing.T) {
 				return errors.New("default uuid must be rejected")
 			}).
 			Get()
-		assertViolation(t, err, Violation{
+		assertViolation(t, err, errx.Violation{
 			Field:  "id",
-			In:     ViolationInQuery,
-			Code:   ViolationCodeInvalid,
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
 			Detail: "default uuid must be rejected",
 		})
 	})
@@ -98,6 +99,6 @@ func TestUUIDParam_ValidationAndErrors(t *testing.T) {
 
 	t.Run("uuid parse invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?id=oops", nil), "id").UUID().Get()
-		assertInvalidViolationAt(t, err, "id", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "id", errx.ViolationInQuery)
 	})
 }

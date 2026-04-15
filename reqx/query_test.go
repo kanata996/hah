@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kanata996/hah/errx"
 )
 
 func TestQuery_SuccessPaths(t *testing.T) {
@@ -73,21 +75,21 @@ func TestQuery_RequiredAndInvalidViolations(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items", nil)
 
 		_, err := Query(req, "page").Int().Required().Get()
-		assertRequiredViolationAt(t, err, "page", ViolationInQuery)
+		assertRequiredViolationAt(t, err, "page", errx.ViolationInQuery)
 	})
 
 	t.Run("invalid query int", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?page=oops", nil)
 
 		_, err := Query(req, "page").Int().Get()
-		assertInvalidViolationAt(t, err, "page", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "page", errx.ViolationInQuery)
 	})
 
 	t.Run("duplicate query validates first value", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?page=oops&page=3", nil)
 
 		_, err := Query(req, "page").Int().Get()
-		assertInvalidViolationAt(t, err, "page", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "page", errx.ViolationInQuery)
 	})
 
 	t.Run("check failure uses custom detail", func(t *testing.T) {
@@ -99,10 +101,10 @@ func TestQuery_RequiredAndInvalidViolations(t *testing.T) {
 			}
 			return nil
 		}).Get()
-		assertViolation(t, err, Violation{
+		assertViolation(t, err, errx.Violation{
 			Field:  "page",
-			In:     ViolationInQuery,
-			Code:   ViolationCodeInvalid,
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
 			Detail: "must be even",
 		})
 	})
@@ -235,7 +237,7 @@ func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items", nil)
 
 		_, err := Query(req, "tag").Values().Required().Get()
-		assertRequiredViolationAt(t, err, "tag", ViolationInQuery)
+		assertRequiredViolationAt(t, err, "tag", errx.ViolationInQuery)
 	})
 
 	t.Run("check failure uses custom detail", func(t *testing.T) {
@@ -247,10 +249,10 @@ func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
 			}
 			return nil
 		}).Get()
-		assertViolation(t, err, Violation{
+		assertViolation(t, err, errx.Violation{
 			Field:  "tag",
-			In:     ViolationInQuery,
-			Code:   ViolationCodeInvalid,
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
 			Detail: "multi value tag is not allowed",
 		})
 	})
@@ -298,7 +300,7 @@ func TestQueryBuilder_UsageAndOptionalBehavior(t *testing.T) {
 		}
 
 		_, err = Query(req, "name").String().Required().Get()
-		assertRequiredViolationAt(t, err, "name", ViolationInQuery)
+		assertRequiredViolationAt(t, err, "name", errx.ViolationInQuery)
 	})
 
 	t.Run("default then required conflict", func(t *testing.T) {
@@ -319,7 +321,7 @@ func assertUsageErrorContains(t *testing.T, err error, want string) {
 	}
 }
 
-func assertViolation(t *testing.T, err error, want Violation) {
+func assertViolation(t *testing.T, err error, want errx.Violation) {
 	t.Helper()
 
 	if got := assertSingleViolation(t, err); got != want {
@@ -330,10 +332,10 @@ func assertViolation(t *testing.T, err error, want Violation) {
 func assertInvalidViolationAt(t *testing.T, err error, field, in string) {
 	t.Helper()
 
-	assertViolation(t, err, Violation{
+	assertViolation(t, err, errx.Violation{
 		Field:  field,
 		In:     in,
-		Code:   ViolationCodeInvalid,
+		Code:   errx.ViolationCodeInvalid,
 		Detail: "is invalid",
 	})
 }
@@ -341,10 +343,10 @@ func assertInvalidViolationAt(t *testing.T, err error, field, in string) {
 func assertRequiredViolationAt(t *testing.T, err error, field, in string) {
 	t.Helper()
 
-	assertViolation(t, err, Violation{
+	assertViolation(t, err, errx.Violation{
 		Field:  field,
 		In:     in,
-		Code:   ViolationCodeRequired,
+		Code:   errx.ViolationCodeRequired,
 		Detail: "is required",
 	})
 }

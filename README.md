@@ -11,7 +11,7 @@
 ## 特性
 
 - 面向 `net/http` 设计，保留标准 handler 和 router 控制权
-- 以 `reqx.Path(...)` / `reqx.Query(...)` 作为请求侧核心 API，直接读取 path/query 参数
+- 以 `hah.Path(...)` / `hah.Query(...)` 作为默认请求侧 API，直接读取 path/query 参数
 - 支持把 query、body `Bind` 到 DTO
 - 聚焦 HTTP 输入绑定与边界错误，不内建 validation engine
 - 把常见请求违规收敛为稳定的公开 HTTP 错误
@@ -51,7 +51,7 @@ import (
 
 仓库分成四个包：
 
-- `hah`：根包 facade，聚合常用的 request helper、绑定与响应写回入口
+- `hah`：根包 facade，聚合常用的 request helper、绑定、invalid-request helper、公共错误模型入口与响应写回入口
 - `reqx`：输入侧核心包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`RequireBody`、`InvalidRequest` 和公开 violations
 - `errx`：共享公共 HTTP 错误模型
 - `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
@@ -60,17 +60,18 @@ import (
 
 当前设计里，最核心的边界表面是两条线：
 
-- 请求侧：`reqx.Path(...)` / `reqx.Query(...)`
-- 响应侧：`resp.WriteError(...)` / `resp.OK(...)` / `resp.Created(...)` / `resp.NoContent(...)`
+- 请求侧：`hah.Path(...)` / `hah.Query(...)`
+- 响应侧：`hah.WriteError(...)` / `hah.OK(...)` / `hah.Created(...)` / `hah.NoContent(...)`
 
-其中 `reqx.BindQuery` / `reqx.BindBody` 与对应的根包 facade，是同一输入侧 API 中面向 DTO 的补充能力。后续如果继续演进，默认应优先稳定 `Path / Query` 这条核心主路径的语义和用法。
+其中 `reqx.BindQuery` / `reqx.BindBody` 与对应的根包 facade，是同一输入侧 API 中面向 DTO 的补充能力。`reqx` / `errx` 仍然承载底层契约，但多数 handler 默认可以只导入 `hah`。
 
 ## 适用范围
 
 `hah` 负责：
 
 - 绑定 query/body 到结构体
-- 提供 `reqx.RequireBody(...)` / `reqx.InvalidRequest(...)` 这类显式输入 helper
+- 提供 `hah.RequireBody(...)` / `hah.InvalidRequest(...)` 这类显式输入 helper
+- 暴露 `hah.Violation`、`hah.HTTPError`、`hah.NewHTTPError(...)` 等常见公共错误模型入口
 - 把常见请求违规收敛成稳定的公开 HTTP 错误
 - 写回标准 JSON 成功响应
 - 写回 `application/problem+json` 错误响应
@@ -95,7 +96,6 @@ import (
 	"strings"
 
 	"github.com/kanata996/hah"
-	"github.com/kanata996/hah/reqx"
 )
 
 type createAccountRequest struct {
@@ -109,10 +109,10 @@ func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) er
 
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
-		return reqx.InvalidRequest(reqx.Violation{
+		return hah.InvalidRequest(hah.Violation{
 			Field: "name",
-			In:    reqx.ViolationInBody,
-			Code:  reqx.ViolationCodeRequired,
+			In:    hah.ViolationInBody,
+			Code:  hah.ViolationCodeRequired,
 		})
 	}
 	return nil
@@ -164,6 +164,11 @@ func main() {
 - `BindBody`
 - `BindQuery`
 - `RequireBody`
+- `InvalidRequest`
+- `Violation`
+- `HTTPError`
+- `NewHTTPError`
+- `NewHTTPErrorWithCause`
 - `WriteError`
 - `JSON`
 - `JSONBlob`
@@ -175,13 +180,16 @@ func main() {
 
 - `hah.BindQuery` / `hah.BindBody`
 - `reqx.BindQuery` / `reqx.BindBody`
-- `reqx.RequireBody(...)` / `reqx.InvalidRequest(...)`
+- `hah.RequireBody(...)` / `hah.InvalidRequest(...)`
+- `hah.NewHTTPError(...)` / `hah.NewHTTPErrorWithCause(...)`
 
 `hah` 只负责把 HTTP 输入绑定到 DTO，不负责选择 validation 方式。绑定完成后，你可以：
 
-- 手写校验函数，再返回 `reqx.InvalidRequest(...)`
+- 手写校验函数，再返回 `hah.InvalidRequest(...)`
 - 继续调用你自己的 `validator/v10`、`ozzo-validation` 或其他库
 - 把 DTO 映射到应用层命令，再让应用层做校验
+
+如果你需要更完整的错误构造器族或更底层的输入辅助类型，再直接导入 `errx` / `reqx`。
 
 单字段 request helper 的边界：
 
@@ -235,7 +243,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 
 默认场景直接用 `WriteError(...)` 即可。
 
-`WriteError(...)` 的返回值表示响应边界自身异常。比如公开错误对象无法编码，或错误响应写出失败。生产代码通常至少要记录这个错误。
+`WriteError(...)` 的返回值表示响应边界自身异常，例如错误响应写出失败。生产代码通常至少要记录这个错误。
 
 ```go
 if writeErr := hah.WriteError(w, err); writeErr != nil {

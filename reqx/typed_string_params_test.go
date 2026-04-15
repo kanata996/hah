@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"testing"
+
+	"github.com/kanata996/hah/errx"
 )
 
 func TestPathTypedParams_DirectCoverage(t *testing.T) {
@@ -34,7 +36,7 @@ func TestPathTypedParams_DirectCoverage(t *testing.T) {
 			Default(1).
 			Min(2).
 			Get()
-		assertInvalidViolationAt(t, err, "page", ViolationInPath)
+		assertInvalidViolationAt(t, err, "page", errx.ViolationInPath)
 	})
 
 	t.Run("required default conflict", func(t *testing.T) {
@@ -70,7 +72,7 @@ func TestStringParam_ValidationAndUsageErrors(t *testing.T) {
 			Default("pending").
 			OneOf("open", "closed").
 			Get()
-		assertInvalidViolationAt(t, err, "status", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "status", errx.ViolationInQuery)
 	})
 
 	t.Run("default match invalid", func(t *testing.T) {
@@ -78,7 +80,7 @@ func TestStringParam_ValidationAndUsageErrors(t *testing.T) {
 			Default("GO").
 			Match(regexp.MustCompile(`^[a-z]+$`)).
 			Get()
-		assertInvalidViolationAt(t, err, "slug", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "slug", errx.ViolationInQuery)
 	})
 
 	t.Run("default check invalid uses custom detail", func(t *testing.T) {
@@ -88,10 +90,10 @@ func TestStringParam_ValidationAndUsageErrors(t *testing.T) {
 				return errors.New("default must be rejected")
 			}).
 			Get()
-		assertViolation(t, err, Violation{
+		assertViolation(t, err, errx.Violation{
 			Field:  "name",
-			In:     ViolationInQuery,
-			Code:   ViolationCodeInvalid,
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
 			Detail: "default must be rejected",
 		})
 	})
@@ -108,12 +110,12 @@ func TestStringParam_ValidationAndUsageErrors(t *testing.T) {
 
 	t.Run("min len invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=g", nil), "name").String().MinLen(2).Get()
-		assertInvalidViolationAt(t, err, "name", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "name", errx.ViolationInQuery)
 	})
 
 	t.Run("max len invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=golang", nil), "name").String().MaxLen(3).Get()
-		assertInvalidViolationAt(t, err, "name", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "name", errx.ViolationInQuery)
 	})
 
 	t.Run("negative min len", func(t *testing.T) {
@@ -128,7 +130,7 @@ func TestStringParam_ValidationAndUsageErrors(t *testing.T) {
 
 	t.Run("one-of invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?status=pending", nil), "status").String().OneOf("open", "closed").Get()
-		assertInvalidViolationAt(t, err, "status", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "status", errx.ViolationInQuery)
 	})
 
 	t.Run("nil match pattern", func(t *testing.T) {
@@ -138,6 +140,6 @@ func TestStringParam_ValidationAndUsageErrors(t *testing.T) {
 
 	t.Run("match invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?slug=GO", nil), "slug").String().Match(regexp.MustCompile(`^[a-z]+$`)).Get()
-		assertInvalidViolationAt(t, err, "slug", ViolationInQuery)
+		assertInvalidViolationAt(t, err, "slug", errx.ViolationInQuery)
 	})
 }

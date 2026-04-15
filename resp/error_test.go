@@ -22,8 +22,9 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 		http.StatusUnprocessableEntity,
 		"",
 		"",
-		map[string]any{"field": "name", "code": "required"},
-	))
+	).WithViolations([]errx.Violation{
+		{Field: "name", Code: "required", Detail: "is required"},
+	}))
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
@@ -53,8 +54,9 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 		t.Fatalf("errors = %#v, want 1 item", body["errors"])
 	}
 	assertPublicErrorObject(t, errors[0], map[string]any{
-		"field": "name",
-		"code":  "required",
+		"field":  "name",
+		"code":   "required",
+		"detail": "is required",
 	})
 }
 
@@ -68,8 +70,9 @@ func TestWriteErrorPreservesExplicitPublicFieldsFromWrappedHTTPError(t *testing.
 			http.StatusBadRequest,
 			"invalid_json",
 			"payload invalid",
-			map[string]any{"field": "name", "code": "required"},
-		),
+		).WithViolations([]errx.Violation{
+			{Field: "name", Code: "required", Detail: "is required"},
+		}),
 	))
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
@@ -90,12 +93,13 @@ func TestWriteErrorPreservesExplicitPublicFieldsFromWrappedHTTPError(t *testing.
 		t.Fatalf("errors = %#v, want 1 item", body["errors"])
 	}
 	assertPublicErrorObject(t, errors[0], map[string]any{
-		"field": "name",
-		"code":  "required",
+		"field":  "name",
+		"code":   "required",
+		"detail": "is required",
 	})
 }
 
-// 多个 details 对象应圆整进入 problem JSON 的 errors 数组。
+// 多个 violation 对象应圆整进入 problem JSON 的 errors 数组。
 func TestWriteErrorMultipleDetails(t *testing.T) {
 	rr := httptest.NewRecorder()
 
@@ -103,9 +107,10 @@ func TestWriteErrorMultipleDetails(t *testing.T) {
 		http.StatusUnprocessableEntity,
 		"validation_failed",
 		"request validation failed",
-		map[string]any{"field": "name", "code": "required"},
-		map[string]any{"field": "email", "code": "invalid"},
-	))
+	).WithViolations([]errx.Violation{
+		{Field: "name", Code: "required", Detail: "is required"},
+		{Field: "email", Code: "invalid", Detail: "is invalid"},
+	}))
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
@@ -120,12 +125,14 @@ func TestWriteErrorMultipleDetails(t *testing.T) {
 		t.Fatalf("errors = %#v, want 2 items", body["errors"])
 	}
 	assertPublicErrorObject(t, errors[0], map[string]any{
-		"field": "name",
-		"code":  "required",
+		"field":  "name",
+		"code":   "required",
+		"detail": "is required",
 	})
 	assertPublicErrorObject(t, errors[1], map[string]any{
-		"field": "email",
-		"code":  "invalid",
+		"field":  "email",
+		"code":   "invalid",
+		"detail": "is invalid",
 	})
 }
 
@@ -167,7 +174,9 @@ func TestWriteErrorRejectsNilWriter(t *testing.T) {
 // HEAD 请求写错误时仍走正常 Write 链路，但最终对外只保留状态和头语义。
 func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	expected := httptest.NewRecorder()
-	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "", "detail")
+	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
+		{Field: "name", Code: "required", Detail: "is required"},
+	})
 	if err := WriteError(expected, httpErr); err != nil {
 		t.Fatalf("WriteError() expected recorder error = %v", err)
 	}
@@ -289,20 +298,6 @@ func TestWriteErrorMapsUnknownErrorToInternalError(t *testing.T) {
 	if bytes.Contains(rr.Body.Bytes(), []byte("db timeout")) {
 		t.Fatalf("body leaked internal cause: %q", rr.Body.String())
 	}
-}
-
-// 公开 details 不可编码时，WriteError 直接返回错误，不再尝试降级写回。
-func TestWriteErrorRejectsUnencodableDetails(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	err := WriteError(rr, errx.NewHTTPError(
-		http.StatusBadRequest,
-		"bad_request",
-		"bad request",
-		func() {},
-	))
-	_ = assertUnsupportedTypeError(t, err)
-	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
 // resp 自己的写响应错误再次传回 WriteError 时，应直接原样返回，避免重复写。
