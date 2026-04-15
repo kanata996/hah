@@ -228,6 +228,16 @@ func TestTimeParam_ValidationAndRangeErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("time required default conflict short-circuits usage error", func(t *testing.T) {
+		at := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "at").Time().
+			Required().
+			Default(at).
+			Get()
+		assertUsageErrorContains(t, err, "required and default are mutually exclusive")
+	})
+
 	t.Run("time default still honors after", func(t *testing.T) {
 		at := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
 

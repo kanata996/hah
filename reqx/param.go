@@ -91,10 +91,6 @@ func (p *paramState[T]) addCheck(check func(T) error) {
 }
 
 func (p *paramState[T]) setNamedCheck(name string, check func(T) error) {
-	if check == nil {
-		panic("reqx: named check must not be nil")
-	}
-
 	filtered := p.checks[:0]
 	for _, existing := range p.checks {
 		if existing.name == name {

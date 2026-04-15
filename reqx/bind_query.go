@@ -258,11 +258,6 @@ func queryBindingMayMutateField(field reflect.Value, formatTag string) bool {
 	if _, ok := fieldValue.(encoding.TextUnmarshaler); ok {
 		return true
 	}
-	if formatTag != "" {
-		if _, ok := fieldValue.(*time.Time); ok {
-			return true
-		}
-	}
 
 	return false
 }
