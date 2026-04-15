@@ -274,4 +274,57 @@ func TestTimeParam_ValidationAndRangeErrors(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?at=not-a-time", nil), "at").Time().Get()
 		assertInvalidViolationAt(t, err, "at", errx.ViolationInQuery)
 	})
+
+	t.Run("latest after overrides earlier after check", func(t *testing.T) {
+		at := time.Date(2026, 4, 13, 10, 30, 0, 0, time.UTC)
+
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?at="+at.Format(time.RFC3339), nil), "at").Time().
+			After(time.Date(2026, 4, 13, 11, 0, 0, 0, time.UTC)).
+			After(time.Date(2026, 4, 13, 9, 0, 0, 0, time.UTC)).
+			Before(time.Date(2026, 4, 13, 10, 45, 0, 0, time.UTC)).
+			Get()
+		if err != nil {
+			t.Fatalf("Time().After().After().Before().Get() error = %v", err)
+		}
+		if !got.Equal(at) {
+			t.Fatalf("time = %v, want %v", got, at)
+		}
+	})
+
+	t.Run("later time bounds can recover from earlier conflict", func(t *testing.T) {
+		at := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?at="+at.Format(time.RFC3339), nil), "at").Time().
+			After(time.Date(2026, 4, 13, 11, 0, 0, 0, time.UTC)).
+			Before(at).
+			After(time.Date(2026, 4, 13, 9, 0, 0, 0, time.UTC)).
+			Get()
+		if err != nil {
+			t.Fatalf("Time().After().Before().After().Get() error = %v", err)
+		}
+		if !got.Equal(at) {
+			t.Fatalf("time = %v, want %v", got, at)
+		}
+	})
+
+	t.Run("repeated after after check preserves custom detail precedence", func(t *testing.T) {
+		at := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?at="+at.Format(time.RFC3339), nil), "at").Time().
+			After(time.Date(2026, 4, 13, 9, 0, 0, 0, time.UTC)).
+			Check(func(value time.Time) error {
+				if value.Equal(at) {
+					return errors.New("custom time detail")
+				}
+				return nil
+			}).
+			After(time.Date(2026, 4, 13, 11, 0, 0, 0, time.UTC)).
+			Get()
+		assertViolation(t, err, errx.Violation{
+			Field:  "at",
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
+			Detail: "custom time detail",
+		})
+	})
 }

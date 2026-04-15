@@ -96,6 +96,48 @@ func TestSuccessWritersCooperateWithHeadLikeWriter(t *testing.T) {
 	}
 }
 
+func TestSuccessWritersRespectWrappedWriterContentLength(t *testing.T) {
+	cases := []struct {
+		name       string
+		write      func(http.ResponseWriter) error
+		wantStatus int
+	}{
+		{
+			name:       "OK",
+			write:      func(w http.ResponseWriter) error { return OK(w, map[string]any{"id": "u_1"}) },
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "Created",
+			write:      func(w http.ResponseWriter) error { return Created(w, map[string]any{"id": "u_1"}) },
+			wantStatus: http.StatusCreated,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inner := &headLikeResponseWriter{}
+			w := &transformingResponseWriter{
+				ResponseWriter: inner,
+				suffix:         []byte("\n"),
+			}
+
+			if err := tc.write(w); err != nil {
+				t.Fatalf("write() error = %v", err)
+			}
+			if inner.status != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", inner.status, tc.wantStatus)
+			}
+			if got := inner.Header().Get("Content-Length"); got != stringLen(w.lastWrite) {
+				t.Fatalf("Content-Length = %q, want %s", got, stringLen(w.lastWrite))
+			}
+			if w.writeCalls != 1 {
+				t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
+			}
+		})
+	}
+}
+
 func TestSuccessWritersRejectNilWriter(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -164,6 +206,8 @@ func TestSuccessWritersRejectUnsupportedValue(t *testing.T) {
 
 func TestNoContentWritesStatusOnly(t *testing.T) {
 	rr := httptest.NewRecorder()
+	rr.Header().Set("Content-Type", "application/json")
+	rr.Header().Set("Content-Length", "10")
 
 	if err := NoContent(rr); err != nil {
 		t.Fatalf("NoContent() error = %v", err)
@@ -176,6 +220,9 @@ func TestNoContentWritesStatusOnly(t *testing.T) {
 	}
 	if got := rr.Header().Get("Content-Type"); got != "" {
 		t.Fatalf("Content-Type = %q, want empty", got)
+	}
+	if got := rr.Header().Get("Content-Length"); got != "" {
+		t.Fatalf("Content-Length = %q, want empty", got)
 	}
 }
 

@@ -26,6 +26,12 @@ type writeCallbackResponseWriter struct {
 	http.ResponseWriter
 	writeCalls int
 }
+type transformingResponseWriter struct {
+	http.ResponseWriter
+	suffix     []byte
+	writeCalls int
+	lastWrite  []byte
+}
 
 func (w *failingWriter) Header() http.Header {
 	if w.header == nil {
@@ -72,6 +78,13 @@ func (w *headLikeResponseWriter) Write(p []byte) (int, error) {
 func (w *writeCallbackResponseWriter) Write(p []byte) (int, error) {
 	w.writeCalls++
 	return w.ResponseWriter.Write(p)
+}
+
+func (w *transformingResponseWriter) Write(p []byte) (int, error) {
+	w.writeCalls++
+	out := append(append([]byte(nil), p...), w.suffix...)
+	w.lastWrite = append([]byte(nil), out...)
+	return w.ResponseWriter.Write(out)
 }
 
 func decodePayload(t *testing.T, body []byte) payloadMap {

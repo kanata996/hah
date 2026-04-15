@@ -12,6 +12,11 @@ var errInvalidParamValue = errors.New("invalid param value")
 
 type paramLookupFunc func(r *http.Request, name string) ([]string, bool)
 
+type paramCheck[T any] struct {
+	name string
+	fn   func(T) error
+}
+
 type paramSpec struct {
 	r      *http.Request
 	name   string
@@ -39,7 +44,7 @@ type paramState[T any] struct {
 	required     bool
 	hasDefault   bool
 	defaultValue T
-	checks       []func(T) error
+	checks       []paramCheck[T]
 	usageErr     error
 }
 
@@ -82,7 +87,27 @@ func (p *paramState[T]) addCheck(check func(T) error) {
 		p.setUsageErr(usageErrorf("check must not be nil"))
 		return
 	}
-	p.checks = append(p.checks, check)
+	p.checks = append(p.checks, paramCheck[T]{fn: check})
+}
+
+func (p *paramState[T]) setNamedCheck(name string, check func(T) error) {
+	if check == nil {
+		panic("reqx: named check must not be nil")
+	}
+
+	filtered := p.checks[:0]
+	for _, existing := range p.checks {
+		if existing.name == name {
+			continue
+		}
+		filtered = append(filtered, existing)
+	}
+	p.checks = filtered
+
+	p.checks = append(p.checks, paramCheck[T]{
+		name: name,
+		fn:   check,
+	})
 }
 
 func (p *paramState[T]) resolveMissing(spec paramSpec) (T, error) {
@@ -99,7 +124,7 @@ func (p *paramState[T]) resolveMissing(spec paramSpec) (T, error) {
 
 func (p *paramState[T]) runChecks(spec paramSpec, value T) (T, error) {
 	for _, check := range p.checks {
-		if err := check(value); err != nil {
+		if err := check.fn(value); err != nil {
 			detail := ""
 			if !errors.Is(err, errInvalidParamValue) {
 				detail = strings.TrimSpace(err.Error())

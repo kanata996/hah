@@ -47,8 +47,9 @@ func (e *HTTPError) WithViolations(violations []Violation) *HTTPError {
 	if e == nil {
 		return nil
 	}
-	e.errors = cloneViolations(violations)
-	return e
+	cloned := *e
+	cloned.errors = cloneViolations(violations)
+	return &cloned
 }
 
 // Error 实现 error 接口。

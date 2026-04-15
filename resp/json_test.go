@@ -124,6 +124,48 @@ func TestJSONBodyWritersCooperateWithHeadLikeWriter(t *testing.T) {
 	}
 }
 
+func TestJSONBodyWritersRespectWrappedWriterContentLength(t *testing.T) {
+	cases := []struct {
+		name       string
+		write      func(http.ResponseWriter) error
+		wantStatus int
+	}{
+		{
+			name:       "JSON",
+			write:      func(w http.ResponseWriter) error { return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"}) },
+			wantStatus: http.StatusAccepted,
+		},
+		{
+			name:       "JSONBlob",
+			write:      func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`)) },
+			wantStatus: http.StatusAccepted,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			inner := &headLikeResponseWriter{}
+			w := &transformingResponseWriter{
+				ResponseWriter: inner,
+				suffix:         []byte("\n"),
+			}
+
+			if err := tc.write(w); err != nil {
+				t.Fatalf("write() error = %v", err)
+			}
+			if inner.status != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", inner.status, tc.wantStatus)
+			}
+			if got := inner.Header().Get("Content-Length"); got != stringLen(w.lastWrite) {
+				t.Fatalf("Content-Length = %q, want %s", got, stringLen(w.lastWrite))
+			}
+			if w.writeCalls != 1 {
+				t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
+			}
+		})
+	}
+}
+
 func TestJSONBodyWritersRejectNilWriter(t *testing.T) {
 	cases := []struct {
 		name    string

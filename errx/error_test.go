@@ -326,6 +326,53 @@ func TestHTTPErrorWithViolationsClonesInputAndReturnedSlices(t *testing.T) {
 	}
 }
 
+// WithViolations 应返回携带独立 violations 的新错误对象，不能污染模板对象或兄弟结果。
+func TestHTTPErrorWithViolationsDoesNotMutateReceiverOrSiblingResults(t *testing.T) {
+	cause := errors.New("db timeout")
+	base := NewHTTPErrorWithCause(http.StatusConflict, " account_conflict ", " account already exists ", cause)
+
+	firstWant := []Violation{{Field: "name", In: ViolationInBody, Code: ViolationCodeRequired, Detail: "is required"}}
+	secondWant := []Violation{{Field: "email", In: ViolationInQuery, Code: ViolationCodeInvalid, Detail: "is invalid"}}
+
+	first := base.WithViolations(firstWant)
+	second := base.WithViolations(secondWant)
+
+	assertHTTPErrorPublicFields(
+		t,
+		base,
+		http.StatusConflict,
+		"account_conflict",
+		http.StatusText(http.StatusConflict),
+		"account already exists",
+	)
+	if got := base.Error(); got != cause.Error() {
+		t.Fatalf("base Error() = %q, want %q", got, cause.Error())
+	}
+	if got := base.Unwrap(); got != cause {
+		t.Fatalf("base Unwrap() = %v, want %v", got, cause)
+	}
+	assertHTTPErrorErrors(t, base)
+
+	assertHTTPErrorErrors(t, first, firstWant...)
+	if got := first.Error(); got != cause.Error() {
+		t.Fatalf("first Error() = %q, want %q", got, cause.Error())
+	}
+	if got := first.Unwrap(); got != cause {
+		t.Fatalf("first Unwrap() = %v, want %v", got, cause)
+	}
+
+	assertHTTPErrorErrors(t, second, secondWant...)
+	if got := second.Error(); got != cause.Error() {
+		t.Fatalf("second Error() = %q, want %q", got, cause.Error())
+	}
+	if got := second.Unwrap(); got != cause {
+		t.Fatalf("second Unwrap() = %v, want %v", got, cause)
+	}
+
+	// 第二次基于同一模板构造，不能回头覆盖第一次的 violations。
+	assertHTTPErrorErrors(t, first, firstWant...)
+}
+
 // 即使 detail 为空，Error 也应与公开 Detail 保持一致，不返回空串。
 func TestHTTPErrorErrorFallsBackToNormalizedDetail(t *testing.T) {
 	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", nil)

@@ -128,6 +128,44 @@ func TestStringParam_ValidationAndUsageErrors(t *testing.T) {
 		assertUsageErrorContains(t, err, "maximum length must be >= 0")
 	})
 
+	t.Run("min len greater than max len is usage error", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=abcd", nil), "name").String().MinLen(5).MaxLen(3).Get()
+		assertUsageErrorContains(t, err, "maximum length must be greater than or equal to minimum length")
+	})
+
+	t.Run("max len smaller than min len can be corrected by later min len", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=abc", nil), "name").String().
+			MaxLen(2).
+			MinLen(3).
+			MaxLen(3).
+			Get()
+		if err != nil {
+			t.Fatalf("String().MaxLen().MinLen().MaxLen().Get() error = %v", err)
+		}
+		if got != "abc" {
+			t.Fatalf("name = %q, want abc", got)
+		}
+	})
+
+	t.Run("repeated min len after check preserves custom detail precedence", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?name=bad", nil), "name").String().
+			MinLen(1).
+			Check(func(value string) error {
+				if value == "bad" {
+					return errors.New("custom string detail")
+				}
+				return nil
+			}).
+			MinLen(5).
+			Get()
+		assertViolation(t, err, errx.Violation{
+			Field:  "name",
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
+			Detail: "custom string detail",
+		})
+	})
+
 	t.Run("one-of invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?status=pending", nil), "status").String().OneOf("open", "closed").Get()
 		assertInvalidViolationAt(t, err, "status", errx.ViolationInQuery)

@@ -202,6 +202,30 @@ func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	}
 }
 
+func TestWriteErrorRespectsWrappedWriterContentLength(t *testing.T) {
+	inner := &headLikeResponseWriter{}
+	w := &transformingResponseWriter{
+		ResponseWriter: inner,
+		suffix:         []byte("\n"),
+	}
+	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
+		{Field: "name", Code: "required", Detail: "is required"},
+	})
+
+	if err := WriteError(w, httpErr); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+	if inner.status != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", inner.status, http.StatusBadRequest)
+	}
+	if got := inner.Header().Get("Content-Length"); got != strconv.Itoa(len(w.lastWrite)) {
+		t.Fatalf("Content-Length = %q, want %d", got, len(w.lastWrite))
+	}
+	if w.writeCalls != 1 {
+		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
+	}
+}
+
 // 非法状态码会被标准化为 500，且内部 cause 不会泄漏到公开响应。
 func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
 	rr := httptest.NewRecorder()
