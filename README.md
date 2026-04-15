@@ -80,7 +80,7 @@ import (
 - 选择或内建 validation library
 - auth / challenge / rate limit / CORS / redirect
 - router 级 `404/405`
-- panic recover
+- panic recover, including panics from caller-provided `MarshalJSON` or `Error` implementations
 - tracing / access log / metrics 基础设施
 - websocket / streaming runtime
 
@@ -209,7 +209,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 ## 请求输入文档
 
 - [`REQUESTS.md`](./REQUESTS.md)：`reqx` 的 request helper、binding、显式 post-bind validation 模式和常见组合方式
-  其中也包含 `reqx` 的自定义解码契约，例如 `UnmarshalParam`、`encoding.TextUnmarshaler`、`time.Duration`、`time.Time` + `format:"..."`，以及重复值输入的处理方式
+  其中也包含 `reqx` 的自定义解码契约，例如 `BindUnmarshaler`、`BindMultipleUnmarshaler`、`encoding.TextUnmarshaler`、`time.Duration`、`time.Time` + `format:"..."`，以及重复值输入的处理方式
 
 ## 错误响应
 

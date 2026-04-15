@@ -10,6 +10,8 @@ import (
 type (
 	// BindUnmarshaler 允许字段从单个字符串输入值自定义解码。
 	BindUnmarshaler = reqx.BindUnmarshaler
+	// BindMultipleUnmarshaler 允许字段一次性接收同名输入的全部值。
+	BindMultipleUnmarshaler = reqx.BindMultipleUnmarshaler
 	// PathParam 表示一个待解析的 path 单参数。
 	PathParam = reqx.PathParam
 	// QueryParam 表示一个待解析的 query 单参数。

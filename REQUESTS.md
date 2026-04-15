@@ -167,13 +167,13 @@ func (t *Timestamp) UnmarshalParam(src string) error {
 }
 ```
 
-除 `UnmarshalParam(string) error` 外，当前默认 query binder 还支持：
+除 `reqx.BindUnmarshaler`（`UnmarshalParam(string) error`）外，当前默认 query binder 还支持：
 
 - 字段实现 `encoding.TextUnmarshaler`
 - `time.Duration` 字段，使用和 `Query(...).Duration()` 一致的 duration 字符串语法
 - `time.Time` 字段配合 `format:"..."` tag 做按格式解析
 - 重复 query 值绑定到切片字段
-- 如果目标字段需要自行消费全部重复值，可以实现 `UnmarshalParams([]string) error`
+- 如果目标字段需要自行消费全部重复值，可以实现 `reqx.BindMultipleUnmarshaler`（`UnmarshalParams([]string) error`）
 
 示例：
 

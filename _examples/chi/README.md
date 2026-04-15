@@ -24,6 +24,7 @@
 1. `middleware.RequestID` 生成 request ID，`traceid.Middleware` 生成或透传 `TraceId`。
 2. `httplog/v3` 输出结构化 request log，并记录 `request.id` / `trace.id`。
 3. handler 入口先把 `chi.RouteContext` 回填到 `net/http` 的 `PathValue` / `Pattern` 契约。
+   如果 router pattern 带自定义约束语法，应在这一步先归一化为 `net/http` wildcard 名称。
 4. handler 用 `hah.Path(...)` 读取 path，用 `hah.BindQuery(...)` / `hah.BindBody(...)` 处理 DTO 输入，再显式做最小请求校验。
 5. `DELETE` 路由额外演示直接读取 header 后的手写 header 校验。
 6. 领域层直接返回 `errx` 公共错误；失败路径统一走 `hah.WriteError(...)`。

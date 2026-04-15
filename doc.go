@@ -12,7 +12,7 @@
 // 公开 API：
 //   - request helper：Path、Query
 //   - 绑定入口：BindQuery、BindBody
-//   - 绑定相关类型：BindUnmarshaler
+//   - 绑定相关类型：BindUnmarshaler、BindMultipleUnmarshaler
 //   - 请求级规则 helper：RequireBody
 //   - 错误响应入口：WriteError
 //   - 成功响应入口：JSON、JSONBlob、OK、Created、NoContent
