@@ -3,6 +3,7 @@ package reqx
 import (
 	"bytes"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,6 +25,19 @@ func (r *byteThenReadErrorCloser) Read(p []byte) (int, error) {
 }
 
 func (r *byteThenReadErrorCloser) Close() error {
+	return nil
+}
+
+type eofReadCloser struct {
+	reads int
+}
+
+func (r *eofReadCloser) Read(_ []byte) (int, error) {
+	r.reads++
+	return 0, io.EOF
+}
+
+func (r *eofReadCloser) Close() error {
 	return nil
 }
 
@@ -207,6 +221,45 @@ func TestBindBody_EmptyBodyPreservesExistingValues(t *testing.T) {
 	}
 	if dst.Name != "kanata" || dst.Age != 17 {
 		t.Fatalf("dst = %#v, want existing values preserved", dst)
+	}
+}
+
+func TestBindBody_EmptyBodyProbePreservesOriginalBody(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	testCases := []struct {
+		name          string
+		contentLength int64
+	}{
+		{name: "content length zero", contentLength: 0},
+		{name: "unknown length", contentLength: -1},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			req.Header.Set("Content-Type", mimeApplicationJSON)
+			req.ContentLength = tc.contentLength
+
+			body := &eofReadCloser{}
+			req.Body = body
+
+			dst := request{Name: "existing"}
+			if err := BindBody(req, &dst); err != nil {
+				t.Fatalf("BindBody() error = %v", err)
+			}
+			if req.Body != body {
+				t.Fatalf("request body = %T, want original empty body preserved", req.Body)
+			}
+			if body.reads != 1 {
+				t.Fatalf("body read count = %d, want 1 probe read", body.reads)
+			}
+			if dst.Name != "existing" {
+				t.Fatalf("name = %q, want existing value preserved", dst.Name)
+			}
+		})
 	}
 }
 

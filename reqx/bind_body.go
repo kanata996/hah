@@ -205,9 +205,13 @@ func detectRequestBody(r *http.Request) (bool, error) {
 		return false, err
 	}
 
+	if n == 0 {
+		return false, nil
+	}
+
 	r.Body = &replayReadCloser{
 		Reader: io.MultiReader(bytes.NewReader(prefix[:n]), body),
 		Closer: body,
 	}
-	return n > 0, nil
+	return true, nil
 }

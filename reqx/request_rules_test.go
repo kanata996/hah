@@ -90,6 +90,37 @@ func TestRequireBodyReadError(t *testing.T) {
 	}
 }
 
+func TestRequireBody_EmptyBodyProbePreservesOriginalBody(t *testing.T) {
+	testCases := []struct {
+		name          string
+		contentLength int64
+	}{
+		{name: "content length zero", contentLength: 0},
+		{name: "unknown length", contentLength: -1},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := newJSONRequest(http.MethodPost, "/", "")
+			req.ContentLength = tc.contentLength
+
+			body := &eofReadCloser{}
+			req.Body = body
+
+			violation := assertSingleViolation(t, RequireBody(req))
+			if violation.Field != "body" || violation.In != errx.ViolationInBody || violation.Code != errx.ViolationCodeRequired || violation.Detail != "is required" {
+				t.Fatalf("violation = %#v", violation)
+			}
+			if req.Body != body {
+				t.Fatalf("request body = %T, want original empty body preserved", req.Body)
+			}
+			if body.reads != 1 {
+				t.Fatalf("body read count = %d, want 1 probe read", body.reads)
+			}
+		})
+	}
+}
+
 func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
 	testCases := []struct {
 		name string
