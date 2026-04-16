@@ -3,6 +3,7 @@ package resp
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -10,6 +11,14 @@ import (
 )
 
 type payloadMap map[string]any
+
+type realHTTPRoundTrip struct {
+	response   *http.Response
+	body       []byte
+	readErr    error
+	handlerErr error
+}
+
 type failingWriter struct {
 	header http.Header
 	status int
@@ -147,4 +156,31 @@ func assertPublicErrorObject(t *testing.T, got any, want map[string]any) {
 
 func stringLen(body []byte) string {
 	return strconv.Itoa(len(body))
+}
+
+func roundTripOverHTTP(t *testing.T, handler func(http.ResponseWriter, *http.Request) error) realHTTPRoundTrip {
+	t.Helper()
+
+	errCh := make(chan error, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		errCh <- handler(w, r)
+	}))
+	defer srv.Close()
+
+	res, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatalf("http.Get() error = %v", err)
+	}
+
+	body, readErr := io.ReadAll(res.Body)
+	if err := res.Body.Close(); err != nil {
+		t.Fatalf("Body.Close() error = %v", err)
+	}
+
+	return realHTTPRoundTrip{
+		response:   res,
+		body:       body,
+		readErr:    readErr,
+		handlerErr: <-errCh,
+	}
 }

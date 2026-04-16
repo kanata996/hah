@@ -226,6 +226,41 @@ func TestWriteErrorRespectsWrappedWriterContentLength(t *testing.T) {
 	}
 }
 
+func TestWriteErrorClearsStaleContentLengthOnRealHTTPServer(t *testing.T) {
+	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
+		{Field: "name", Code: "required", Detail: "is required"},
+	})
+
+	expected := httptest.NewRecorder()
+	if err := WriteError(expected, httpErr); err != nil {
+		t.Fatalf("WriteError() expected recorder error = %v", err)
+	}
+
+	result := roundTripOverHTTP(t, func(w http.ResponseWriter, _ *http.Request) error {
+		w.Header().Set("Content-Length", "100")
+		return WriteError(w, httpErr)
+	})
+
+	if result.handlerErr != nil {
+		t.Fatalf("handler error = %v", result.handlerErr)
+	}
+	if result.response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", result.response.StatusCode, http.StatusBadRequest)
+	}
+	if got := result.response.Header.Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/problem+json")
+	}
+	if result.readErr != nil {
+		t.Fatalf("ReadAll() error = %v", result.readErr)
+	}
+	if got := string(result.body); got != expected.Body.String() {
+		t.Fatalf("body = %q, want %q", got, expected.Body.String())
+	}
+	if got := result.response.Header.Get("Content-Length"); got != "" && got != strconv.Itoa(len(result.body)) {
+		t.Fatalf("Content-Length = %q, want empty or %d", got, len(result.body))
+	}
+}
+
 // 非法状态码会被标准化为 500，且内部 cause 不会泄漏到公开响应。
 func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
 	rr := httptest.NewRecorder()

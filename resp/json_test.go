@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 )
 
@@ -163,6 +164,32 @@ func TestJSONBodyWritersRespectWrappedWriterContentLength(t *testing.T) {
 				t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
 			}
 		})
+	}
+}
+
+func TestJSONClearsStaleContentLengthOnRealHTTPServer(t *testing.T) {
+	result := roundTripOverHTTP(t, func(w http.ResponseWriter, _ *http.Request) error {
+		w.Header().Set("Content-Length", "100")
+		return JSON(w, http.StatusOK, map[string]any{"id": "u_1"})
+	})
+
+	if result.handlerErr != nil {
+		t.Fatalf("handler error = %v", result.handlerErr)
+	}
+	if result.response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", result.response.StatusCode, http.StatusOK)
+	}
+	if got := result.response.Header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/json")
+	}
+	if result.readErr != nil {
+		t.Fatalf("ReadAll() error = %v", result.readErr)
+	}
+	if got := string(result.body); got != "{\"id\":\"u_1\"}\n" {
+		t.Fatalf("body = %q, want %q", got, "{\"id\":\"u_1\"}\n")
+	}
+	if got := result.response.Header.Get("Content-Length"); got != "" && got != strconv.Itoa(len(result.body)) {
+		t.Fatalf("Content-Length = %q, want empty or %d", got, len(result.body))
 	}
 }
 

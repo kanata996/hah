@@ -90,6 +90,8 @@ func validateJSONBodyWriter(w http.ResponseWriter, status int) error {
 // writePreparedJSONBytes 假定 writer 与 status 已完成校验，直接执行头和 body 的实际写回。
 func writePreparedJSONBytes(w http.ResponseWriter, status int, contentType string, body []byte) error {
 	header := w.Header()
+	// 清掉外部预设的旧长度，让 net/http 按本次实际 body 重新决定最终 Content-Length。
+	header.Del("Content-Length")
 	header.Set("Content-Type", contentType)
 	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
