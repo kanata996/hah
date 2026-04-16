@@ -1,7 +1,7 @@
 # hah BindQuery 设计方案
 
 - 状态：Locked
-- 版本：v2
+- 版本：v3
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.BindQuery(...)`
@@ -88,10 +88,12 @@
 
 - 未标注字段一律忽略
 - `query:"-"` 一律显式忽略；不参与绑定、冲突检测或字段类型校验
+- `query:"name"` 中的 `name` 必须非空，且不得包含前后空白
+- `query:"name"` 的 key 按 tag 字面值原样参与匹配；不做 trim、大小写归一化或额外解码
 - `query:"name"` 字段必须导出、可设置、且字段形状受支持
 - `query:",inline"` 只能用于导出且可设置的 `struct` / `*struct`
 - `inline` 展开后若没有任何可绑定子字段，属于普通 usage error
-- 多个可绑定字段映射到同一个有效 query key 时，属于普通 usage error
+- 多个可绑定字段映射到同一个 query key 时，属于普通 usage error
 - 冲突检测必须发生在任何字段写入之前
 
 ### 2.3 支持的字段形状
@@ -242,6 +244,9 @@
 - `query:"-"` 不参与冲突检测或字段类型校验
 - inline 子字段计划为空时返回 usage error
 - 非法 `query` tag 形式
+- `query:""` 返回 usage error
+- 带前后空白的 `query:"name"` key 返回 usage error
+- `query:"name"` 的 key 按 tag 字面值原样匹配，不做 trim、大小写归一化或额外解码
 - tagged 但不可设置字段返回 usage error
 - 不支持字段类型在规划阶段返回 usage error
 - 命名类型、多级指针、`time.Time`、`time.Duration`、自定义 decoder 类型返回 usage error

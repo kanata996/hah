@@ -1,7 +1,7 @@
 # hah Query 设计方案
 
 - 状态：Locked
-- 版本：v3
+- 版本：v4
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.Query(...)`
@@ -144,7 +144,33 @@
 
 该顺序只锁 typed builder；`Values()` 不参与“单值重复 key”判定。
 
-### 2.7 类型专属约束
+### 2.7 `Values()` builder 语义
+
+`Values()` 是唯一公开的多值读取入口。
+
+`Values()` 的公开语义固定为：
+
+- 支持 `Required()`、`Default(...)`、`Check(...)`、`Get()`
+- 不支持单值 typed builder 的类型解析、重复 key 拒绝或 built-in constraint
+- `Get()` 必须读取当前 request 中该 key 的全部值，并返回独立副本
+- 返回值必须保留顺序、重复值和空字符串
+- 修改一次 `Get()` 返回的切片，不得影响 builder 内部状态、后续 `Get()` 结果或默认值本身
+
+`Values().Get()` 执行顺序固定为：
+
+1. 若 builder 已记录 usage error，立即返回首次记录的 usage error
+2. 读取当前 request 中该 key 的全部当前值
+3. 若该 key 缺失：
+   - 声明了 `Required()`：返回 `required` violation
+   - 未声明 `Required()` 且声明了 `Default(v)`：以默认切片副本作为候选值进入 `Check(...)`
+   - 未声明 `Required()` 且未声明 `Default(v)`：直接返回 `nil`
+4. 若该 key 存在：以当前全部值的副本作为候选值进入 `Check(...)`
+5. 若 `Check(...)` 失败：
+   - 候选值来自请求输入：返回客户端输入错误
+   - 候选值来自 `Default(v)`：返回 usage error
+6. 全部成功后返回候选切片
+
+### 2.8 类型专属约束
 
 `String()` 额外支持：
 
@@ -237,6 +263,11 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 - `Values()` 保留重复值
 - `Values()` 跟随 `net/url` 的解码语义，而不是 raw query 子串
 - `Values()` 保留空字符串；缺失时返回 `nil`
+- `Values()` 支持 `Required()`、`Default(...)`、`Check(...)`
+- `Values()` 不参与单值重复 key 拒绝，也不做 built-in constraint
+- `Values()` 缺失且声明 `Required()` 时返回单个 `required` violation
+- `Values()` 缺失且声明 `Default(...)` 时返回默认切片副本
+- `Values()` 的返回值是 defensive copy；修改返回切片不会影响后续 `Get()`
 - `Query(...)` 不会为了读取单个 key 额外扫描整条 raw query 并引入新的全局错误路径
 - typed builder 缺失时返回零值
 - 未声明 `Required()` 且参数缺失时，不执行 built-in constraint 或 `Check(...)`
@@ -263,4 +294,5 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 - usage error 的 sticky 语义
 - typed builder 的 `Get()` 执行顺序与错误优先级固定
 - typed builder 命中重复 key 时，不进入类型解析或后续约束
+- `Values()` 的 `Get()` 执行顺序与错误优先级固定
 - 同一 builder 多次 `Get()` 会重新读取当前 request query

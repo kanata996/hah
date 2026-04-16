@@ -1,7 +1,7 @@
 # hah resp 设计方案
 
 - 状态：Locked
-- 版本：v3
+- 版本：v4
 - 锁定日期：2026-04-17
 - 适用范围：
   - `resp.JSON`
@@ -135,7 +135,7 @@
 - typed-nil `*errx.HTTPError` 不视为匹配到公共 HTTP 错误
 - 若错误链里只有 typed-nil `*errx.HTTPError`，则按“未匹配到 `*errx.HTTPError`”继续后续收敛
 - `WriteError` 不得依赖 nil receiver 的 `Status()` / `Detail()` / `Errors()` 行为
-- 若错误链中存在多个可匹配的非 `nil` `*errx.HTTPError`，必须按标准库 `errors.As` 的首次匹配结果选出唯一的“被选中公共 HTTP 错误”
+- 若错误链中存在多个可遍历到的 `*errx.HTTPError` 候选，必须按标准库 `errors.As` 所使用的错误链遍历顺序，跳过 typed-nil，选出第一个非 `nil` 的 `*errx.HTTPError` 作为唯一的“被选中公共 HTTP 错误”
 - 一旦选中某个公共 HTTP 错误，后续 `status` / `code` / `detail` / `errors` 都必须基于同一个对象的归一化公开语义
 - 若匹配到非 `nil` 的 `*errx.HTTPError`，后续 `code` / `detail` / `errors` 从其归一化公开语义提取
 - 若未匹配到非 `nil` 的 `*errx.HTTPError`，则视为框架合成错误，只允许写最小 Problem：`title` / `status` / `code`
@@ -217,7 +217,7 @@
 - `WriteError` 对普通错误写出最小 `500` Problem，且不写 `detail` / `errors`，也不泄漏内部错误文本
 - `WriteError(nil)` 是 no-op
 - Problem payload 无法编码时，`WriteError` 回退为最小内部错误 Problem
-- 多个可匹配 `*errx.HTTPError` 同时存在时，按 `errors.As` 首次匹配结果收敛
+- 多个 `*errx.HTTPError` 候选同时存在时，按 `errors.As` 的错误链遍历顺序跳过 typed-nil，并选择第一个非 `nil` 候选收敛
 - 错误链同时匹配 `*errx.HTTPError` 与 `context` 错误时，优先按 `*errx.HTTPError` 收敛
 - typed-nil `*errx.HTTPError` 不算匹配到公共 HTTP 错误；此时继续按 `context` 错误或默认 `500` 收敛
 - 若候选状态码不属于 `499` 或 `400..599`，`WriteError` 必须先把状态码收敛为 `500`
