@@ -1,7 +1,7 @@
 # hah errx 设计方案
 
 - 状态：Locked
-- 版本：v1
+- 版本：v2
 - 锁定日期：2026-04-17
 - 适用范围：
   - `errx`
@@ -209,6 +209,7 @@
 - 返回新的 `*HTTPError`
 - 不修改 receiver
 - 除 `violations` 外，必须保留 receiver 的 `Status()` / `Code()` / `Title()` / `Detail()` / `Unwrap()` 公开语义
+- 返回值中的 violations 必须完全替换 receiver 当前的 violations；不得 merge、append 或保留 receiver 的旧 violations
 - 立即拷贝入参切片
 - `Errors()` 必须返回 defensive copy
 - `nil` 或空切片输入都统一表现为 `nil`
@@ -246,6 +247,7 @@
 - typed-nil `cause` 被归一化为 `nil`
 - `WithViolations(...)` 不修改 receiver
 - `WithViolations(...)` 返回值会保留 receiver 的 `Status()` / `Code()` / `Title()` / `Detail()` / `Unwrap()` 公开语义
+- `WithViolations(...)` 会替换而不是追加 receiver 的旧 violations
 - 传入切片被修改时，错误对象不受影响
 - `Errors()` 返回结果被修改时，错误对象不受影响
 - `nil` / 空切片统一表现为 `nil`

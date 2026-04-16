@@ -1,7 +1,7 @@
 # hah BindQuery 设计方案
 
 - 状态：Locked
-- 版本：v3
+- 版本：v4
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.BindQuery(...)`
@@ -127,8 +127,12 @@
 公开语义固定为：
 
 - binder 必须先解析 raw query，再进入字段写入
+- 当 `request.URL != nil` 时，source 阶段必须按 Go `1.25.9` `net/url` 的 query 解析语义解析当前 `request.URL.RawQuery`
 - raw query 解析失败属于客户端输入错误，不是 usage error
 - raw query 解析失败时，返回稳定 `400 bad_request`，且 target 零修改
+- query source 中的 key 与 value 都基于解析后的字符串，而不是 raw query 子串
+- `+`、百分号解码和 malformed escape 的处理都跟随 Go `1.25.9` `net/url` 的 query 解析语义
+- `query:"name"` 的 tag key 必须与解析后的 query key 做精确字符串匹配；不做 trim、大小写归一化或二次解码
 - query source 采用默认单值模型：同名 key 出现多个值时，视为客户端输入错误
 - 对 `struct` 目标，未知 key 默认忽略；但未知 key 也受单值模型约束
 - 缺失 key 不会继承 target 旧值；对应字段保持零值临时对象中的默认状态
@@ -139,7 +143,7 @@
 
 对 `*map[string]string` 的规则固定为：
 
-- 成功绑定后，target 必须替换为当前请求的“单值字符串快照”
+- 成功绑定后，target 必须替换为当前请求的“解析后单值字符串快照”
 - 旧项必须被移除，不允许保留历史 key
 - 空 query 绑定后得到可用空 map
 - 任一 key 命中多个值时，返回 `400 bad_request` 且 target 零修改
@@ -230,9 +234,10 @@
 - typed-nil target
 - 指向不支持目标类型的指针
 - `request.URL == nil` 视为空 query source
+- raw query 的解析与 key/value 解码语义跟随 Go `1.25.9` `net/url`
 - raw query 解析失败返回 `400 bad_request`
 - raw query 解析失败时 target 零修改
-- `map[string]string` 成功绑定后替换为当前请求单值快照
+- `map[string]string` 成功绑定后替换为当前请求解析后单值快照
 - `map[string]string` 在空 query 下得到空 map
 - `map[string]string` 成功绑定时清除旧项
 - query source 中任一重复 key 返回 `400 bad_request`
@@ -246,7 +251,7 @@
 - 非法 `query` tag 形式
 - `query:""` 返回 usage error
 - 带前后空白的 `query:"name"` key 返回 usage error
-- `query:"name"` 的 key 按 tag 字面值原样匹配，不做 trim、大小写归一化或额外解码
+- `query:"name"` 的 key 与解析后的 query key 精确匹配，不做 trim、大小写归一化或额外解码
 - tagged 但不可设置字段返回 usage error
 - 不支持字段类型在规划阶段返回 usage error
 - 命名类型、多级指针、`time.Time`、`time.Duration`、自定义 decoder 类型返回 usage error

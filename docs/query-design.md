@@ -1,7 +1,7 @@
 # hah Query 设计方案
 
 - 状态：Locked
-- 版本：v4
+- 版本：v5
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.Query(...)`
@@ -152,8 +152,10 @@
 
 - 支持 `Required()`、`Default(...)`、`Check(...)`、`Get()`
 - 不支持单值 typed builder 的类型解析、重复 key 拒绝或 built-in constraint
+- `Values().Default(v)` 必须在配置时立即保存 `v` 的 defensive copy
 - `Get()` 必须读取当前 request 中该 key 的全部值，并返回独立副本
 - 返回值必须保留顺序、重复值和空字符串
+- 调用方在 `Default(v)` 之后再修改原始 `v`，不得影响 builder 内部状态或后续 `Get()` 结果
 - 修改一次 `Get()` 返回的切片，不得影响 builder 内部状态、后续 `Get()` 结果或默认值本身
 
 `Values().Get()` 执行顺序固定为：
@@ -162,7 +164,7 @@
 2. 读取当前 request 中该 key 的全部当前值
 3. 若该 key 缺失：
    - 声明了 `Required()`：返回 `required` violation
-   - 未声明 `Required()` 且声明了 `Default(v)`：以默认切片副本作为候选值进入 `Check(...)`
+   - 未声明 `Required()` 且声明了 `Default(v)`：以配置时保存的默认切片快照副本作为候选值进入 `Check(...)`
    - 未声明 `Required()` 且未声明 `Default(v)`：直接返回 `nil`
 4. 若该 key 存在：以当前全部值的副本作为候选值进入 `Check(...)`
 5. 若 `Check(...)` 失败：
@@ -267,6 +269,7 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 - `Values()` 不参与单值重复 key 拒绝，也不做 built-in constraint
 - `Values()` 缺失且声明 `Required()` 时返回单个 `required` violation
 - `Values()` 缺失且声明 `Default(...)` 时返回默认切片副本
+- `Values().Default(v)` 会在配置时快照 `v`；后续修改原始切片不影响 `Get()`
 - `Values()` 的返回值是 defensive copy；修改返回切片不会影响后续 `Get()`
 - `Query(...)` 不会为了读取单个 key 额外扫描整条 raw query 并引入新的全局错误路径
 - typed builder 缺失时返回零值
