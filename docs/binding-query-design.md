@@ -1,7 +1,7 @@
 # hah BindQuery 设计方案
 
 - 状态：Locked
-- 版本：v1
+- 版本：v2
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.BindQuery(...)`
@@ -52,7 +52,7 @@
 | target 形状          | 是否支持 | 说明                      |
 | -------------------- | -------- | ------------------------- |
 | `*struct`            | 是       | 默认 DTO 绑定目标         |
-| `*map[string]string` | 是       | 当前请求 query 的首值快照 |
+| `*map[string]string` | 是       | 当前请求 query 的单值快照 |
 
 其余 target 一律是普通 usage error，包括：
 
@@ -127,8 +127,8 @@
 - binder 必须先解析 raw query，再进入字段写入
 - raw query 解析失败属于客户端输入错误，不是 usage error
 - raw query 解析失败时，返回稳定 `400 bad_request`，且 target 零修改
-- 对 `struct` 目标，未知 key 默认忽略
-- 重复 key 只消费第一个值
+- query source 采用默认单值模型：同名 key 出现多个值时，视为客户端输入错误
+- 对 `struct` 目标，未知 key 默认忽略；但未知 key 也受单值模型约束
 - 缺失 key 不会继承 target 旧值；对应字段保持零值临时对象中的默认状态
 - 参数存在但首值为空字符串时，仍视为“已提交参数”
 - 只有 `string` 与 `*string` 接受空字符串；其他受支持类型把空字符串当解析失败处理
@@ -137,11 +137,12 @@
 
 对 `*map[string]string` 的规则固定为：
 
-- 成功绑定后，target 必须替换为当前请求的“首值字符串快照”
+- 成功绑定后，target 必须替换为当前请求的“单值字符串快照”
 - 旧项必须被移除，不允许保留历史 key
 - 空 query 绑定后得到可用空 map
+- 任一 key 命中多个值时，返回 `400 bad_request` 且 target 零修改
 - 不做类型解码
-- 不会因为值内容本身返回 `400 bad_request`
+- 不会因为单个值内容本身返回 `400 bad_request`
 
 ### 2.6 指针与 inline 写入规则
 
@@ -198,6 +199,7 @@
 以下场景返回稳定 `*errx.HTTPError`：
 
 - raw query 解析失败
+- query source 中存在重复 key
 - 内建标量解析失败
 - 空字符串落到非 `string` 字段
 
@@ -211,7 +213,7 @@
 
 ## 4. 与其他文档的关系
 
-- `BindQuery(...)` 与 `Query(...)` 共享“首值消费”“空字符串视为已提交参数”“默认忽略未知 key”的输入模型。
+- `BindQuery(...)` 与 `Query(...)` 共享“空字符串视为已提交参数”“单值入口拒绝重复 key”“默认忽略未知 key（在各自适用范围内）”的输入模型。
 - `BindQuery(...)` 比 `Query(...)` 更严格，因为它还要处理 DTO 规划、整条 raw query 解析、字段白名单和原子提交。
 - 顶层错误模型来自 `errx`；对外如何写成 Problem JSON 由 `resp` 决定。
 - 若未来需要严格模式，只能作为独立 opt-in 契约引入，不能直接改变本文档的默认行为。
@@ -228,9 +230,11 @@
 - `request.URL == nil` 视为空 query source
 - raw query 解析失败返回 `400 bad_request`
 - raw query 解析失败时 target 零修改
-- `map[string]string` 成功绑定后替换为当前请求快照
+- `map[string]string` 成功绑定后替换为当前请求单值快照
 - `map[string]string` 在空 query 下得到空 map
 - `map[string]string` 成功绑定时清除旧项
+- query source 中任一重复 key 返回 `400 bad_request`
+- 重复 key 时 target 零修改
 - `query:"name"`
 - `query:"-"`
 - `query:",inline"`
@@ -245,7 +249,6 @@
 - 冲突 query key 在写入前返回 usage error
 - 规划阶段 usage error 时 target 零修改
 - 未知 query key 默认忽略
-- 重复 query key 默认消费第一个值
 - 缺失参数不会继承 target 旧值
 - 空字符串参数视为存在
 - 只有 `string` / `*string` 接受空字符串

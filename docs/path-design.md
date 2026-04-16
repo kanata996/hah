@@ -1,7 +1,7 @@
 # hah Path 设计方案
 
 - 状态：Locked
-- 版本：v1
+- 版本：v2
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.Path(...)`
@@ -91,7 +91,10 @@
 - `Required()` 与 `Default(...)` 互斥
 - 重复 `Required()` 幂等
 - 未声明 `Required()` 时，重复 `Default(...)` 以后一次为准
+- 未声明 `Required()` 且参数缺失时，若未配置 `Default(...)`，直接返回类型零值，不执行类型解析、built-in constraint 或 `Check(...)`
+- 参数缺失且命中 `Default(v)` 时，以默认值进入后续约束与 `Check(...)`
 - 默认值仍然要经过后续全部约束与 `Check(...)`
+- 若 `Default(v)` 未通过后续约束或 `Check(...)`，`Get()` 返回普通 usage error
 - `Check(nil)` 返回普通 usage error
 - 自定义 `Check(...)` 返回非 `nil` error 时，整体视为校验失败
 - `Check(...)` 的 error 文本不是默认公开 detail 契约
@@ -137,6 +140,7 @@
 - 参数名为空
 - 零值 builder 直接使用
 - 非法约束配置
+- 配置的 `Default(...)` 未通过后续约束或 `Check(...)`
 
 稳定契约只有：
 
@@ -151,9 +155,9 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 以下场景返回稳定 `*errx.HTTPError`：
 
 - `Required()` 参数缺失
-- 类型解析失败
-- built-in constraint 失败
-- `Check(...)` 失败
+- 来自请求输入的类型解析失败
+- 来自请求输入的 built-in constraint 失败
+- 来自请求输入的 `Check(...)` 失败
 
 公开收敛固定为：
 
@@ -183,11 +187,13 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 - 零值 builder 与零值 typed builder 直接使用
 - usage error 只要求 `err != nil` 且不是 `*errx.HTTPError`
 - 缺失 optional 返回各类型零值
+- 未声明 `Required()` 且参数缺失时，不执行 built-in constraint 或 `Check(...)`
 - `Required()` 缺失时返回单个 `required` violation
 - 重复 `Required()` 幂等
 - `Default(...)` 与 `Required()` 互斥
 - 重复 `Default(...)` 以后一次为准
 - default 值仍然经过后续校验
+- 非法 default 值会返回 usage error
 - `Check(nil)` usage error
 - `OneOf(...)`、`Match(...)`、`Check(...)` 的顺序与短路语义
 - `OneOf()` 空参数 usage error

@@ -1,7 +1,7 @@
 # hah resp 设计方案
 
 - 状态：Locked
-- 版本：v1
+- 版本：v2
 - 锁定日期：2026-04-17
 - 适用范围：
   - `resp.JSON`
@@ -136,6 +136,8 @@
 - typed-nil `*errx.HTTPError` 不视为匹配到公共 HTTP 错误
 - 若错误链里只有 typed-nil `*errx.HTTPError`，则按“未匹配到 `*errx.HTTPError`”继续后续收敛
 - `WriteError` 不得依赖 nil receiver 的 `Status()` / `Detail()` / `Errors()` 行为
+- 若匹配到非 `nil` 的 `*errx.HTTPError`，后续 `code` / `detail` / `errors` 从其归一化公开语义提取
+- 若未匹配到非 `nil` 的 `*errx.HTTPError`，则视为框架合成错误，只允许写最小 Problem：`title` / `status` / `code`
 
 然后再执行一次状态码归一化：
 
@@ -152,15 +154,22 @@
   - `499` 固定为 `Client Closed Request`
   - 其他无标准文本的 `4xx` 回退为 `Client Error`
   - 其他无标准文本的 `5xx` 回退为 `Internal Server Error`
-- `code` 直接取归一化后公开错误的 `Code()`
-- `detail` 直接取归一化后公开错误的 `Detail()`
-- `errors` 直接取归一化后公开错误的 `Errors()`
+- `code`：
+  - 若匹配到非 `nil` 的 `*errx.HTTPError`，直接取其归一化后的 `Code()`
+  - 否则按 `errx` 对该最终状态码的默认 `code` 规则补 `code`
+- `detail`：
+  - 只有匹配到非 `nil` 的 `*errx.HTTPError` 时，才允许写出其归一化后的 `Detail()`
+  - 对普通 `error`、`context.Canceled`、`context.DeadlineExceeded` 等框架合成错误，不写 `detail`
+- `errors`：
+  - 只有匹配到非 `nil` 的 `*errx.HTTPError` 时，才允许写出其归一化后的 `Errors()`
+  - 对普通 `error`、`context.Canceled`、`context.DeadlineExceeded` 等框架合成错误，不写 `errors`
 
 安全规则固定为：
 
 - 不得从普通 `error` 泄漏 `err.Error()` 文本
 - 不得泄漏栈、文件路径、私有类型名或内部实现细节
 - 除 `code`、`detail` 与 `errors` 外，不得从 `*errx.HTTPError` 复制其他公开字段
+- 对未匹配到 `*errx.HTTPError` 的错误，不得额外派生 `detail` 或 `errors`
 
 ### 4.4 首次提交、回退与返回值
 
@@ -169,6 +178,7 @@
 - 若完整、合法的目标响应已成功写出，则返回 `nil`
 - 必须先在内存里构造好目标 payload，再执行首次提交
 - 成功入口不得在内部隐式调用 `WriteError`
+- 对普通 `error`、`context.Canceled`、`context.DeadlineExceeded` 等框架合成错误，目标响应本身就是最小 Problem，不包含 `detail` 或 `errors`
 - 最小内部错误回退只允许由“Problem payload 在首次提交前无法被 JSON 编码”触发
 - 该回退固定写出：
   - `status = 500`
@@ -201,9 +211,9 @@
 - `WriteError` 会保留来自 `*errx.HTTPError` 的 `code`
 - `WriteError` 会保留来自 `*errx.HTTPError` 的 violations 顺序与内容
 - `errors[]` 的稳定 JSON 字段固定为 `field` / `in` / `code` / `detail`
-- `WriteError(context.Canceled)` 写出 `499` 与 `Client Closed Request`
-- `WriteError(context.DeadlineExceeded)` 写出 `504` 与 `Gateway Timeout`
-- `WriteError` 对普通错误写出最小 `500` Problem，且不泄漏内部错误文本
+- `WriteError(context.Canceled)` 写出 `499`、`Client Closed Request`、`code=client_closed_request`，且不写 `detail` / `errors`
+- `WriteError(context.DeadlineExceeded)` 写出 `504`、`Gateway Timeout`、`code=timeout`，且不写 `detail` / `errors`
+- `WriteError` 对普通错误写出最小 `500` Problem，且不写 `detail` / `errors`，也不泄漏内部错误文本
 - `WriteError(nil)` 是 no-op
 - Problem payload 无法编码时，`WriteError` 回退为最小内部错误 Problem
 - 若输入本身表示一次已开始的响应写回失败，`WriteError` 返回同一个 error 且不再写回

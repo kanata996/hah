@@ -1,7 +1,7 @@
 # hah Query 设计方案
 
 - 状态：Locked
-- 版本：v1
+- 版本：v2
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.Query(...)`
@@ -92,7 +92,8 @@
 
 ### 2.3 重复 key 与空值语义
 
-- typed builder 只消费第一个值
+- typed builder 对目标 key 只接受零个或一个值
+- 当同名 key 出现多个值时，typed builder 返回客户端输入错误
 - `Values()` 返回全部值并保留顺序
 - `Values()` 保留重复值和空字符串
 - 参数缺失与参数存在但首值为空字符串是两种不同状态
@@ -107,7 +108,10 @@
 - `Required()` 与 `Default(...)` 互斥
 - 重复 `Required()` 幂等
 - 未声明 `Required()` 时，重复 `Default(...)` 以后一次为准
+- 未声明 `Required()` 且参数缺失时，若未配置 `Default(...)`，直接返回类型零值，不执行类型解析、built-in constraint 或 `Check(...)`
+- 参数缺失且命中 `Default(v)` 时，以默认值进入后续约束与 `Check(...)`
 - 默认值仍然要经过后续全部约束与 `Check(...)`
+- 若 `Default(v)` 未通过后续约束或 `Check(...)`，`Get()` 返回普通 usage error
 - `Check(nil)` 返回普通 usage error
 - 自定义 `Check(...)` 返回非 `nil` error 时，整体视为校验失败
 - `Check(...)` 的 error 文本不是默认公开 detail 契约
@@ -161,6 +165,7 @@
 - 参数名为空
 - 零值 builder 直接使用
 - 非法约束配置
+- 配置的 `Default(...)` 未通过后续约束或 `Check(...)`
 
 稳定契约只有：
 
@@ -175,9 +180,10 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 以下场景返回稳定 `*errx.HTTPError`：
 
 - `Required()` 参数缺失
-- 类型解析失败
-- built-in constraint 失败
-- `Check(...)` 失败
+- 单值 typed builder 命中重复 key
+- 来自请求输入的类型解析失败
+- 来自请求输入的 built-in constraint 失败
+- 来自请求输入的 `Check(...)` 失败
 
 公开收敛固定为：
 
@@ -188,12 +194,13 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 - violation `Field` 等于裁剪后的参数名
 - violation `In == errx.InQuery`
 - 缺失 required 参数时，violation `Code == errx.CodeRequired`，`Detail == "is required"`
+- 单值 typed builder 命中重复 key 时，violation `Code == errx.CodeMultiple`，`Detail == "must appear only once"`
 - 解析失败或校验失败时，violation `Code == errx.CodeInvalid`，`Detail == "is invalid"`
 
 ## 4. 与其他文档的关系
 
 - `Query(...)` 是单字段 helper；`BindQuery(...)` 是 DTO binder。
-- 两者共享“首值消费”“空字符串视为已提交参数”“默认忽略未知 key”这些方向上的输入模型。
+- 两者共享“空字符串视为已提交参数”“单值入口拒绝重复 key”“默认忽略未知 key（在各自适用范围内）”这些方向上的输入模型。
 - `Query(...)` 不为读取单个 key 额外扫描整条 raw query 的全局合法性。
 - `BindQuery(...)` 比 `Query(...)` 更严格：它要处理 DTO 规划、整条 raw query 解析、字段白名单和原子提交。
 - 顶层错误模型和 violation 词汇由 `errx` 提供；响应写回由 `resp` 决定。
@@ -207,17 +214,20 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 - 空参数名
 - 零值 builder 与零值 typed builder 直接使用
 - `request.URL == nil` 视为空输入
-- typed builder 重复 key 只消费第一个值
+- typed builder 命中重复 key 时返回单个 `multiple` violation
 - `Values()` 返回全部解析后值并保留顺序
+- `Values()` 保留重复值
 - `Values()` 跟随 `net/url` 的解码语义，而不是 raw query 子串
 - `Values()` 保留空字符串；缺失时返回 `nil`
 - `Query(...)` 不会为了读取单个 key 额外扫描整条 raw query 并引入新的全局错误路径
 - typed builder 缺失时返回零值
+- 未声明 `Required()` 且参数缺失时，不执行 built-in constraint 或 `Check(...)`
 - `Required()` 缺失时返回单个 `required` violation
 - 重复 `Required()` 幂等
 - `Default(...)` 与 `Required()` 互斥
 - 重复 `Default(...)` 以后一次为准
 - default 值仍然经过后续校验
+- 非法 default 值会返回 usage error
 - `Check(nil)` usage error
 - `OneOf(...)`、`Match(...)`、`Check(...)` 的顺序与短路语义
 - `OneOf()` 空参数 usage error

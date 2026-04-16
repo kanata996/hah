@@ -1,7 +1,7 @@
 # hah BindBody 设计方案
 
 - 状态：Locked
-- 版本：v1
+- 版本：v2
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.BindBody(...)`
@@ -90,7 +90,7 @@ JSON 文档边界固定为：
 除表内字段类型家族外，其他参与 JSON binding 的字段类型一律不支持，并应返回 usage error。
 
 这张表锁的是“字段类型家族”，不展开 `encoding/json` 的全部内部派发细节。
-表内类型的字段发现、赋值、自定义 decoder 触发和重复 object key 覆盖，仍跟随 Go `1.25.9` 的 `encoding/json`。
+表内类型的字段发现、赋值和自定义 decoder 触发仍跟随 Go `1.25.9` 的 `encoding/json`；重复 object key 不在该跟随范围内。
 
 补充规则：
 
@@ -127,7 +127,8 @@ JSON 文档边界固定为：
 
 对于公开支持的 `*struct` target：
 
-- 字段发现、字段赋值、自定义 decoder 触发和重复 object key 覆盖语义，在表内类型范围内跟随 Go `1.25.9` 的 `encoding/json`
+- 同一 object 内出现重复 key 时，视为非法 JSON
+- 除重复 object key 外，字段发现、字段赋值和自定义 decoder 触发语义，在表内类型范围内跟随 Go `1.25.9` 的 `encoding/json`
 - 解码必须先进入与 target 同构的零值临时对象
 - 只有全部成功后，才允许一次性提交到 target
 - 失败时，target 必须保持调用前状态
@@ -145,7 +146,7 @@ JSON 文档边界固定为：
 - 稳定客户端输入错误：
   - 不支持的媒体类型：`415 unsupported_media_type`
   - body 超限：`413 request_too_large`
-  - 非法 JSON、空白 body、截断 JSON、多个 top-level 值、尾随非空白数据、UTF-8 BOM、顶层非 object、未知字段、标准 JSON 类型不匹配、数值溢出、字段级自定义 decoder 返回 error：`400 invalid_json`
+  - 非法 JSON、空白 body、截断 JSON、多个 top-level 值、尾随非空白数据、UTF-8 BOM、顶层非 object、重复 object key、未知字段、标准 JSON 类型不匹配、数值溢出、字段级自定义 decoder 返回 error：`400 invalid_json`
   - 返回稳定 `*errx.HTTPError`
 - 底层读取失败：
   - `Body.Read` 包装错误
@@ -216,7 +217,7 @@ JSON 文档边界固定为：
 - 标准字段类型不匹配或数值溢出返回 `400 invalid_json`
 - 参与 JSON binding 的表外字段类型返回 usage error
 - 未导出字段、`json:"-"` 字段等被 `encoding/json` 忽略的字段不会因表外类型触发 usage error
-- 重复 object key 的覆盖语义跟随 `encoding/json`
+- 重复 object key 返回 `400 invalid_json`
 - 缺失字段不会继承 target 旧值
 - 失败时 target 保持不变
 - 自定义 decoder 的成功路径遵循 `encoding/json`
