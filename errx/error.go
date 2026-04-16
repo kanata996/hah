@@ -2,6 +2,7 @@ package errx
 
 import (
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 )
@@ -37,7 +38,7 @@ func NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPEr
 		status: status,
 		code:   normalizeErrorCode(status, code),
 		detail: normalizeErrorDetail(status, detail),
-		cause:  cause,
+		cause:  normalizeErrorCause(cause),
 	}
 }
 
@@ -171,6 +172,22 @@ func cloneViolations(violations []Violation) []Violation {
 		return nil
 	}
 	return slices.Clone(violations)
+}
+
+// normalizeErrorCause 把 typed-nil error 收敛为真正的 nil，避免污染 Error/Unwrap 链语义。
+func normalizeErrorCause(cause error) error {
+	if cause == nil {
+		return nil
+	}
+
+	value := reflect.ValueOf(cause)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		if value.IsNil() {
+			return nil
+		}
+	}
+	return cause
 }
 
 // normalizeErrorStatus 把非法或越界状态码收敛到 500。

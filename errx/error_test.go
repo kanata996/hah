@@ -10,12 +10,18 @@ type panicWriteCause struct{}
 
 type blankWriteCause struct{}
 
+type typedNilCause struct{}
+
 func (panicWriteCause) Error() string {
 	panic("boom")
 }
 
 func (blankWriteCause) Error() string {
 	return "   "
+}
+
+func (*typedNilCause) Error() string {
+	return "typed nil cause"
 }
 
 type standardHTTPErrorConstructorCase struct {
@@ -283,6 +289,23 @@ func TestHTTPErrorErrorFallsBackWhenCauseMessageBlank(t *testing.T) {
 
 	if got := err.Error(); got != http.StatusText(http.StatusBadRequest) {
 		t.Fatalf("Error() = %q, want %q", got, http.StatusText(http.StatusBadRequest))
+	}
+}
+
+// typed-nil cause 不应被当成真实错误链保留，否则会污染 Error/Unwrap/Is/As 语义。
+func TestNewHTTPErrorWithCauseTreatsTypedNilCauseAsNoCause(t *testing.T) {
+	var cause *typedNilCause
+
+	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", cause)
+
+	assertHTTPErrorHasNoCause(t, err, http.StatusText(http.StatusBadRequest))
+	if errors.Is(err, cause) {
+		t.Fatal("errors.Is should not match a typed-nil cause")
+	}
+
+	var target *typedNilCause
+	if errors.As(err, &target) {
+		t.Fatal("errors.As should not expose a typed-nil cause")
 	}
 }
 
