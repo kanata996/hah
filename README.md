@@ -201,9 +201,10 @@ func main() {
 DTO binding 的边界：
 
 - `hah.BindQuery(...)` / `reqx.BindQuery(...)` 只负责 query -> DTO 的映射，不内建请求级校验
-- `hah.BindQuery(...)` / `reqx.BindQuery(...)` 的目标必须是 struct、`map[string]string`、`map[string][]string` 或 `map[string]any`；如果 DTO/tag 形状本身非法，会直接返回普通错误
-- `hah.BindBody(...)` / `reqx.BindBody(...)` 只负责 JSON body -> DTO 的解码；解码直接作用在传入 target 上，JSON 里缺失的字段不会清空 DTO 现有值
+- `hah.BindQuery(...)` / `reqx.BindQuery(...)` 的目标必须是 struct、`map[string]string`、`map[string][]string` 或 `map[string]any`；如果 DTO/tag 形状本身非法（例如命名的未打 `query` tag 的 `*struct` 字段），会直接返回普通错误
+- `hah.BindBody(...)` / `reqx.BindBody(...)` 只负责 JSON body -> DTO 的解码；解码直接作用在传入 target 上，JSON 里缺失的字段不会清空 DTO 现有值；如果返回错误，target 可能已经被部分更新
 - `hah.RequireBody(...)` / `reqx.RequireBody(...)` 与 `BindBody(...)` 共享同一个非破坏性 body 探测；无论你先要求 body 必填还是先绑定，后续都还能继续读取同一个请求 body
+- `hah.BindQuery(...)` / `reqx.BindQuery(...)` 也不是事务性的；如果返回错误，target 可能已经被部分更新，调用方不应依赖其精确状态
 - header 通常直接使用标准库 `r.Header.Get(...)` / `r.Header.Values(...)`
 
 示例：

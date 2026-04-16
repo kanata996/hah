@@ -486,6 +486,23 @@ func TestBindQuery_EmbeddedFieldContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects named pointer to nested struct without query tag", func(t *testing.T) {
+		type Nested struct {
+			Name string `query:"name"`
+		}
+		type request struct {
+			Nested *Nested
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
+		dst := request{Nested: &Nested{}}
+
+		assertUsageErrorContains(t, BindQuery(req, &dst), "named pointer to struct field without query tag is not supported")
+		if dst.Nested == nil || dst.Nested.Name != "" {
+			t.Fatalf("dst = %#v, want nested pointer preserved without partial bind", dst)
+		}
+	})
+
 	t.Run("allows query tag on anonymous non-struct field", func(t *testing.T) {
 		type Alias string
 		type request struct {
@@ -557,8 +574,8 @@ func TestBindQuery_DecodeFailuresAreBadRequest(t *testing.T) {
 		}
 
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || dst.Custom.value != "existing-custom" || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing custom value unchanged, and later field untouched", dst)
+		if dst.Name != "kanata" || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
 		}
 	})
 
@@ -577,8 +594,8 @@ func TestBindQuery_DecodeFailuresAreBadRequest(t *testing.T) {
 		}
 
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || !reflect.DeepEqual(dst.Multi.values, []string{"existing"}) || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing multi value unchanged, and later field untouched", dst)
+		if dst.Name != "kanata" || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
 		}
 	})
 
@@ -594,8 +611,8 @@ func TestBindQuery_DecodeFailuresAreBadRequest(t *testing.T) {
 		dst := request{Name: "existing-name", When: when, Note: "existing-note"}
 
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || !dst.When.Equal(when) || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing time value unchanged, and later field untouched", dst)
+		if dst.Name != "kanata" || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
 		}
 	})
 
@@ -611,8 +628,8 @@ func TestBindQuery_DecodeFailuresAreBadRequest(t *testing.T) {
 		dst := request{Name: "existing-name", Whens: append([]time.Time(nil), whens...), Note: "existing-note"}
 
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || !reflect.DeepEqual(dst.Whens, whens) || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing time slice unchanged, and later field untouched", dst)
+		if dst.Name != "kanata" || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
 		}
 	})
 
@@ -628,8 +645,8 @@ func TestBindQuery_DecodeFailuresAreBadRequest(t *testing.T) {
 		dst := request{Name: "existing-name", IDs: append([]int(nil), ids...), Note: "existing-note"}
 
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || !reflect.DeepEqual(dst.IDs, ids) || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing slice unchanged, and later field untouched", dst)
+		if dst.Name != "kanata" || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
 		}
 	})
 
@@ -732,8 +749,8 @@ func TestBindQuery_PointerFieldFailuresAreBadRequest(t *testing.T) {
 		dst := request{Name: "existing-name", Page: page, Note: "existing-note"}
 
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || dst.Page == nil || *dst.Page != 7 || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing pointer unchanged, and later field untouched", dst)
+		if dst.Name != "kanata" || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
 		}
 	})
 
@@ -749,8 +766,8 @@ func TestBindQuery_PointerFieldFailuresAreBadRequest(t *testing.T) {
 		dst := request{Name: "existing-name", Note: "existing-note"}
 
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || dst.When != nil || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, nil pointer unchanged, and later field untouched", dst)
+		if dst.Name != "kanata" || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
 		}
 	})
 
@@ -765,8 +782,8 @@ func TestBindQuery_PointerFieldFailuresAreBadRequest(t *testing.T) {
 		dst := request{Name: "existing-name", Note: "existing-note"}
 
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || dst.Custom != nil || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, nil custom pointer unchanged, and later field untouched", dst)
+		if dst.Name != "kanata" || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
 		}
 	})
 
@@ -781,8 +798,8 @@ func TestBindQuery_PointerFieldFailuresAreBadRequest(t *testing.T) {
 		dst := request{Name: "existing-name", Note: "existing-note"}
 
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || dst.Custom != nil || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, nil multi-value pointer unchanged, and later field untouched", dst)
+		if dst.Name != "kanata" || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
 		}
 	})
 }
@@ -803,8 +820,8 @@ func TestBindQuery_PointerSliceFailuresAreBadRequest(t *testing.T) {
 		dst := request{Name: "existing-name", IDs: []*int{id}, Note: "existing-note"}
 
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || len(dst.IDs) != 1 || dst.IDs[0] == nil || *dst.IDs[0] != 7 || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing slice unchanged, and later field untouched", dst)
+		if dst.Name != "kanata" || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
 		}
 	})
 
@@ -820,8 +837,8 @@ func TestBindQuery_PointerSliceFailuresAreBadRequest(t *testing.T) {
 		dst := request{Name: "existing-name", Whens: []*time.Time{when}, Note: "existing-note"}
 
 		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || len(dst.Whens) != 1 || dst.Whens[0] == nil || dst.Whens[0].Format("15:04:05") != "09:10:11" || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing time slice unchanged, and later field untouched", dst)
+		if dst.Name != "kanata" || dst.Note != "existing-note" {
+			t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
 		}
 	})
 }
@@ -921,34 +938,30 @@ func TestBindQuery_PartialUpdatesPersistOnFieldFailure(t *testing.T) {
 	}
 }
 
-func TestBindQuery_CustomTextDecoderFailureRestoresDeepMutableFieldState(t *testing.T) {
+func TestBindQuery_CustomTextDecoderFailureStopsBeforeLaterField(t *testing.T) {
 	type request struct {
 		Name  string                   `query:"name"`
 		State mutatingFailingTextState `query:"state"`
 		Note  string                   `query:"note"`
 	}
 
-	newState := func() mutatingFailingTextState {
-		value := 7
-		return mutatingFailingTextState{
+	req := httptest.NewRequest(http.MethodGet, "/?name=kanata&state=bad&note=after-error", nil)
+	value := 7
+	dst := request{
+		Name: "existing-name",
+		State: mutatingFailingTextState{
 			Labels:  []string{"stable"},
 			Index:   map[string]int{"count": 1},
 			Meta:    map[string]string{"phase": "stable"},
 			Flags:   []string{"keep"},
 			History: [2]string{"before", "still"},
 			Pointer: &value,
-		}
+		},
+		Note: "existing-note",
 	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?name=kanata&state=bad&note=after-error", nil)
-	wantState := newState()
-	dst := request{Name: "existing-name", State: newState(), Note: "existing-note"}
 
 	_ = assertBadRequest(t, BindQuery(req, &dst))
 	if dst.Name != "kanata" || dst.Note != "existing-note" {
 		t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
-	}
-	if !reflect.DeepEqual(dst.State, wantState) {
-		t.Fatalf("State = %#v, want %#v", dst.State, wantState)
 	}
 }

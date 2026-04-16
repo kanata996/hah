@@ -12,8 +12,8 @@
 // 链式能力或错误语义时，应按核心 public API 变更看待。
 //
 // BindQuery 的目标当前限定为 struct、map[string]string、map[string][]string
-// 或 map[string]any；如果 DTO/tag 形状本身非法，会直接返回普通错误，
-// 而不是按客户端输入错误收敛。
+// 或 map[string]any；如果 DTO/tag 形状本身非法（例如命名的未打 query tag
+// 的 *struct 字段），会直接返回普通错误，而不是按客户端输入错误收敛。
 //
 // 典型用法：
 //   - 读取单个 path/query 参数时，优先使用 Path(...) / Query(...)
@@ -43,6 +43,7 @@
 //   - BindBody 对空 body 不主动报错；是否必填由调用方显式决定。
 //   - RequireBody 与 BindBody 共享同一个非破坏性 body 探测；二者可按调用方需要自由前后组合。
 //   - BindBody 直接解码到传入目标；JSON 缺失字段不会清空目标已有值。
+//   - BindBody / BindQuery 都不是事务性的；若返回错误，目标值可能已经被部分更新。
 //
 // path 输入只依赖 net/http 暴露的 PathValue / Pattern 命名 wildcard 语义。
 // 如果上层 router 有自定义 pattern 语法，应在桥接层先归一化后再写入 Pattern。

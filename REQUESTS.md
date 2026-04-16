@@ -119,7 +119,9 @@ if err := hah.BindQuery(r, &query); err != nil {
 - 重复 query 绑定到切片字段时会保留全部值
 - 重复 query 绑定到标量字段时默认只消费第一个值
 - 缺失参数不会覆盖 DTO 现有值
-- 绑定失败时，前面已经成功写入的字段保持已写状态
+- 绑定不是事务性的；如果返回错误，DTO 可能已经被部分更新，调用方不应继续依赖其精确状态
+- 绑定在遇到第一个字段错误时停止；后续字段不会继续处理
+- 命名的未打 `query` tag 的 `*struct` 字段属于不支持的 DTO 形状，会直接返回普通错误
 - 如果目标 DTO/tag 形状本身非法，直接返回普通错误，不收敛成 `400 bad_request`
 
 它适合“批量投影”，不适合表达请求级规则。像 `Required`、`Default`、`OneOf`、`Min/Max` 这类规则，仍然优先放在 `reqx.Query(...)` 或绑定后的显式校验里。
@@ -147,7 +149,7 @@ if err := hah.BindBody(r, &body); err != nil {
 - 默认使用标准库 `encoding/json`
 - 不接受 `application/*+json`
 - 解码直接作用在传入目标上；JSON 里缺失的字段不会覆盖 DTO 现有值
-- 如果解码在中途失败，前面已经成功写入的字段保持已写状态，失败字段保持其原值
+- 绑定不是事务性的；如果返回错误，DTO 可能已经被部分更新，调用方不应继续依赖其精确状态
 
 `reqx.RequireBody` / `hah.RequireBody` 与 `BindBody` 共享同一个非破坏性 body-presence probe：
 
