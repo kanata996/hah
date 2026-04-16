@@ -1,7 +1,7 @@
 # hah resp 设计方案
 
 - 状态：Locked
-- 版本：v2
+- 版本：v3
 - 锁定日期：2026-04-17
 - 适用范围：
   - `resp.JSON`
@@ -124,18 +124,19 @@
 收敛顺序固定为：
 
 1. `err == nil`：返回 `nil`，不写任何内容
-2. 若输入 error 已表示一次“已开始的响应写回失败”：返回传入的同一个 error，且不得再次写回
-3. `w == nil`：返回 error，且不得写任何内容
-4. 错误链中存在非 `nil` 的 `*errx.HTTPError`：最终状态码取其 `Status()`
-5. `errors.Is(err, context.Canceled)`：最终状态码为 `499`
-6. `errors.Is(err, context.DeadlineExceeded)`：最终状态码为 `504`
-7. 其他情况：最终状态码为 `500`
+2. `w == nil`：返回 error，且不得写任何内容
+3. 错误链中存在非 `nil` 的 `*errx.HTTPError`：最终状态码取被选中公共 HTTP 错误的 `Status()`
+4. `errors.Is(err, context.Canceled)`：最终状态码为 `499`
+5. `errors.Is(err, context.DeadlineExceeded)`：最终状态码为 `504`
+6. 其他情况：最终状态码为 `500`
 
 补充规则：
 
 - typed-nil `*errx.HTTPError` 不视为匹配到公共 HTTP 错误
 - 若错误链里只有 typed-nil `*errx.HTTPError`，则按“未匹配到 `*errx.HTTPError`”继续后续收敛
 - `WriteError` 不得依赖 nil receiver 的 `Status()` / `Detail()` / `Errors()` 行为
+- 若错误链中存在多个可匹配的非 `nil` `*errx.HTTPError`，必须按标准库 `errors.As` 的首次匹配结果选出唯一的“被选中公共 HTTP 错误”
+- 一旦选中某个公共 HTTP 错误，后续 `status` / `code` / `detail` / `errors` 都必须基于同一个对象的归一化公开语义
 - 若匹配到非 `nil` 的 `*errx.HTTPError`，后续 `code` / `detail` / `errors` 从其归一化公开语义提取
 - 若未匹配到非 `nil` 的 `*errx.HTTPError`，则视为框架合成错误，只允许写最小 Problem：`title` / `status` / `code`
 
@@ -188,7 +189,7 @@
   - 不包含 `errors`
 - 若该最小内部错误 Problem 成功写出，`WriteError` 仍返回 `nil`
 - 若首次提交后发生底层写失败，返回写失败 error，且不得尝试改写已开始的响应
-- 若把“已开始的响应写回失败”再次传给 `WriteError`，必须返回同一个 error，且不得写任何内容
+- 首次提交后返回的底层写失败 error 不属于 `WriteError` 的稳定公开输入模型；本文档不承诺再次传给 `WriteError` 时的特殊处理
 
 ## 5. 测试基线
 
@@ -216,7 +217,7 @@
 - `WriteError` 对普通错误写出最小 `500` Problem，且不写 `detail` / `errors`，也不泄漏内部错误文本
 - `WriteError(nil)` 是 no-op
 - Problem payload 无法编码时，`WriteError` 回退为最小内部错误 Problem
-- 若输入本身表示一次已开始的响应写回失败，`WriteError` 返回同一个 error 且不再写回
+- 多个可匹配 `*errx.HTTPError` 同时存在时，按 `errors.As` 首次匹配结果收敛
 - 错误链同时匹配 `*errx.HTTPError` 与 `context` 错误时，优先按 `*errx.HTTPError` 收敛
 - typed-nil `*errx.HTTPError` 不算匹配到公共 HTTP 错误；此时继续按 `context` 错误或默认 `500` 收敛
 - 若候选状态码不属于 `499` 或 `400..599`，`WriteError` 必须先把状态码收敛为 `500`

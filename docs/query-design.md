@@ -1,7 +1,7 @@
 # hah Query 设计方案
 
 - 状态：Locked
-- 版本：v2
+- 版本：v3
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.Query(...)`
@@ -126,7 +126,25 @@
 - `OneOf(...)`、`Match(...)`、`Check(...)` 每调用一次都会追加一条独立约束
 - `Min` / `Max`、`MinLen` / `MaxLen`、`After` / `Before` 属于 named 约束；重复声明时以后一次为准，并按最后一次声明的位置参与执行
 
-### 2.6 类型专属约束
+### 2.6 typed builder 的 `Get()` 执行顺序
+
+对除 `Values()` 之外的 typed builder，`Get()` 执行顺序固定为：
+
+1. 若 builder 已记录 usage error，立即返回首次记录的 usage error
+2. 读取当前 request 中该 key 的当前值状态，只区分三种状态：缺失、恰好一个值、多个值
+3. 若为多个值，立即返回客户端输入错误；不进入缺失处理、类型解析或后续约束
+4. 若为缺失：
+   - 声明了 `Required()`：返回 `required` violation
+   - 未声明 `Required()` 且声明了 `Default(v)`：以 `v` 作为候选值继续后续约束与 `Check(...)`
+   - 未声明 `Required()` 且未声明 `Default(v)`：直接返回类型零值，不进入类型解析、built-in constraint 或 `Check(...)`
+5. 若为恰好一个请求值：先按类型入口完成解析；解析失败立即返回客户端输入错误
+6. 对进入约束阶段的候选值，按本文档 2.5 的顺序执行 built-in constraint 与 `Check(...)`
+7. 若候选值来自请求输入，则约束失败返回客户端输入错误；若候选值来自 `Default(v)`，则约束失败返回 usage error
+8. 全部成功后返回最终值
+
+该顺序只锁 typed builder；`Values()` 不参与“单值重复 key”判定。
+
+### 2.7 类型专属约束
 
 `String()` 额外支持：
 
@@ -243,4 +261,6 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 - 空字符串只有 `String()` 接受，其他类型按解析失败处理
 - `Check(...)` 失败时公开 detail 仍保持稳定 `is invalid`
 - usage error 的 sticky 语义
+- typed builder 的 `Get()` 执行顺序与错误优先级固定
+- typed builder 命中重复 key 时，不进入类型解析或后续约束
 - 同一 builder 多次 `Get()` 会重新读取当前 request query

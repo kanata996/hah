@@ -1,7 +1,7 @@
 # hah Path 设计方案
 
 - 状态：Locked
-- 版本：v2
+- 版本：v3
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.Path(...)`
@@ -98,6 +98,8 @@
 - `Check(nil)` 返回普通 usage error
 - 自定义 `Check(...)` 返回非 `nil` error 时，整体视为校验失败
 - `Check(...)` 的 error 文本不是默认公开 detail 契约
+- builder 一旦记录 usage error，后续链式调用不会清除该状态
+- `Get()` 返回首次记录的 usage error
 
 ### 2.5 约束执行顺序
 
@@ -106,7 +108,22 @@
 - `OneOf(...)`、`Match(...)`、`Check(...)` 每调用一次都会追加一条独立约束
 - `Min` / `Max`、`MinLen` / `MaxLen` 属于 named 约束；重复声明时以后一次为准，并按最后一次声明的位置参与执行
 
-### 2.6 类型专属约束
+### 2.6 `Get()` 执行顺序
+
+`Path(...)` 的 `Get()` 执行顺序固定为：
+
+1. 若 builder 已记录 usage error，立即返回首次记录的 usage error
+2. 先按本文档 2.2 的规则判定该 path 参数是“缺失”还是“存在”
+3. 若为缺失：
+   - 声明了 `Required()`：返回 `required` violation
+   - 未声明 `Required()` 且声明了 `Default(v)`：以 `v` 作为候选值继续后续约束与 `Check(...)`
+   - 未声明 `Required()` 且未声明 `Default(v)`：直接返回类型零值，不进入类型解析、built-in constraint 或 `Check(...)`
+4. 若为存在：先按类型入口完成解析；解析失败立即返回客户端输入错误
+5. 对进入约束阶段的候选值，按本文档 2.5 的顺序执行 built-in constraint 与 `Check(...)`
+6. 若候选值来自请求输入，则约束失败返回客户端输入错误；若候选值来自 `Default(v)`，则约束失败返回 usage error
+7. 全部成功后返回最终值
+
+### 2.7 类型专属约束
 
 `String()` 额外支持：
 
@@ -196,6 +213,8 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 - 非法 default 值会返回 usage error
 - `Check(nil)` usage error
 - `OneOf(...)`、`Match(...)`、`Check(...)` 的顺序与短路语义
+- usage error 的 sticky 语义
+- `Get()` 的执行顺序与错误优先级固定
 - `OneOf()` 空参数 usage error
 - `Match(nil)` usage error
 - `Match(...)` 的匹配语义等同于 `Regexp.MatchString`
