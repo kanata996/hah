@@ -109,6 +109,15 @@ func TestQuery_RequiredAndInvalidViolations(t *testing.T) {
 		})
 	})
 
+	t.Run("blank check detail falls back to default invalid detail", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?page=3", nil)
+
+		_, err := Query(req, "page").Int().Check(func(value int) error {
+			return errors.New("   ")
+		}).Get()
+		assertInvalidViolationAt(t, err, "page", errx.ViolationInQuery)
+	})
+
 	t.Run("present empty string remains empty when required", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?name=", nil)
 
@@ -167,7 +176,7 @@ func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("values returns raw values including empty string", func(t *testing.T) {
+	t.Run("values returns decoded values including empty string", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?tag=&tag=b", nil)
 
 		got, err := Query(req, "tag").Values().Get()
@@ -176,6 +185,18 @@ func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
 		}
 		if !reflect.DeepEqual(got, []string{"", "b"}) {
 			t.Fatalf("tag = %#v, want [\"\" b]", got)
+		}
+	})
+
+	t.Run("values follow net slash url decoding", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?tag=a+b&tag=a%20b&tag=%2B", nil)
+
+		got, err := Query(req, "tag").Values().Get()
+		if err != nil {
+			t.Fatalf("Query().Values().Get() error = %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{"a b", "a b", "+"}) {
+			t.Fatalf("tag = %#v, want [\"a b\" \"a b\" \"+\"]", got)
 		}
 	})
 
@@ -233,6 +254,23 @@ func TestQueryValuesParam_SuccessAndErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("later default overrides earlier default", func(t *testing.T) {
+		def := []string{"first"}
+		override := []string{"second"}
+		builder := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().
+			Default(def).
+			Default(override)
+		override[0] = "mutated"
+
+		got, err := builder.Get()
+		if err != nil {
+			t.Fatalf("Query().Values().Default().Default().Get() error = %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{"second"}) {
+			t.Fatalf("tag = %#v, want [second]", got)
+		}
+	})
+
 	t.Run("required missing returns query violation", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items", nil)
 
@@ -277,6 +315,11 @@ func TestQueryBuilder_UsageAndOptionalBehavior(t *testing.T) {
 		assertUsageErrorContains(t, err, "param builder must be created with Path or Query")
 	})
 
+	t.Run("zero typed builder", func(t *testing.T) {
+		_, err := (&StringParam{}).Get()
+		assertUsageErrorContains(t, err, "param builder must be created with Path or Query")
+	})
+
 	t.Run("missing optional returns zero", func(t *testing.T) {
 		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "name").String().Get()
 		if err != nil {
@@ -306,6 +349,24 @@ func TestQueryBuilder_UsageAndOptionalBehavior(t *testing.T) {
 	t.Run("default then required conflict", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "name").String().Default("kanata").Required().Get()
 		assertUsageErrorContains(t, err, "required and default are mutually exclusive")
+	})
+
+	t.Run("required is idempotent", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "name").String().Required().Required().Get()
+		assertRequiredViolationAt(t, err, "name", errx.ViolationInQuery)
+	})
+
+	t.Run("later scalar default overrides earlier default", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
+			Default(1).
+			Default(2).
+			Get()
+		if err != nil {
+			t.Fatalf("Query().Int().Default().Default().Get() error = %v", err)
+		}
+		if got != 2 {
+			t.Fatalf("page = %d, want 2", got)
+		}
 	})
 }
 

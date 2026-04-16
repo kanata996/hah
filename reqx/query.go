@@ -84,7 +84,7 @@ func (p *QueryParam) UnixMilliTime() *TimeParam {
 	return newTimeParam(p.spec, parseUnixMilliTime)
 }
 
-// Values 读取 query 参数的全部原始值。
+// Values 读取 query 参数的全部解析后值。
 func (p *QueryParam) Values() *ValuesParam {
 	return newValuesParam(p.spec)
 }

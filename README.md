@@ -196,14 +196,15 @@ func main() {
 - `hah.Path(...)` 面向 path segment 中的资源标识，只保留 `String()`、`UUID()`、`Int()`、`Int64()`、`Uint()`、`Uint64()`
 - `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`、`UnixMilliTime()`
 - `hah.Query(...).String()` / `Int()` / `UUID()` 等标量 helper 在重复 query key 上默认只消费第一个值
-- `hah.Query(...).Values()` 可直接读取同名 query 参数的全部原始值；如果你需要批量结构化解码，优先用 `reqx.BindQuery`
+- `hah.Query(...).Values()` 可直接读取同名 query 参数的全部解析后值；如果你需要批量结构化解码，优先用 `reqx.BindQuery`
 
 DTO binding 的边界：
 
 - `hah.BindQuery(...)` / `reqx.BindQuery(...)` 只负责 query -> DTO 的映射，不内建请求级校验
-- `hah.BindQuery(...)` / `reqx.BindQuery(...)` 的目标必须是 struct、`map[string]string`、`map[string][]string` 或 `map[string]any`；如果 DTO/tag 形状本身非法（例如命名的未打 `query` tag 的 `*struct` 字段），会直接返回普通错误
-- `hah.BindBody(...)` / `reqx.BindBody(...)` 只负责 JSON body -> DTO 的解码；解码直接作用在传入 target 上，JSON 里缺失的字段不会清空 DTO 现有值；如果返回错误，target 可能已经被部分更新
-- `hah.RequireBody(...)` / `reqx.RequireBody(...)` 与 `BindBody(...)` 共享同一个非破坏性 body 探测；无论你先要求 body 必填还是先绑定，后续都还能继续读取同一个请求 body
+- `hah.BindQuery(...)` / `reqx.BindQuery(...)` 的目标必须是 struct 或 `map[string]string`；对于 struct，只有显式 `query` tag 的字段会参与绑定，嵌套 DTO 需要显式写 `query:",inline"`，普通 `query:"name"` 字段只支持文档定义的常见内建标量字段及其一级指针
+- `hah.BindQuery(...)` / `reqx.BindQuery(...)` 默认忽略未知 query key；重复 query key 只消费第一个值；malformed raw query 返回稳定 `400 bad_request` 且不修改 target；如果 DTO/tag 形状本身非法，也会先返回普通错误且不修改 target
+- `hah.BindBody(...)` / `reqx.BindBody(...)` 只负责 JSON body -> DTO 的解码；公开只支持非 `nil` 的 `*struct` target，且字段支持范围按公开表闭集处理，超出表格即 usage error；非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，未知字段默认拒绝；截断 JSON 仍收敛为 `invalid_json`，但非 JSON 语义的 body read failure 返回普通 error；绑定先解到临时值，成功后才一次性提交，因此失败不会污染 target，缺失字段也不会继承旧值
+- `hah.RequireBody(...)` / `reqx.RequireBody(...)` 与 `BindBody(...)` 共享同一个非破坏性 body 探测；零字节 body 对 `BindBody(...)` 是 no-op、对 `RequireBody(...)` 是缺失 body；仅空白字符 body 对 `RequireBody(...)` 视为存在、对 `BindBody(...)` 视为 `invalid_json`
 - `hah.BindQuery(...)` / `reqx.BindQuery(...)` 也不是事务性的；如果返回错误，target 可能已经被部分更新，调用方不应依赖其精确状态
 - header 通常直接使用标准库 `r.Header.Get(...)` / `r.Header.Values(...)`
 
@@ -219,7 +220,10 @@ tags, err := hah.Query(r, "tag").Values().Get()
 ## 请求输入文档
 
 - [`REQUESTS.md`](./REQUESTS.md)：`reqx` 的 request helper、binding、显式 post-bind validation 模式和常见组合方式
-  其中也包含 `reqx` 的自定义解码契约，例如 `BindUnmarshaler`、`BindMultipleUnmarshaler`、`encoding.TextUnmarshaler`、`time.Duration`、`time.Time` + `format:"..."`，以及重复值输入的处理方式
+  其中也包含 `BindQuery(...)` 的封闭字段白名单与单值 query 输入的处理方式
+- [docs/path-design.md](./docs/path-design.md)：`Path(...)` 的公开 API、source 语义、支持类型与错误边界
+- [docs/query-design.md](./docs/query-design.md)：`Query(...)` 的公开 API、支持类型、链式校验与错误边界
+- [docs/binding-query-design.md](./docs/binding-query-design.md)：`BindQuery(...)` 的公开契约与演进边界
 
 ## 错误响应
 

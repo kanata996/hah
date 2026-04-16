@@ -241,7 +241,7 @@ type StringParam struct {
 	lastConstraint rangeConstraint
 }
 
-// ValuesParam 读取并校验 query 多值参数的原始 []string。
+// ValuesParam 读取并校验 query 多值参数的解析后 []string。
 type ValuesParam struct {
 	value multiParamValue[[]string]
 }

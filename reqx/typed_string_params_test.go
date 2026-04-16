@@ -171,6 +171,41 @@ func TestStringParam_ValidationAndUsageErrors(t *testing.T) {
 		})
 	})
 
+	t.Run("check before one-of short-circuits with custom detail", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?status=pending", nil), "status").String().
+			Check(func(value string) error {
+				return errors.New("custom order detail")
+			}).
+			OneOf("open", "closed").
+			Get()
+		assertViolation(t, err, errx.Violation{
+			Field:  "status",
+			In:     errx.ViolationInQuery,
+			Code:   errx.ViolationCodeInvalid,
+			Detail: "custom order detail",
+		})
+	})
+
+	t.Run("one-of before check short-circuits with default invalid detail", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?status=pending", nil), "status").String().
+			OneOf("open", "closed").
+			Check(func(value string) error {
+				return errors.New("custom order detail")
+			}).
+			Get()
+		assertInvalidViolationAt(t, err, "status", errx.ViolationInQuery)
+	})
+
+	t.Run("match before check short-circuits with default invalid detail", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?slug=GO", nil), "slug").String().
+			Match(regexp.MustCompile(`^[a-z]+$`)).
+			Check(func(value string) error {
+				return errors.New("custom order detail")
+			}).
+			Get()
+		assertInvalidViolationAt(t, err, "slug", errx.ViolationInQuery)
+	})
+
 	t.Run("one-of invalid", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?status=pending", nil), "status").String().OneOf("open", "closed").Get()
 		assertInvalidViolationAt(t, err, "status", errx.ViolationInQuery)
