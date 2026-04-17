@@ -17,6 +17,10 @@ type bindBodyNamedTags []string
 
 type bindBodyReadErrorCloser struct{ err error }
 type bindBodyUnsupportedJSONDecoder struct{}
+type bindBodyUnsupportedTextDecoder string
+type bindBodyTopLevelTextDecoder struct {
+	Name string `json:"name"`
+}
 type bindBodyTopLevelJSONDecoder struct {
 	Name string `json:"name"`
 }
@@ -26,7 +30,9 @@ func (r bindBodyReadErrorCloser) Close() error             { return nil }
 func (*bindBodyUnsupportedJSONDecoder) UnmarshalJSON([]byte) error {
 	return nil
 }
-func (*bindBodyTopLevelJSONDecoder) UnmarshalJSON([]byte) error { return nil }
+func (*bindBodyUnsupportedTextDecoder) UnmarshalText([]byte) error { return nil }
+func (*bindBodyTopLevelTextDecoder) UnmarshalText([]byte) error    { return nil }
+func (*bindBodyTopLevelJSONDecoder) UnmarshalJSON([]byte) error    { return nil }
 
 func TestBindBody_Contracts(t *testing.T) {
 	t.Run("zero byte body is noop and does not require json content type", func(t *testing.T) {
@@ -328,6 +334,27 @@ func TestBindBody_AdditionalBaselineContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("supports struct slice elements", func(t *testing.T) {
+		type address struct {
+			Street string `json:"street"`
+		}
+		type request struct {
+			Addresses []address `json:"addresses"`
+		}
+
+		var dst request
+		err := BindBody(
+			newJSONRequest(http.MethodPost, "/", `{"addresses":[{"street":"main"},{"street":"second"}]}`),
+			&dst,
+		)
+		if err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if len(dst.Addresses) != 2 || dst.Addresses[0].Street != "main" || dst.Addresses[1].Street != "second" {
+			t.Fatalf("addresses = %#v, want decoded struct slice", dst.Addresses)
+		}
+	})
+
 	t.Run("slice pointer time and nested struct failures are invalid json and preserve target", func(t *testing.T) {
 		t.Run("slice element type mismatch", func(t *testing.T) {
 			type request struct {
@@ -436,13 +463,25 @@ func TestBindBody_UsageAndBoundaryContracts(t *testing.T) {
 	})
 
 	t.Run("rejects top level custom decoder target", func(t *testing.T) {
-		dst := bindBodyTopLevelJSONDecoder{Name: "existing"}
+		t.Run("json unmarshaler", func(t *testing.T) {
+			dst := bindBodyTopLevelJSONDecoder{Name: "existing"}
 
-		err := BindBody(newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`), &dst)
-		assertNotHTTPError(t, err)
-		if dst != (bindBodyTopLevelJSONDecoder{Name: "existing"}) {
-			t.Fatalf("dst = %#v, want unchanged", dst)
-		}
+			err := BindBody(newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`), &dst)
+			assertNotHTTPError(t, err)
+			if dst != (bindBodyTopLevelJSONDecoder{Name: "existing"}) {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
+
+		t.Run("text unmarshaler", func(t *testing.T) {
+			dst := bindBodyTopLevelTextDecoder{Name: "existing"}
+
+			err := BindBody(newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`), &dst)
+			assertNotHTTPError(t, err)
+			if dst != (bindBodyTopLevelTextDecoder{Name: "existing"}) {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
 	})
 
 	t.Run("rejects unsupported body field families", func(t *testing.T) {
@@ -457,6 +496,14 @@ func TestBindBody_UsageAndBoundaryContracts(t *testing.T) {
 		t.Run("custom json decoder field", func(t *testing.T) {
 			type request struct {
 				Value bindBodyUnsupportedJSONDecoder `json:"value"`
+			}
+
+			assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &request{}))
+		})
+
+		t.Run("custom text decoder field", func(t *testing.T) {
+			type request struct {
+				Value bindBodyUnsupportedTextDecoder `json:"value"`
 			}
 
 			assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &request{}))

@@ -380,6 +380,23 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 				t.Fatalf("dst = %#v, want unchanged", dst)
 			}
 		})
+
+		t.Run("duplicate planned fields", func(t *testing.T) {
+			type request struct {
+				Name  string `query:"name"`
+				Alias string `query:"name"`
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.URL.RawQuery = "%"
+
+			dst := request{Name: "existing", Alias: "keep"}
+			err := BindQuery(req, &dst)
+			assertNotHTTPError(t, err)
+			if dst != (request{Name: "existing", Alias: "keep"}) {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
 	})
 
 	t.Run("untagged and tagged unexported fields are ignored before validation", func(t *testing.T) {
