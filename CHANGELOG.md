@@ -13,18 +13,16 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
-## [v0.6.1] - 2026-04-18
+## [v0.6.0] - 2026-04-18
+
+### Fixed
+
+- Normalized typed-nil `error` values passed to `errx.NewHTTPErrorWithCause(...)` so they are treated as no cause, keeping `HTTPError.Error()` / `Unwrap()` / `errors.Is` / `errors.As` aligned with the public no-cause contract.
 
 ### Documentation
 
 - Refreshed `README.md` around the root `hah` package's default usage path, package boundaries, public API summary, and boundary responsibilities.
 - Updated `REQUESTS.md` to align the request-input guide with the root facade, including the current `hah.InBody` / `hah.InHeader` and `hah.CodeRequired` examples.
-
-## [v0.6.0] - 2026-04-17
-
-### Fixed
-
-- Normalized typed-nil `error` values passed to `errx.NewHTTPErrorWithCause(...)` so they are treated as no cause, keeping `HTTPError.Error()` / `Unwrap()` / `errors.Is` / `errors.As` aligned with the public no-cause contract.
 
 ## [v0.5.3] - 2026-04-16
 
