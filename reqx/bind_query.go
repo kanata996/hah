@@ -222,10 +222,7 @@ func disallowedBindQueryDecoder(t reflect.Type) bool {
 }
 
 func setBindQueryPlannedField(dst reflect.Value, plan bindQueryFieldPlan, raw string) error {
-	field, err := fieldByIndexForSet(dst, plan.index)
-	if err != nil {
-		return err
-	}
+	field := fieldByIndexForSet(dst, plan.index)
 
 	if field.Kind() == reflect.Pointer {
 		elem := reflect.New(field.Type().Elem())
@@ -239,13 +236,13 @@ func setBindQueryPlannedField(dst reflect.Value, plan bindQueryFieldPlan, raw st
 	return setBindQueryLeaf(field, raw)
 }
 
-func fieldByIndexForSet(v reflect.Value, index []int) (reflect.Value, error) {
+func fieldByIndexForSet(v reflect.Value, index []int) reflect.Value {
 	current := v
 	for _, i := range index {
 		field := current.Field(i)
 		if field.Kind() == reflect.Pointer {
 			if field.Type().Elem().Kind() != reflect.Struct {
-				return field, nil
+				return field
 			}
 			if field.IsNil() {
 				field.Set(reflect.New(field.Type().Elem()))
@@ -255,7 +252,7 @@ func fieldByIndexForSet(v reflect.Value, index []int) (reflect.Value, error) {
 		}
 		current = field
 	}
-	return current, nil
+	return current
 }
 
 func setBindQueryLeaf(field reflect.Value, raw string) error {
