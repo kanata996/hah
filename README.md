@@ -171,7 +171,6 @@ func main() {
 - `NewHTTPErrorWithCause`
 - `WriteError`
 - `JSON`
-- `JSONBlob`
 - `OK`
 - `Created`
 - `NoContent`

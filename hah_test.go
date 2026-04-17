@@ -260,21 +260,6 @@ func TestJSON_DelegatesToResp(t *testing.T) {
 	}
 }
 
-// JSONBlob 会通过根包 facade 直接写回原始 JSON 字节。
-func TestJSONBlob_DelegatesToResp(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	if err := JSONBlob(rr, http.StatusAccepted, []byte(`{"id":"u_1"}`)); err != nil {
-		t.Fatalf("JSONBlob() error = %v", err)
-	}
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
-	}
-	if body := rr.Body.String(); body != `{"id":"u_1"}` {
-		t.Fatalf("body = %q, want raw JSON", body)
-	}
-}
-
 // Created 会通过根包 facade 写回标准 201 JSON 响应。
 func TestCreated_DelegatesToResp(t *testing.T) {
 	rr := httptest.NewRecorder()

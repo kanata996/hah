@@ -89,11 +89,6 @@ func JSON(w http.ResponseWriter, status int, data any) error {
 	return resp.JSON(w, status, data)
 }
 
-// JSONBlob 直接写回原始 JSON 字节。
-func JSONBlob(w http.ResponseWriter, status int, body []byte) error {
-	return resp.JSONBlob(w, status, body)
-}
-
 // OK 写回 200 成功响应。
 func OK(w http.ResponseWriter, data any) error {
 	return resp.OK(w, data)

@@ -32,15 +32,6 @@ func JSON(w http.ResponseWriter, status int, data any) error {
 	return writeJSON(w, status, data)
 }
 
-// JSONBlob 直接写出原始 JSON 字节。
-// 调用方需要自行保证 body 是合法 JSON。
-func JSONBlob(w http.ResponseWriter, status int, body []byte) error {
-	if err := validateJSONBodyWriter(w, status); err != nil {
-		return err
-	}
-	return writePreparedJSONBytes(w, status, jsonContentType, body)
-}
-
 // writeJSON 是通用 JSON 成功响应的核心路径。
 // 它先校验响应边界，再编码 payload，最后写出已准备好的 JSON 字节，
 // 避免无效状态码或空 writer 触发多余编码，也避免底层写回重复做同一轮校验。
