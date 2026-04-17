@@ -284,3 +284,115 @@ func TestPathBuilder_ServeMuxPathValueContracts(t *testing.T) {
 		}
 	})
 }
+
+func TestPathBuilder_InternalPathLookupContracts(t *testing.T) {
+	t.Run("nil request returns missing path lookup", func(t *testing.T) {
+		got, ok := pathParamValues(nil, "id")
+		if ok {
+			t.Fatal("pathParamValues(nil, id) reported present")
+		}
+		if got != nil {
+			t.Fatalf("pathParamValues(nil, id) = %v, want nil", got)
+		}
+	})
+
+	t.Run("catch all wildcard must be terminal", func(t *testing.T) {
+		if pathHasWildcard("/files/{rest...}/meta", "rest") {
+			t.Fatal("pathHasWildcard accepted non-terminal catch-all wildcard")
+		}
+	})
+}
+
+func TestPathBuilder_InternalPathPatternPartContracts(t *testing.T) {
+	testCases := []struct {
+		name        string
+		pattern     string
+		wantPattern string
+		wantOK      bool
+	}{
+		{
+			name:    "empty pattern rejected",
+			pattern: "",
+		},
+		{
+			name:        "plain path preserved",
+			pattern:     "/accounts/{id}",
+			wantPattern: "/accounts/{id}",
+			wantOK:      true,
+		},
+		{
+			name:    "method qualified path requires path part",
+			pattern: "GET \t",
+		},
+		{
+			name:    "method qualified path requires leading slash",
+			pattern: "GET accounts/{id}",
+		},
+		{
+			name:    "method qualified path rejects whitespace in path",
+			pattern: "GET /accounts /{id}",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotPattern, gotOK := pathPatternPart(tc.pattern)
+			if gotOK != tc.wantOK {
+				t.Fatalf("pathPatternPart(%q) ok = %v, want %v", tc.pattern, gotOK, tc.wantOK)
+			}
+			if gotPattern != tc.wantPattern {
+				t.Fatalf("pathPatternPart(%q) pattern = %q, want %q", tc.pattern, gotPattern, tc.wantPattern)
+			}
+		})
+	}
+}
+
+func TestPathBuilder_InternalWildcardNameContracts(t *testing.T) {
+	t.Run("wildcard name requires letter or underscore prefix", func(t *testing.T) {
+		if isValidPathWildcardName("9id") {
+			t.Fatal("isValidPathWildcardName accepted a digit-prefixed name")
+		}
+	})
+}
+
+func TestPathBuilder_InternalPatternMethodContracts(t *testing.T) {
+	t.Run("empty method rejected", func(t *testing.T) {
+		if isValidPathPatternMethod("") {
+			t.Fatal("isValidPathPatternMethod accepted an empty method")
+		}
+	})
+
+	testCases := []struct {
+		name string
+		b    byte
+		want bool
+	}{
+		{
+			name: "digit is allowed",
+			b:    '9',
+			want: true,
+		},
+		{
+			name: "lowercase letter is allowed",
+			b:    'g',
+			want: true,
+		},
+		{
+			name: "tchar punctuation is allowed",
+			b:    '-',
+			want: true,
+		},
+		{
+			name: "separator is rejected",
+			b:    '=',
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isPathPatternMethodByte(tc.b); got != tc.want {
+				t.Fatalf("isPathPatternMethodByte(%q) = %v, want %v", tc.b, got, tc.want)
+			}
+		})
+	}
+}
