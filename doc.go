@@ -15,12 +15,11 @@
 // 公开 API：
 //   - request helper：Path、Query
 //   - 绑定入口：BindQuery、BindBody
-//   - 绑定相关类型：BindUnmarshaler、BindMultipleUnmarshaler
 //   - 请求级规则 helper：RequireBody、InvalidRequest
 //   - 公共错误模型：Violation、HTTPError、NewHTTPError、NewHTTPErrorWithCause
-//   - 公开 violation 常量：ViolationCode*、ViolationIn*
+//   - 公开 violation 常量：Code*、In*
 //   - 错误响应入口：WriteError
-//   - 成功响应入口：JSON、JSONBlob、OK、Created、NoContent
+//   - 成功响应入口：JSON、OK、Created、NoContent
 //
 // 根包暴露大多数 handler 会直接用到的 facade；如果你需要更细粒度的绑定、
 // request helper 或底层类型，请直接导入 reqx、errx 或 resp。

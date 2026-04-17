@@ -122,7 +122,7 @@ func TestRequireBody_DelegatesToReqx(t *testing.T) {
 	req.ContentLength = -1
 
 	violation := assertSingleRootViolation(t, RequireBody(req))
-	if violation.Field != "body" || violation.In != errx.ViolationInBody || violation.Code != errx.ViolationCodeRequired || violation.Detail != "is required" {
+	if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -131,11 +131,11 @@ func TestRequireBody_DelegatesToReqx(t *testing.T) {
 func TestInvalidRequest_DelegatesToReqx(t *testing.T) {
 	violation := assertSingleRootViolation(t, InvalidRequest(Violation{
 		Field: "name",
-		In:    ViolationInBody,
-		Code:  ViolationCodeRequired,
+		In:    InBody,
+		Code:  CodeRequired,
 	}))
 
-	if violation.Field != "name" || violation.In != ViolationInBody || violation.Code != ViolationCodeRequired || violation.Detail != "is required" {
+	if violation.Field != "name" || violation.In != InBody || violation.Code != CodeRequired || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -145,8 +145,8 @@ func TestNewHTTPError_DelegatesToErrx(t *testing.T) {
 	err := NewHTTPError(http.StatusConflict, "account_conflict", "account already exists").WithViolations([]Violation{
 		{
 			Field:  "name",
-			In:     ViolationInBody,
-			Code:   ViolationCodeInvalid,
+			In:     InBody,
+			Code:   CodeInvalid,
 			Detail: "is invalid",
 		},
 	})
@@ -162,7 +162,7 @@ func TestNewHTTPError_DelegatesToErrx(t *testing.T) {
 	}
 
 	violation := assertSingleRootViolation(t, err)
-	if violation.Field != "name" || violation.In != ViolationInBody || violation.Code != ViolationCodeInvalid || violation.Detail != "is invalid" {
+	if violation.Field != "name" || violation.In != InBody || violation.Code != CodeInvalid || violation.Detail != "is invalid" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -181,8 +181,8 @@ func TestNewHTTPErrorWithCause_DelegatesToErrx(t *testing.T) {
 	if got := err.Code(); got != "internal_error" {
 		t.Fatalf("Code() = %q, want internal_error", got)
 	}
-	if got := err.Error(); got != "db timeout" {
-		t.Fatalf("Error() = %q, want db timeout", got)
+	if got := err.Error(); got != "Internal Server Error" {
+		t.Fatalf("Error() = %q, want Internal Server Error", got)
 	}
 }
 
@@ -257,21 +257,6 @@ func TestJSON_DelegatesToResp(t *testing.T) {
 	}
 	if body := rr.Body.String(); body != "{\"id\":\"u_1\"}\n" {
 		t.Fatalf("body = %q, want compact JSON", body)
-	}
-}
-
-// JSONBlob 会通过根包 facade 直接写回原始 JSON 字节。
-func TestJSONBlob_DelegatesToResp(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	if err := JSONBlob(rr, http.StatusAccepted, []byte(`{"id":"u_1"}`)); err != nil {
-		t.Fatalf("JSONBlob() error = %v", err)
-	}
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
-	}
-	if body := rr.Body.String(); body != `{"id":"u_1"}` {
-		t.Fatalf("body = %q, want raw JSON", body)
 	}
 }
 
@@ -350,8 +335,8 @@ func assertSingleRootViolation(t *testing.T, err error) Violation {
 
 	return Violation{
 		Field:  stringValue(violationMap["field"]),
-		In:     stringValue(violationMap["in"]),
-		Code:   stringValue(violationMap["code"]),
+		In:     errx.ViolationIn(stringValue(violationMap["in"])),
+		Code:   errx.ViolationCode(stringValue(violationMap["code"])),
 		Detail: stringValue(violationMap["detail"]),
 	}
 }

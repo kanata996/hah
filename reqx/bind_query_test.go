@@ -1,954 +1,589 @@
 package reqx
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/google/uuid"
 )
 
-type customParamValue struct {
-	value string
-	err   error
-}
+type bindQueryNamedString string
+type bindQueryNamedSlice []string
 
-func (v *customParamValue) UnmarshalParam(param string) error {
-	if v.err != nil {
-		return v.err
-	}
-	v.value = param
-	return nil
-}
+type bindQueryTextValue string
 
-type customParamsValue struct {
-	values []string
-	err    error
-}
+func (*bindQueryTextValue) UnmarshalText([]byte) error { return nil }
 
-var _ BindMultipleUnmarshaler = (*customParamsValue)(nil)
+func TestBindQuery_Contracts(t *testing.T) {
+	t.Run("binds supported leaf types and inline structs", func(t *testing.T) {
+		type inlineFields struct {
+			When  time.Time     `query:"when"`
+			Wait  time.Duration `query:"wait"`
+			Token uuid.UUID     `query:"token"`
+		}
+		type request struct {
+			Name    bindQueryNamedString `query:"name"`
+			Enabled bool                 `query:"enabled"`
+			Count   *int                 `query:"count"`
+			Inline  inlineFields         `query:",inline"`
+		}
 
-func (v *customParamsValue) UnmarshalParams(params []string) error {
-	if v.err != nil {
-		return v.err
-	}
-	v.values = append([]string(nil), params...)
-	return nil
-}
+		token := uuid.New()
+		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&enabled=true&count=7&when=2026-04-13T10:00:00Z&wait=5s&token="+token.String(), nil)
 
-type mutatingFailingParamValue struct {
-	value string
-}
+		var dst request
+		if err := BindQuery(req, &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Name != "kanata" || !dst.Enabled || dst.Count == nil || *dst.Count != 7 || dst.Inline.Wait != 5*time.Second || dst.Inline.Token != token {
+			t.Fatalf("dst = %#v, want bound supported fields", dst)
+		}
+		if got := dst.Inline.When.UTC().Format(time.RFC3339); got != "2026-04-13T10:00:00Z" {
+			t.Fatalf("when = %q, want 2026-04-13T10:00:00Z", got)
+		}
+	})
 
-func (v *mutatingFailingParamValue) UnmarshalParam(param string) error {
-	v.value = param
-	return errors.New("custom failed")
-}
+	t.Run("missing keys do not inherit existing values", func(t *testing.T) {
+		type request struct {
+			Name    string `query:"name"`
+			Enabled bool   `query:"enabled"`
+		}
 
-type mutatingFailingParamsValue struct {
-	values []string
-}
+		dst := request{Name: "existing", Enabled: true}
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst != (request{}) {
+			t.Fatalf("dst = %#v, want zero value struct", dst)
+		}
+	})
 
-func (v *mutatingFailingParamsValue) UnmarshalParams(params []string) error {
-	v.values = append([]string(nil), params...)
-	return errors.New("multi failed")
-}
+	t.Run("duplicate key returns bad request and preserves target", func(t *testing.T) {
+		type request struct {
+			Page int `query:"page"`
+		}
 
-type alwaysFailingParamValue struct{}
+		dst := request{Page: 9}
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?page=1&page=2", nil), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if dst != (request{Page: 9}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
 
-func (*alwaysFailingParamValue) UnmarshalParam(string) error {
-	return errors.New("custom failed")
-}
+	t.Run("unknown repeated key also returns bad request", func(t *testing.T) {
+		type request struct {
+			Name string `query:"name"`
+		}
 
-type alwaysFailingParamsValue struct{}
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?extra=1&extra=2", nil), &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+	})
 
-func (*alwaysFailingParamsValue) UnmarshalParams([]string) error {
-	return errors.New("multi failed")
-}
+	t.Run("empty string only string family accepts", func(t *testing.T) {
+		type request struct {
+			Name    bindQueryNamedString `query:"name"`
+			Enabled bool                 `query:"enabled"`
+		}
 
-type customTextValue string
+		var dst request
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() string family error = %v", err)
+		}
+		if dst.Name != "" {
+			t.Fatalf("name = %q, want empty string", dst.Name)
+		}
 
-func (v *customTextValue) UnmarshalText(text []byte) error {
-	if string(text) == "bad" {
-		return errors.New("bad text")
-	}
-	*v = customTextValue(text)
-	return nil
-}
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?enabled=", nil), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+	})
 
-type mutatingFailingTextState struct {
-	Labels     []string
-	Index      map[string]int
-	Meta       any
-	Flags      any
-	History    [2]string
-	Pointer    *int
-	NilLabels  []string
-	NilIndex   map[string]int
-	NilMeta    any
-	NilPointer *int
-}
+	t.Run("query values follow net url decoding", func(t *testing.T) {
+		type request struct {
+			Name string `query:"name"`
+			Plus string `query:"plus"`
+		}
 
-func (v *mutatingFailingTextState) UnmarshalText(text []byte) error {
-	if len(v.Labels) > 0 {
-		v.Labels[0] = "mutated"
-	}
-	if v.Index != nil {
-		v.Index["count"] = 99
-	}
-	if meta, ok := v.Meta.(map[string]string); ok {
-		meta["phase"] = "mutated"
-	}
-	if flags, ok := v.Flags.([]string); ok && len(flags) > 0 {
-		flags[0] = "mutated"
-	}
-	v.History[0] = string(text)
-	if v.Pointer != nil {
-		*v.Pointer = 42
-	}
-	if v.NilLabels == nil {
-		v.NilLabels = []string{"allocated"}
-	}
-	if v.NilIndex == nil {
-		v.NilIndex = map[string]int{"added": 1}
-	}
-	if v.NilMeta == nil {
-		v.NilMeta = map[string]string{"added": "yes"}
-	}
-	if v.NilPointer == nil {
-		value := 9
-		v.NilPointer = &value
-	}
-	return errors.New("bad text")
-}
+		var dst request
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=a+b&plus=%2B", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Name != "a b" || dst.Plus != "+" {
+			t.Fatalf("dst = %#v, want decoded query values", dst)
+		}
+	})
 
-type nestedBindUnmarshaler struct {
-	Name string `query:"name"`
-}
+	t.Run("map string string target becomes single value snapshot", func(t *testing.T) {
+		dst := map[string]string{"stale": "value"}
 
-func (*nestedBindUnmarshaler) UnmarshalParam(string) error {
-	return errors.New("should not be called for untagged nested struct")
-}
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata&page=2", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if !reflect.DeepEqual(dst, map[string]string{"name": "kanata", "page": "2"}) {
+			t.Fatalf("dst = %#v, want current single-value snapshot", dst)
+		}
+	})
 
-func TestBind_PublicEntryPointsRejectInvalidInputs(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	t.Run("empty query binds map target to usable empty map", func(t *testing.T) {
+		var dst map[string]string
 
-	type destination struct{}
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst == nil || len(dst) != 0 {
+			t.Fatalf("dst = %#v, want usable empty map", dst)
+		}
+	})
 
-	var typedNil *destination
+	t.Run("map target rejects repeated key and preserves target", func(t *testing.T) {
+		dst := map[string]string{"stale": "value"}
 
-	entryPoints := []struct {
-		name string
-		call func(*http.Request, any) error
-	}{
-		{name: "BindBody", call: BindBody},
-		{name: "BindQuery", call: BindQuery},
-	}
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata&name=dup", nil), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if !reflect.DeepEqual(dst, map[string]string{"stale": "value"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
 
-	invalidInputs := []struct {
-		name   string
-		req    *http.Request
-		target any
-		want   string
-	}{
-		{name: "rejects nil request", req: nil, target: &destination{}, want: wantNilRequestErr},
-		{name: "rejects nil destination", req: req, target: nil, want: wantNilDestinationErr},
-		{name: "rejects non-pointer destination", req: req, target: destination{}, want: wantNilDestinationErr},
-		{name: "rejects typed nil destination", req: req, target: typedNil, want: wantNilDestinationErr},
-	}
+	t.Run("unsupported map target is usage error and preserves target", func(t *testing.T) {
+		dst := map[string]int{"stale": 9}
 
-	for _, entryPoint := range entryPoints {
-		t.Run(entryPoint.name, func(t *testing.T) {
-			for _, tc := range invalidInputs {
-				t.Run(tc.name, func(t *testing.T) {
-					assertUsageError(t, entryPoint.call(tc.req, tc.target), tc.want)
-				})
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?page=2", nil), &dst)
+		assertNotHTTPError(t, err)
+		if !reflect.DeepEqual(dst, map[string]int{"stale": 9}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("pointer leaf decode failure is bad request and preserves target", func(t *testing.T) {
+		type request struct {
+			Count *int `query:"count"`
+		}
+
+		existing := 9
+		dst := request{Count: &existing}
+
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?count=bad", nil), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if dst.Count == nil || *dst.Count != 9 {
+			t.Fatalf("dst = %#v, want unchanged pointer field", dst)
+		}
+	})
+
+	t.Run("pointer leaf success overwrites existing value", func(t *testing.T) {
+		type request struct {
+			Count *int `query:"count"`
+		}
+
+		existing := 1
+		dst := request{Count: &existing}
+
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?count=2", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Count == nil || *dst.Count != 2 {
+			t.Fatalf("dst = %#v, want overwritten pointer field", dst)
+		}
+	})
+
+	t.Run("raw query parse failure is bad request and preserves target", func(t *testing.T) {
+		type request struct {
+			Name string `query:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.URL.RawQuery = "%"
+		dst := request{Name: "existing"}
+
+		err := BindQuery(req, &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("unsupported field families are usage errors", func(t *testing.T) {
+		type unsupportedSlice struct {
+			Tags bindQueryNamedSlice `query:"tag"`
+		}
+		type unsupportedTextDecoder struct {
+			Value bindQueryTextValue `query:"value"`
+		}
+
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?tag=a", nil), &unsupportedSlice{}))
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?value=x", nil), &unsupportedTextDecoder{}))
+	})
+
+	t.Run("special query scalar formats reject invalid input and preserve target", func(t *testing.T) {
+		t.Run("duration", func(t *testing.T) {
+			type request struct {
+				Wait time.Duration `query:"wait"`
+			}
+
+			dst := request{Wait: 3 * time.Second}
+			err := BindQuery(httptest.NewRequest(http.MethodGet, "/?wait=forever", nil), &dst)
+			_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+			if dst.Wait != 3*time.Second {
+				t.Fatalf("dst = %#v, want unchanged", dst)
 			}
 		})
-	}
-}
 
-func TestBindQuery_RejectsUnsupportedTargets(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/?page=1", nil)
+		t.Run("time", func(t *testing.T) {
+			type request struct {
+				When time.Time `query:"when"`
+			}
 
-	scalar := 1
-	err := BindQuery(req, &scalar)
-	assertUsageErrorContains(t, err, "destination must point to struct or supported map")
-	if scalar != 1 {
-		t.Fatalf("scalar = %d, want existing value preserved", scalar)
-	}
-
-	unsupportedMap := map[string]int(nil)
-	err = BindQuery(req, &unsupportedMap)
-	assertUsageErrorContains(t, err, "destination must point to struct or supported map")
-	if unsupportedMap != nil {
-		t.Fatalf("unsupportedMap = %#v, want nil preserved on failure", unsupportedMap)
-	}
-
-	unsupportedKeyMap := map[int]string(nil)
-	err = BindQuery(req, &unsupportedKeyMap)
-	assertUsageErrorContains(t, err, "destination must point to struct or supported map")
-	if unsupportedKeyMap != nil {
-		t.Fatalf("unsupportedKeyMap = %#v, want nil preserved on failure", unsupportedKeyMap)
-	}
-}
-
-func TestBindQuery_UsesOnlyQuerySource(t *testing.T) {
-	type request struct {
-		AccountID string `param:"account_id"`
-		Actor     string `header:"x-actor"`
-		Name      string `json:"name"`
-		Cursor    string `query:"cursor"`
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/?cursor=next", nil)
-	req.Header.Set("X-Actor", "kanata")
-	req.SetPathValue("account_id", "acct_123")
-	req.Pattern = "/accounts/{account_id}"
-	setRequestBody(req, mimeApplicationJSON, `{"name":"body-name"}`)
-
-	dst := request{
-		AccountID: "existing-account",
-		Actor:     "existing-actor",
-		Name:      "existing-name",
-	}
-	mustBindQuery(t, req, &dst)
-	if dst.AccountID != "existing-account" || dst.Actor != "existing-actor" || dst.Name != "existing-name" || dst.Cursor != "next" {
-		t.Fatalf("dst = %#v, want query field only", dst)
-	}
-}
-
-func TestBindQuery_BindsSupportedTypes(t *testing.T) {
-	type request struct {
-		Page    int    `query:"page"`
-		Search  string `query:"search"`
-		Enabled bool   `query:"enabled"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?page=2&search=kanata&enabled=true", nil)
-
-	var dst request
-	mustBindQuery(t, req, &dst)
-	if dst.Page != 2 || dst.Search != "kanata" || !dst.Enabled {
-		t.Fatalf("dst = %#v, want bound query values", dst)
-	}
-}
-
-func TestBindQuery_BindsUnsignedAndFloatTypes(t *testing.T) {
-	type request struct {
-		Attempt uint    `query:"attempt"`
-		Limit   uint64  `query:"limit"`
-		Ratio   float32 `query:"ratio"`
-		Score   float64 `query:"score"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?attempt=3&limit=99&ratio=1.5&score=2.25", nil)
-
-	var dst request
-	mustBindQuery(t, req, &dst)
-	if dst.Attempt != 3 || dst.Limit != 99 || dst.Ratio != 1.5 || dst.Score != 2.25 {
-		t.Fatalf("dst = %#v, want bound unsigned and float values", dst)
-	}
-}
-
-func TestBindQuery_EmptyUnsignedAndFloatValuesBindZero(t *testing.T) {
-	type request struct {
-		Attempt uint    `query:"attempt"`
-		Limit   uint64  `query:"limit"`
-		Ratio   float32 `query:"ratio"`
-		Score   float64 `query:"score"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?attempt=&limit=&ratio=&score=", nil)
-	dst := request{
-		Attempt: 7,
-		Limit:   9,
-		Ratio:   1.5,
-		Score:   2.25,
-	}
-
-	mustBindQuery(t, req, &dst)
-	if dst.Attempt != 0 || dst.Limit != 0 || dst.Ratio != 0 || dst.Score != 0 {
-		t.Fatalf("dst = %#v, want zero values after empty inputs", dst)
-	}
-}
-
-func TestBindQuery_EmptyBoolValueBindsFalse(t *testing.T) {
-	type request struct {
-		Enabled bool `query:"enabled"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?enabled=", nil)
-	dst := request{Enabled: true}
-
-	mustBindQuery(t, req, &dst)
-	if dst.Enabled {
-		t.Fatalf("enabled = %v, want false", dst.Enabled)
-	}
-}
-
-func TestBindQuery_BindsSupportedMapTargets(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/?name=kanata&tag=a&tag=b", nil)
-
-	stringMap := map[string]string(nil)
-	mustBindQuery(t, req, &stringMap)
-	if got := stringMap["name"]; got != "kanata" {
-		t.Fatalf("stringMap[name] = %q, want kanata", got)
-	}
-	if got := stringMap["tag"]; got != "a" {
-		t.Fatalf("stringMap[tag] = %q, want first value a", got)
-	}
-
-	sliceMap := map[string][]string(nil)
-	mustBindQuery(t, req, &sliceMap)
-	if !reflect.DeepEqual(sliceMap["tag"], []string{"a", "b"}) {
-		t.Fatalf("sliceMap[tag] = %#v, want [a b]", sliceMap["tag"])
-	}
-
-	anyMap := map[string]any(nil)
-	mustBindQuery(t, req, &anyMap)
-	if got := anyMap["name"]; got != "kanata" {
-		t.Fatalf("anyMap[name] = %#v, want kanata", got)
-	}
-}
-
-func TestBindQuery_NoQueryDataIsNoop(t *testing.T) {
-	t.Run("struct preserves existing values", func(t *testing.T) {
-		type request struct {
-			Page int    `query:"page"`
-			Name string `query:"name"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-		dst := request{Page: 7, Name: "existing"}
-
-		mustBindQuery(t, req, &dst)
-		if dst.Page != 7 || dst.Name != "existing" {
-			t.Fatalf("dst = %#v, want existing values preserved", dst)
-		}
-	})
-
-	t.Run("nil map is not allocated", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/", nil)
-
-		var dst map[string]string
-		mustBindQuery(t, req, &dst)
-		if dst != nil {
-			t.Fatalf("dst = %#v, want nil map preserved", dst)
-		}
-	})
-}
-
-func TestBindQuery_MissingParamsPreserveExistingValues(t *testing.T) {
-	type request struct {
-		Page   int    `query:"page"`
-		Search string `query:"search"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?other=1", nil)
-	dst := request{Page: 3, Search: "existing"}
-
-	mustBindQuery(t, req, &dst)
-	if dst.Page != 3 || dst.Search != "existing" {
-		t.Fatalf("dst = %#v, want existing values preserved", dst)
-	}
-}
-
-func TestBindQuery_RepeatedScalarUsesFirstValue(t *testing.T) {
-	type request struct {
-		Page int `query:"page"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?page=1&page=2", nil)
-
-	var dst request
-	mustBindQuery(t, req, &dst)
-	if dst.Page != 1 {
-		t.Fatalf("page = %d, want 1", dst.Page)
-	}
-}
-
-func TestBindQuery_NameMatchingIsCaseSensitive(t *testing.T) {
-	type request struct {
-		Page int `query:"page"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?PAGE=7", nil)
-
-	dst := request{Page: 3}
-	mustBindQuery(t, req, &dst)
-	if dst.Page != 3 {
-		t.Fatalf("page = %d, want existing value preserved", dst.Page)
-	}
-}
-
-func TestBindQuery_BindingErrorsAreBadRequest(t *testing.T) {
-	type request struct {
-		Page int `query:"page"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?page=oops", nil)
-
-	var dst request
-	_ = assertBadRequest(t, BindQuery(req, &dst))
-}
-
-func TestBindQuery_UnsignedAndFloatBindingErrorsAreBadRequest(t *testing.T) {
-	cases := []struct {
-		name   string
-		target string
-		field  any
-	}{
-		{name: "uint", target: "/?attempt=oops", field: &struct {
-			Attempt uint `query:"attempt"`
-		}{}},
-		{name: "uint64", target: "/?limit=oops", field: &struct {
-			Limit uint64 `query:"limit"`
-		}{}},
-		{name: "float32", target: "/?ratio=oops", field: &struct {
-			Ratio float32 `query:"ratio"`
-		}{}},
-		{name: "float64", target: "/?score=oops", field: &struct {
-			Score float64 `query:"score"`
-		}{}},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, tc.target, nil)
-			_ = assertBadRequest(t, BindQuery(req, tc.field))
+			existing := time.Date(2026, time.April, 13, 10, 0, 0, 0, time.UTC)
+			dst := request{When: existing}
+			err := BindQuery(httptest.NewRequest(http.MethodGet, "/?when=not-rfc3339", nil), &dst)
+			_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+			if !dst.When.Equal(existing) {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
 		})
-	}
+
+		t.Run("uuid", func(t *testing.T) {
+			type request struct {
+				Token uuid.UUID `query:"token"`
+			}
+
+			existing := uuid.New()
+			dst := request{Token: existing}
+			err := BindQuery(httptest.NewRequest(http.MethodGet, "/?token=not-a-uuid", nil), &dst)
+			_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+			if dst.Token != existing {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
+	})
+
+	t.Run("special pointer scalar formats bind successfully", func(t *testing.T) {
+		type request struct {
+			Wait  *time.Duration `query:"wait"`
+			When  *time.Time     `query:"when"`
+			Token *uuid.UUID     `query:"token"`
+		}
+
+		token := uuid.New()
+		var dst request
+
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?wait=5s&when=2026-04-13T10:00:00Z&token="+token.String(), nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Wait == nil || *dst.Wait != 5*time.Second {
+			t.Fatalf("wait = %#v, want 5s", dst.Wait)
+		}
+		if dst.When == nil || dst.When.UTC().Format(time.RFC3339) != "2026-04-13T10:00:00Z" {
+			t.Fatalf("when = %#v, want 2026-04-13T10:00:00Z", dst.When)
+		}
+		if dst.Token == nil || *dst.Token != token {
+			t.Fatalf("token = %#v, want %v", dst.Token, token)
+		}
+	})
+
+	t.Run("duration pointer uses parse duration semantics", func(t *testing.T) {
+		type request struct {
+			Wait *time.Duration `query:"wait"`
+		}
+
+		existing := 3 * time.Second
+		dst := request{Wait: &existing}
+
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?wait=5", nil), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if dst.Wait == nil || *dst.Wait != 3*time.Second {
+			t.Fatalf("dst = %#v, want unchanged duration pointer", dst)
+		}
+	})
+
+	t.Run("unsigned and float leaf types bind and reject invalid input", func(t *testing.T) {
+		type request struct {
+			Limit uint16  `query:"limit"`
+			Ratio float32 `query:"ratio"`
+		}
+
+		t.Run("success", func(t *testing.T) {
+			var dst request
+			if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?limit=7&ratio=1.25", nil), &dst); err != nil {
+				t.Fatalf("BindQuery() error = %v", err)
+			}
+			if dst.Limit != 7 || dst.Ratio != 1.25 {
+				t.Fatalf("dst = %#v, want bound unsigned and float values", dst)
+			}
+		})
+
+		t.Run("invalid unsigned", func(t *testing.T) {
+			dst := request{Limit: 9, Ratio: 1.25}
+			err := BindQuery(httptest.NewRequest(http.MethodGet, "/?limit=-1", nil), &dst)
+			_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+			if dst != (request{Limit: 9, Ratio: 1.25}) {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
+
+		t.Run("invalid float", func(t *testing.T) {
+			dst := request{Limit: 9, Ratio: 1.25}
+			err := BindQuery(httptest.NewRequest(http.MethodGet, "/?ratio=nan-ish", nil), &dst)
+			_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+			if dst != (request{Limit: 9, Ratio: 1.25}) {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
+	})
 }
 
-func TestBindQuery_EmbeddedFieldContracts(t *testing.T) {
-	t.Run("rejects tagged anonymous embedded struct", func(t *testing.T) {
-		type Embedded struct {
-			Name string
-		}
+func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
+	t.Run("rejects invalid request and target shapes", func(t *testing.T) {
 		type request struct {
-			Embedded `query:"name"`
+			Name string `query:"name"`
+		}
+
+		assertNotHTTPError(t, BindQuery(nil, &request{}))
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), nil))
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), request{}))
+
+		var typedNil *request
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), typedNil))
+
+		var unsupported []string
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), &unsupported))
+	})
+
+	t.Run("untagged and unexported fields are ignored before validation", func(t *testing.T) {
+		type request struct {
+			Name     string              `query:"name"`
+			hidden   bindQueryNamedSlice `query:"hidden"`
+			Untagged bindQueryNamedSlice
+		}
+
+		var dst request
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata&hidden=x&Untagged=y", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Name != "kanata" || dst.hidden != nil || dst.Untagged != nil {
+			t.Fatalf("dst = %#v, want only tagged exported fields to participate", dst)
+		}
+	})
+
+	t.Run("nil url acts like empty query source", func(t *testing.T) {
+		type request struct {
+			Name string `query:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.URL = nil
+		dst := request{Name: "stale"}
+
+		if err := BindQuery(req, &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst != (request{}) {
+			t.Fatalf("dst = %#v, want zero value struct", dst)
+		}
+	})
+
+	t.Run("unknown query keys are ignored", func(t *testing.T) {
+		type request struct {
+			Name string `query:"name"`
+		}
+
+		dst := request{Name: "stale"}
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?extra=1", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst != (request{}) {
+			t.Fatalf("dst = %#v, want zero value struct", dst)
+		}
+	})
+
+	t.Run("invalid tags and empty inline plans are usage errors", func(t *testing.T) {
+		type emptyTag struct {
+			Name string `query:""`
+		}
+		type spacedTag struct {
+			Name string `query:" name "`
+		}
+		type inlineEmpty struct {
+			Inline struct{} `query:",inline"`
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
 
-		var dst request
-		assertUsageErrorContains(t, BindQuery(req, &dst), "query tags are not allowed with anonymous struct field")
+		assertNotHTTPError(t, BindQuery(req, &emptyTag{}))
+		assertNotHTTPError(t, BindQuery(req, &spacedTag{}))
+		assertNotHTTPError(t, BindQuery(req, &inlineEmpty{}))
 	})
 
-	t.Run("rejects tagged anonymous embedded pointer even when nil", func(t *testing.T) {
-		type Embedded struct {
-			Name string
-		}
+	t.Run("inline non-struct field shape is usage error", func(t *testing.T) {
 		type request struct {
-			*Embedded `query:"name"`
+			Inline *int `query:",inline"`
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
-
-		var dst request
-		assertUsageErrorContains(t, BindQuery(req, &dst), "query tags are not allowed with anonymous struct field")
-	})
-
-	t.Run("ignores nil anonymous embedded pointer", func(t *testing.T) {
-		type Embedded struct {
-			Name string `query:"name"`
-		}
-		type request struct {
-			*Embedded
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
-
-		var dst request
-		mustBindQuery(t, req, &dst)
-		if dst.Embedded != nil {
-			t.Fatalf("Embedded = %#v, want nil preserved", dst.Embedded)
+		existing := 7
+		dst := request{Inline: &existing}
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?inline=1", nil), &dst))
+		if dst.Inline == nil || *dst.Inline != 7 {
+			t.Fatalf("dst = %#v, want unchanged", dst)
 		}
 	})
 
-	t.Run("traverses non nil anonymous embedded pointer", func(t *testing.T) {
-		type Embedded struct {
-			Name string `query:"name"`
+	t.Run("inline child planning errors bubble up before writes", func(t *testing.T) {
+		type child struct {
+			Name string `query:""`
 		}
 		type request struct {
-			*Embedded
+			Page   int   `query:"page"`
+			Inline child `query:",inline"`
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
-		dst := request{Embedded: &Embedded{}}
-		mustBindQuery(t, req, &dst)
-		if dst.Embedded == nil || dst.Name != "kanata" {
-			t.Fatalf("dst = %#v, want embedded name to bind", dst)
+		dst := request{Page: 9}
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?page=7", nil), &dst))
+		if dst != (request{Page: 9}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
 		}
 	})
 
-	t.Run("allows query tag on anonymous non-struct field", func(t *testing.T) {
-		type Alias string
+	t.Run("later client input errors do not commit earlier successful field writes", func(t *testing.T) {
 		type request struct {
-			Alias `query:"alias"`
+			Name  string `query:"name"`
+			Count int    `query:"count"`
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/?alias=kanata", nil)
+		dst := request{Name: "existing", Count: 9}
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata&count=bad", nil), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if dst != (request{Name: "existing", Count: 9}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("inline pointer allocates only when a child binds successfully", func(t *testing.T) {
+		type filters struct {
+			Page int `query:"page"`
+		}
+		type request struct {
+			Filters *filters `query:",inline"`
+		}
 
 		var dst request
-		mustBindQuery(t, req, &dst)
-		if dst.Alias != "kanata" {
-			t.Fatalf("Alias = %q, want kanata", dst.Alias)
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Filters != nil {
+			t.Fatalf("filters = %#v, want nil", dst.Filters)
+		}
+
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?page=bad", nil), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if dst.Filters != nil {
+			t.Fatalf("filters = %#v, want nil after failed bind", dst.Filters)
+		}
+
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?page=7", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Filters == nil || dst.Filters.Page != 7 {
+			t.Fatalf("filters = %#v, want page=7", dst.Filters)
 		}
 	})
 
-	t.Run("rejects unsupported tagged field type", func(t *testing.T) {
+	t.Run("double pointer leaf is usage error", func(t *testing.T) {
 		type request struct {
-			Ch chan int `query:"ch"`
+			Count **int `query:"count"`
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/?ch=value", nil)
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?count=7", nil), &request{}))
+	})
+
+	t.Run("query dash fields are ignored before type validation", func(t *testing.T) {
+		type request struct {
+			Name    string              `query:"name"`
+			Ignored bindQueryNamedSlice `query:"-"`
+		}
 
 		var dst request
-		assertUsageErrorContains(t, BindQuery(req, &dst), "unsupported query field type")
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Name != "kanata" || dst.Ignored != nil {
+			t.Fatalf("dst = %#v, want ignored field skipped", dst)
+		}
 	})
-}
 
-func TestBindQuery_DecodeFailuresAreBadRequest(t *testing.T) {
-	t.Run("nested struct parse failures bubble up", func(t *testing.T) {
-		type nested struct {
-			Age int `query:"age"`
-		}
+	t.Run("query dash fields do not participate in duplicate detection", func(t *testing.T) {
 		type request struct {
-			Nested nested
+			Name    string `query:"name"`
+			Ignored string `query:"-"`
+			Alias   string `query:"alias"`
 		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?age=oops", nil)
 
 		var dst request
-		_ = assertBadRequest(t, BindQuery(req, &dst))
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata&alias=friend", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst != (request{Name: "kanata", Alias: "friend"}) {
+			t.Fatalf("dst = %#v, want bound non-dash fields only", dst)
+		}
 	})
 
-	t.Run("nested structs still recurse even when they also implement BindUnmarshaler", func(t *testing.T) {
+	t.Run("query keys match parsed names exactly", func(t *testing.T) {
 		type request struct {
-			Nested nestedBindUnmarshaler
+			Upper string `query:"Name"`
+			Lower string `query:"name"`
+			Plus  string `query:"x+y"`
 		}
 
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
-		var dst request
-
-		mustBindQuery(t, req, &dst)
-		if dst.Nested.Name != "kanata" {
-			t.Fatalf("Nested.Name = %q, want kanata", dst.Nested.Name)
-		}
-	})
-
-	t.Run("custom single value decoder failures are bad request", func(t *testing.T) {
-		type request struct {
-			Name   string                    `query:"name"`
-			Custom mutatingFailingParamValue `query:"custom"`
-			Note   string                    `query:"note"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&custom=x&note=after-error", nil)
-		dst := request{
-			Name:   "existing-name",
-			Custom: mutatingFailingParamValue{value: "existing-custom"},
-			Note:   "existing-note",
-		}
-
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || dst.Custom.value != "existing-custom" || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing custom value unchanged, and later field untouched", dst)
-		}
-	})
-
-	t.Run("custom multi value decoder failures are bad request", func(t *testing.T) {
-		type request struct {
-			Name  string                     `query:"name"`
-			Multi mutatingFailingParamsValue `query:"multi"`
-			Note  string                     `query:"note"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&multi=a&multi=b&note=after-error", nil)
-		dst := request{
-			Name:  "existing-name",
-			Multi: mutatingFailingParamsValue{values: []string{"existing"}},
-			Note:  "existing-note",
-		}
-
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || !reflect.DeepEqual(dst.Multi.values, []string{"existing"}) || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing multi value unchanged, and later field untouched", dst)
-		}
-	})
-
-	t.Run("invalid time value returns bad request", func(t *testing.T) {
-		type request struct {
-			Name string    `query:"name"`
-			When time.Time `query:"when" format:"2006-01-02"`
-			Note string    `query:"note"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&when=bad&note=after-error", nil)
-		when := time.Date(2026, 4, 9, 0, 0, 0, 0, time.UTC)
-		dst := request{Name: "existing-name", When: when, Note: "existing-note"}
-
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || !dst.When.Equal(when) || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing time value unchanged, and later field untouched", dst)
-		}
-	})
-
-	t.Run("invalid time slice value returns bad request", func(t *testing.T) {
-		type request struct {
-			Name  string      `query:"name"`
-			Whens []time.Time `query:"whens" format:"15:04:05"`
-			Note  string      `query:"note"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&whens=10:11:12&whens=bad&note=after-error", nil)
-		whens := []time.Time{time.Date(2000, 1, 1, 9, 10, 11, 0, time.UTC)}
-		dst := request{Name: "existing-name", Whens: append([]time.Time(nil), whens...), Note: "existing-note"}
-
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || !reflect.DeepEqual(dst.Whens, whens) || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing time slice unchanged, and later field untouched", dst)
-		}
-	})
-
-	t.Run("invalid slice element returns bad request", func(t *testing.T) {
-		type request struct {
-			Name string `query:"name"`
-			IDs  []int  `query:"id"`
-			Note string `query:"note"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&id=1&id=oops&note=after-error", nil)
-		ids := []int{7}
-		dst := request{Name: "existing-name", IDs: append([]int(nil), ids...), Note: "existing-note"}
-
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || !reflect.DeepEqual(dst.IDs, ids) || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing slice unchanged, and later field untouched", dst)
-		}
-	})
-
-	t.Run("custom decoder http errors are preserved", func(t *testing.T) {
-		type request struct {
-			Custom customParamValue `query:"custom"`
-		}
-
-		wantErr := errx.NewHTTPError(http.StatusUnprocessableEntity, "custom_invalid", "custom invalid")
-		req := httptest.NewRequest(http.MethodGet, "/?custom=x", nil)
-		dst := request{Custom: customParamValue{err: wantErr}}
-
-		gotErr := BindQuery(req, &dst)
-		if gotErr != wantErr {
-			t.Fatalf("BindQuery() error = %v, want original %v", gotErr, wantErr)
-		}
-		_ = assertHTTPError(t, gotErr, http.StatusUnprocessableEntity, "custom_invalid", "custom invalid")
-	})
-}
-
-func TestBindQuery_BindsPointerSliceFields(t *testing.T) {
-	type request struct {
-		IDs   []*int       `query:"id"`
-		Whens []*time.Time `query:"when" format:"15:04:05"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?id=1&id=2&when=10:11:12&when=13:14:15", nil)
-
-	var dst request
-	mustBindQuery(t, req, &dst)
-	if len(dst.IDs) != 2 || dst.IDs[0] == nil || *dst.IDs[0] != 1 || dst.IDs[1] == nil || *dst.IDs[1] != 2 {
-		t.Fatalf("IDs = %#v, want pointer slice values [1 2]", dst.IDs)
-	}
-	if len(dst.Whens) != 2 || dst.Whens[0] == nil || dst.Whens[0].Format("15:04:05") != "10:11:12" || dst.Whens[1] == nil || dst.Whens[1].Format("15:04:05") != "13:14:15" {
-		t.Fatalf("Whens = %#v, want pointer slice times 10:11:12 and 13:14:15", dst.Whens)
-	}
-}
-
-func TestBindQuery_PointerFieldPreservation(t *testing.T) {
-	type request struct {
-		Page *int `query:"page"`
-	}
-
-	intPtr := func(v int) *int { return &v }
-
-	t.Run("nil pointer preserved when query param is missing", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?other=1", nil)
+		req := httptest.NewRequest(http.MethodGet, "/?Name=upper&name=lower&x+y=space&x%2By=plus", nil)
 
 		var dst request
-		mustBindQuery(t, req, &dst)
-		if dst.Page != nil {
-			t.Fatalf("page = %#v, want nil", dst.Page)
+		if err := BindQuery(req, &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Upper != "upper" || dst.Lower != "lower" || dst.Plus != "plus" {
+			t.Fatalf("dst = %#v, want exact parsed-key matches only", dst)
 		}
 	})
 
-	t.Run("existing pointer value is preserved when query param is missing", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?other=1", nil)
+	t.Run("duplicate planned fields fail before any write", func(t *testing.T) {
+		type request struct {
+			Name  string `query:"name"`
+			Alias string `query:"name"`
+		}
 
-		dst := request{Page: intPtr(7)}
-		mustBindQuery(t, req, &dst)
-		if dst.Page == nil || *dst.Page != 7 {
-			t.Fatalf("page = %#v, want &7", dst.Page)
+		dst := request{Name: "existing", Alias: "keep"}
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata", nil), &dst)
+		assertNotHTTPError(t, err)
+		if dst != (request{Name: "existing", Alias: "keep"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
 		}
 	})
 
-	t.Run("empty value allocates pointer and sets zero", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?page=", nil)
+	t.Run("inline pointer conflicts are rejected regardless of runtime nil state", func(t *testing.T) {
+		type filters struct {
+			Page int `query:"page"`
+		}
+		type request struct {
+			Page    int      `query:"page"`
+			Filters *filters `query:",inline"`
+		}
 
 		var dst request
-		mustBindQuery(t, req, &dst)
-		if dst.Page == nil || *dst.Page != 0 {
-			t.Fatalf("page = %#v, want &0", dst.Page)
-		}
-	})
-
-	t.Run("empty value overwrites existing pointer with zero", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?page=", nil)
-
-		dst := request{Page: intPtr(7)}
-		mustBindQuery(t, req, &dst)
-		if dst.Page == nil || *dst.Page != 0 {
-			t.Fatalf("page = %#v, want &0", dst.Page)
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?page=7", nil), &dst))
+		if dst != (request{}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
 		}
 	})
 }
 
-func TestBindQuery_PointerFieldFailuresAreBadRequest(t *testing.T) {
-	intPtr := func(v int) *int { return &v }
+func TestSetBindQueryLeaf_UnsupportedKindIsUsageError(t *testing.T) {
+	var dst []string
 
-	t.Run("scalar parse failure preserves earlier writes and failing pointer", func(t *testing.T) {
-		type request struct {
-			Name string `query:"name"`
-			Page *int   `query:"page"`
-			Note string `query:"note"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&page=oops&note=after-error", nil)
-
-		page := intPtr(7)
-		dst := request{Name: "existing-name", Page: page, Note: "existing-note"}
-
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || dst.Page == nil || *dst.Page != 7 || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing pointer unchanged, and later field untouched", dst)
-		}
-	})
-
-	t.Run("time parse failure keeps nil pointer nil and later field untouched", func(t *testing.T) {
-		type request struct {
-			Name string     `query:"name"`
-			When *time.Time `query:"when" format:"2006-01-02"`
-			Note string     `query:"note"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&when=bad&note=after-error", nil)
-
-		dst := request{Name: "existing-name", Note: "existing-note"}
-
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || dst.When != nil || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, nil pointer unchanged, and later field untouched", dst)
-		}
-	})
-
-	t.Run("custom single-value failure keeps nil pointer nil", func(t *testing.T) {
-		type request struct {
-			Name   string                   `query:"name"`
-			Custom *alwaysFailingParamValue `query:"custom"`
-			Note   string                   `query:"note"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&custom=x&note=after-error", nil)
-		dst := request{Name: "existing-name", Note: "existing-note"}
-
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || dst.Custom != nil || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, nil custom pointer unchanged, and later field untouched", dst)
-		}
-	})
-
-	t.Run("custom multi-value failure keeps nil pointer nil", func(t *testing.T) {
-		type request struct {
-			Name   string                    `query:"name"`
-			Custom *alwaysFailingParamsValue `query:"custom"`
-			Note   string                    `query:"note"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&custom=a&custom=b&note=after-error", nil)
-		dst := request{Name: "existing-name", Note: "existing-note"}
-
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || dst.Custom != nil || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, nil multi-value pointer unchanged, and later field untouched", dst)
-		}
-	})
-}
-
-func TestBindQuery_PointerSliceFailuresAreBadRequest(t *testing.T) {
-	intPtr := func(v int) *int { return &v }
-	timePtr := func(v time.Time) *time.Time { return &v }
-
-	t.Run("slice element failure preserves earlier writes and existing slice", func(t *testing.T) {
-		type request struct {
-			Name string `query:"name"`
-			IDs  []*int `query:"id"`
-			Note string `query:"note"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&id=1&id=oops&note=after-error", nil)
-		id := intPtr(7)
-		dst := request{Name: "existing-name", IDs: []*int{id}, Note: "existing-note"}
-
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || len(dst.IDs) != 1 || dst.IDs[0] == nil || *dst.IDs[0] != 7 || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing slice unchanged, and later field untouched", dst)
-		}
-	})
-
-	t.Run("pointer time slice element failure preserves existing slice", func(t *testing.T) {
-		type request struct {
-			Name  string       `query:"name"`
-			Whens []*time.Time `query:"when" format:"15:04:05"`
-			Note  string       `query:"note"`
-		}
-
-		req := httptest.NewRequest(http.MethodGet, "/?name=kanata&when=10:11:12&when=bad&note=after-error", nil)
-		when := timePtr(time.Date(2000, 1, 1, 9, 10, 11, 0, time.UTC))
-		dst := request{Name: "existing-name", Whens: []*time.Time{when}, Note: "existing-note"}
-
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-		if dst.Name != "kanata" || len(dst.Whens) != 1 || dst.Whens[0] == nil || dst.Whens[0].Format("15:04:05") != "09:10:11" || dst.Note != "existing-note" {
-			t.Fatalf("dst = %#v, want earlier writes preserved, failing time slice unchanged, and later field untouched", dst)
-		}
-	})
-}
-
-func TestBindQuery_BindsComplexTypesEndToEnd(t *testing.T) {
-	type nested struct {
-		Name string `query:"name"`
-	}
-	type request struct {
-		Nested nested
-		Age    *int              `query:"age"`
-		IDs    []int             `query:"id"`
-		When   time.Time         `query:"when" format:"2006-01-02"`
-		Whens  []time.Time       `query:"whens" format:"15:04:05"`
-		Wait   time.Duration     `query:"wait"`
-		Waits  []time.Duration   `query:"waits"`
-		Custom customParamValue  `query:"custom"`
-		Multi  customParamsValue `query:"multi"`
-		State  customTextValue   `query:"state"`
-	}
-
-	req := httptest.NewRequest(
-		http.MethodGet,
-		"/?name=kanata&age=17&id=1&id=2&when=2026-04-09&whens=10:11:12&whens=13:14:15&wait=5s&waits=1s&waits=250ms&custom=x&multi=a&multi=b&state=open",
-		nil,
-	)
-
-	var dst request
-	mustBindQuery(t, req, &dst)
-	if dst.Nested.Name != "kanata" {
-		t.Fatalf("Nested.Name = %q, want kanata", dst.Nested.Name)
-	}
-	if dst.Age == nil || *dst.Age != 17 {
-		t.Fatalf("Age = %#v, want 17", dst.Age)
-	}
-	if !reflect.DeepEqual(dst.IDs, []int{1, 2}) {
-		t.Fatalf("IDs = %#v, want [1 2]", dst.IDs)
-	}
-	if got := dst.When.Format("2006-01-02"); got != "2026-04-09" {
-		t.Fatalf("When = %q, want 2026-04-09", got)
-	}
-	if len(dst.Whens) != 2 || dst.Whens[0].Format("15:04:05") != "10:11:12" || dst.Whens[1].Format("15:04:05") != "13:14:15" {
-		t.Fatalf("Whens = %v, want 10:11:12 and 13:14:15", dst.Whens)
-	}
-	if dst.Wait != 5*time.Second {
-		t.Fatalf("Wait = %v, want 5s", dst.Wait)
-	}
-	if !reflect.DeepEqual(dst.Waits, []time.Duration{time.Second, 250 * time.Millisecond}) {
-		t.Fatalf("Waits = %#v, want [1s 250ms]", dst.Waits)
-	}
-	if dst.Custom.value != "x" {
-		t.Fatalf("Custom = %#v, want x", dst.Custom)
-	}
-	if !reflect.DeepEqual(dst.Multi.values, []string{"a", "b"}) {
-		t.Fatalf("Multi = %#v, want [a b]", dst.Multi)
-	}
-	if dst.State != "open" {
-		t.Fatalf("State = %q, want open", dst.State)
-	}
-}
-
-func TestBindQuery_DurationBindingErrorsAreBadRequest(t *testing.T) {
-	type request struct {
-		Wait  time.Duration   `query:"wait"`
-		Waits []time.Duration `query:"waits"`
-	}
-
-	t.Run("invalid duration scalar returns bad request", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?wait=soon", nil)
-
-		var dst request
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-	})
-
-	t.Run("invalid duration slice element returns bad request", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/?waits=1s&waits=soon", nil)
-
-		var dst request
-		_ = assertBadRequest(t, BindQuery(req, &dst))
-	})
-}
-
-func TestBindQuery_PartialUpdatesPersistOnFieldFailure(t *testing.T) {
-	type request struct {
-		Name string `query:"name"`
-		Page int    `query:"page"`
-		Note string `query:"note"`
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?name=kanata&page=oops&note=after-error", nil)
-
-	dst := request{Name: "existing-name", Page: 3, Note: "existing-note"}
-	err := BindQuery(req, &dst)
-	_ = assertBadRequest(t, err)
-	if dst.Name != "kanata" || dst.Page != 3 || dst.Note != "existing-note" {
-		t.Fatalf("dst = %#v, want earlier query writes preserved and later field untouched", dst)
-	}
-}
-
-func TestBindQuery_CustomTextDecoderFailureRestoresDeepMutableFieldState(t *testing.T) {
-	type request struct {
-		Name  string                   `query:"name"`
-		State mutatingFailingTextState `query:"state"`
-		Note  string                   `query:"note"`
-	}
-
-	newState := func() mutatingFailingTextState {
-		value := 7
-		return mutatingFailingTextState{
-			Labels:  []string{"stable"},
-			Index:   map[string]int{"count": 1},
-			Meta:    map[string]string{"phase": "stable"},
-			Flags:   []string{"keep"},
-			History: [2]string{"before", "still"},
-			Pointer: &value,
-		}
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/?name=kanata&state=bad&note=after-error", nil)
-	wantState := newState()
-	dst := request{Name: "existing-name", State: newState(), Note: "existing-note"}
-
-	_ = assertBadRequest(t, BindQuery(req, &dst))
-	if dst.Name != "kanata" || dst.Note != "existing-note" {
-		t.Fatalf("dst = %#v, want earlier writes preserved and later field untouched", dst)
-	}
-	if !reflect.DeepEqual(dst.State, wantState) {
-		t.Fatalf("State = %#v, want %#v", dst.State, wantState)
+	err := setBindQueryLeaf(reflect.ValueOf(&dst).Elem(), "x")
+	assertNotHTTPError(t, err)
+	if dst != nil {
+		t.Fatalf("dst = %#v, want unchanged nil slice", dst)
 	}
 }

@@ -36,9 +36,32 @@ func TestRequireBody(t *testing.T) {
 		if err := BindBody(req, &dst); err != nil {
 			t.Fatalf("BindBody() after RequireBody() error = %v", err)
 		}
-		if dst.Name != "kanata" || dst.Age != 17 {
-			t.Fatalf("dst = %#v, want bound body fields with omitted fields preserved", dst)
+		if dst != (request{Name: "kanata"}) {
+			t.Fatalf("dst = %#v, want zero-based bind result after RequireBody", dst)
 		}
+	})
+
+	t.Run("whitespace body counts as present for RequireBody", func(t *testing.T) {
+		req := newJSONRequest(http.MethodPost, "/", " \n\t ")
+
+		if err := RequireBody(req); err != nil {
+			t.Fatalf("RequireBody(whitespace) error = %v, want nil", err)
+		}
+	})
+
+	t.Run("null body counts as present for RequireBody while BindBody rejects it", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := newJSONRequest(http.MethodPost, "/", `null`)
+
+		if err := RequireBody(req); err != nil {
+			t.Fatalf("RequireBody(null) error = %v, want nil", err)
+		}
+
+		err := BindBody(req, &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
 	})
 
 	t.Run("content length zero body is required violation", func(t *testing.T) {
@@ -46,7 +69,7 @@ func TestRequireBody(t *testing.T) {
 		req.ContentLength = 0
 
 		violation := assertSingleViolation(t, RequireBody(req))
-		if violation.Field != "body" || violation.In != errx.ViolationInBody || violation.Code != errx.ViolationCodeRequired || violation.Detail != "is required" {
+		if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -56,7 +79,7 @@ func TestRequireBody(t *testing.T) {
 		req.ContentLength = -1
 
 		violation := assertSingleViolation(t, RequireBody(req))
-		if violation.Field != "body" || violation.In != errx.ViolationInBody || violation.Code != errx.ViolationCodeRequired || violation.Detail != "is required" {
+		if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -67,7 +90,7 @@ func TestRequireBody(t *testing.T) {
 		req.ContentLength = 0
 
 		violation := assertSingleViolation(t, RequireBody(req))
-		if violation.Field != "body" || violation.In != errx.ViolationInBody || violation.Code != errx.ViolationCodeRequired || violation.Detail != "is required" {
+		if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
 			t.Fatalf("violation = %#v", violation)
 		}
 	})
@@ -108,7 +131,7 @@ func TestRequireBody_EmptyBodyProbePreservesOriginalBody(t *testing.T) {
 			req.Body = body
 
 			violation := assertSingleViolation(t, RequireBody(req))
-			if violation.Field != "body" || violation.In != errx.ViolationInBody || violation.Code != errx.ViolationCodeRequired || violation.Detail != "is required" {
+			if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
 				t.Fatalf("violation = %#v", violation)
 			}
 			if req.Body != body {
@@ -130,27 +153,27 @@ func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
 		{
 			name: "default invalid",
 			in:   errx.Violation{Field: "name"},
-			want: errx.Violation{Field: "name", Code: errx.ViolationCodeInvalid, Detail: "is invalid"},
+			want: errx.Violation{Field: "name", Code: errx.CodeInvalid, Detail: "is invalid"},
 		},
 		{
 			name: "required",
-			in:   errx.Violation{Field: "body", In: errx.ViolationInBody, Code: errx.ViolationCodeRequired},
-			want: errx.Violation{Field: "body", In: errx.ViolationInBody, Code: errx.ViolationCodeRequired, Detail: "is required"},
+			in:   errx.Violation{Field: "body", In: errx.InBody, Code: errx.CodeRequired},
+			want: errx.Violation{Field: "body", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
 		},
 		{
 			name: "unknown",
-			in:   errx.Violation{Field: "extra", In: errx.ViolationInQuery, Code: errx.ViolationCodeUnknown},
-			want: errx.Violation{Field: "extra", In: errx.ViolationInQuery, Code: errx.ViolationCodeUnknown, Detail: "unknown field"},
+			in:   errx.Violation{Field: "extra", In: errx.InQuery, Code: errx.CodeUnknown},
+			want: errx.Violation{Field: "extra", In: errx.InQuery, Code: errx.CodeUnknown, Detail: "unknown field"},
 		},
 		{
 			name: "type",
-			in:   errx.Violation{Field: "limit", In: errx.ViolationInBody, Code: errx.ViolationCodeType},
-			want: errx.Violation{Field: "limit", In: errx.ViolationInBody, Code: errx.ViolationCodeType, Detail: "has invalid type"},
+			in:   errx.Violation{Field: "limit", In: errx.InBody, Code: errx.CodeType},
+			want: errx.Violation{Field: "limit", In: errx.InBody, Code: errx.CodeType, Detail: "has invalid type"},
 		},
 		{
 			name: "multiple",
-			in:   errx.Violation{Field: "X-Trace-Id", In: errx.ViolationInHeader, Code: errx.ViolationCodeMultiple},
-			want: errx.Violation{Field: "X-Trace-Id", In: errx.ViolationInHeader, Code: errx.ViolationCodeMultiple, Detail: "must not be repeated"},
+			in:   errx.Violation{Field: "X-Trace-Id", In: errx.InHeader, Code: errx.CodeMultiple},
+			want: errx.Violation{Field: "X-Trace-Id", In: errx.InHeader, Code: errx.CodeMultiple, Detail: "must appear only once"},
 		},
 	}
 
@@ -165,13 +188,13 @@ func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
 
 	t.Run("multiple violations are preserved in order", func(t *testing.T) {
 		got := assertViolations(t, InvalidRequest(
-			errx.Violation{Field: "page", In: errx.ViolationInQuery},
-			errx.Violation{Field: "body", In: errx.ViolationInBody, Code: errx.ViolationCodeRequired},
+			errx.Violation{Field: "page", In: errx.InQuery},
+			errx.Violation{Field: "body", In: errx.InBody, Code: errx.CodeRequired},
 		))
 
 		want := []errx.Violation{
-			{Field: "page", In: errx.ViolationInQuery, Code: errx.ViolationCodeInvalid, Detail: "is invalid"},
-			{Field: "body", In: errx.ViolationInBody, Code: errx.ViolationCodeRequired, Detail: "is required"},
+			{Field: "page", In: errx.InQuery, Code: errx.CodeInvalid, Detail: "is invalid"},
+			{Field: "body", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
 		}
 		if len(got) != len(want) {
 			t.Fatalf("violations len = %d, want %d", len(got), len(want))

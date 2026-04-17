@@ -20,10 +20,10 @@
 //   - 公开错误构造：NewHTTPError、NewHTTPErrorWithCause、WithViolations
 //   - 公开状态快捷构造：BadRequest、Unauthorized、Forbidden、NotFound、
 //     MethodNotAllowed、Conflict、UnprocessableEntity、TooManyRequests
-//   - 公开 violation code 常量：ViolationCodeInvalid、ViolationCodeRequired、
-//     ViolationCodeUnknown、ViolationCodeType、ViolationCodeMultiple
-//   - 公开 violation in 常量：ViolationInBody、ViolationInQuery、
-//     ViolationInPath、ViolationInHeader
+//   - 公开 violation code 常量：CodeInvalid、CodeRequired、
+//     CodeUnknown、CodeType、CodeMultiple
+//   - 公开 violation in 常量：InBody、InQuery、
+//     InPath、InHeader
 //
 // 新增、移除、重命名以上导出符号，或改变其公开语义时，应同步更新本注释与 CHANGELOG。
 package errx

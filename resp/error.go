@@ -23,42 +23,21 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-// asHTTPError 把任意 error 适配为 HTTPError。
-// 这是错误响应语义的收敛点，负责得到最终 status/code/detail/errors。
-//
-// 适配顺序：
-//   - 已经是 HTTPError，直接返回；
-//   - context.Canceled / context.DeadlineExceeded 走固定 HTTP 语义；
-//   - 其余错误统一视为内部错误。
-func asHTTPError(err error) *errx.HTTPError {
-	if err == nil {
-		return nil
-	}
-
-	var httpErr *errx.HTTPError
-	if errors.As(err, &httpErr) && httpErr != nil {
-		return httpErr
-	}
-
-	switch {
-	case errors.Is(err, context.Canceled):
-		return errx.NewHTTPErrorWithCause(499, "", "", err)
-	case errors.Is(err, context.DeadlineExceeded):
-		return errx.NewHTTPErrorWithCause(http.StatusGatewayTimeout, "", "", err)
-	}
-
-	return errx.NewHTTPErrorWithCause(http.StatusInternalServerError, "", "", err)
-}
-
 // problemPayload 是最终写入响应体的公共错误字段。
 // 这里不包含内部原始 error，避免把服务端细节泄露给客户端。
 type problemPayload struct {
 	Title  string           `json:"title"`
 	Status int              `json:"status"`
-	Detail string           `json:"detail"`
+	Detail string           `json:"detail,omitempty"`
 	Code   string           `json:"code"`
 	Errors []errx.Violation `json:"errors,omitempty"`
 }
+
+var internalProblemBody = []byte("{\"title\":\"Internal Server Error\",\"status\":500,\"code\":\"internal_error\"}\n")
+
+// problemBodyEncoder 默认走标准 JSON 编码。
+// 保持为变量仅用于测试编码失败时的回退契约，不改变公开 API。
+var problemBodyEncoder = encodeJSON
 
 // WriteError 是 HTTP 错误写回的统一入口。
 //
@@ -84,17 +63,81 @@ func WriteError(w http.ResponseWriter, err error) error {
 		return errNilResponseWriter
 	}
 
-	httpErr := asHTTPError(err)
-	body, err := encodeJSON(problemPayload{
-		Title:  httpErr.Title(),
-		Status: httpErr.Status(),
-		Detail: httpErr.Detail(),
-		Code:   httpErr.Code(),
-		Errors: httpErr.Errors(),
-	})
-	if err != nil {
-		return err
+	payload := normalizeProblemPayload(err)
+	status, body := encodeProblemBody(payload, problemBodyEncoder)
+	return writePreparedJSONBytes(w, status, problemJSONContentType, body)
+}
+
+// encodeProblemBody 负责把公开错误 payload 编码成响应体。
+// 若主 payload 意外编码失败，则回退到最小 500 problem JSON，避免对外暴露内部细节。
+func encodeProblemBody(payload problemPayload, encode func(any) ([]byte, error)) (status int, body []byte) {
+	body, err := encode(payload)
+	if err == nil {
+		return payload.Status, body
+	}
+	return http.StatusInternalServerError, internalProblemBody
+}
+
+func selectedHTTPError(err error) *errx.HTTPError {
+	return firstHTTPErrorCandidate(err)
+}
+
+func firstHTTPErrorCandidate(err error) *errx.HTTPError {
+	if err == nil {
+		return nil
 	}
 
-	return writePreparedJSONBytes(w, httpErr.Status(), problemJSONContentType, body)
+	if httpErr, ok := err.(*errx.HTTPError); ok {
+		if httpErr != nil {
+			return httpErr
+		}
+	} else if asErr, ok := err.(interface{ As(any) bool }); ok {
+		var httpErr *errx.HTTPError
+		if asErr.As(&httpErr) && httpErr != nil {
+			return httpErr
+		}
+	}
+
+	type unwrapOne interface{ Unwrap() error }
+	type unwrapMany interface{ Unwrap() []error }
+
+	switch e := err.(type) {
+	case unwrapMany:
+		for _, child := range e.Unwrap() {
+			if httpErr := firstHTTPErrorCandidate(child); httpErr != nil {
+				return httpErr
+			}
+		}
+	case unwrapOne:
+		return firstHTTPErrorCandidate(e.Unwrap())
+	}
+
+	return nil
+}
+
+func normalizeProblemPayload(err error) problemPayload {
+	if httpErr := selectedHTTPError(err); httpErr != nil {
+		return problemPayload{
+			Title:  httpErr.Title(),
+			Status: httpErr.Status(),
+			Detail: httpErr.Detail(),
+			Code:   httpErr.Code(),
+			Errors: httpErr.Errors(),
+		}
+	}
+
+	status := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, context.Canceled):
+		status = 499
+	case errors.Is(err, context.DeadlineExceeded):
+		status = http.StatusGatewayTimeout
+	}
+
+	synthetic := errx.NewHTTPError(status, "", "")
+	return problemPayload{
+		Title:  synthetic.Title(),
+		Status: synthetic.Status(),
+		Code:   synthetic.Code(),
+	}
 }

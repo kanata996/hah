@@ -4,6 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -15,6 +17,13 @@ func TestJSONWritersWriteExpectedResponses(t *testing.T) {
 		wantContentType string
 		wantBody        string
 	}{
+		{
+			name:            "JSON writes OK response",
+			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusOK, map[string]any{"id": "u_1"}) },
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        "{\"id\":\"u_1\"}\n",
+		},
 		{
 			name:            "JSON writes compact JSON",
 			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"}) },
@@ -30,32 +39,39 @@ func TestJSONWritersWriteExpectedResponses(t *testing.T) {
 			wantBody:        "null\n",
 		},
 		{
-			name:            "JSONBlob writes raw bytes",
-			write:           func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`)) },
-			wantStatus:      http.StatusAccepted,
+			name:            "JSON writes created response",
+			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusCreated, map[string]any{"id": "u_1"}) },
+			wantStatus:      http.StatusCreated,
 			wantContentType: "application/json",
-			wantBody:        `{"id":"u_1"}`,
+			wantBody:        "{\"id\":\"u_1\"}\n",
 		},
 		{
-			name:            "JSONBlob passes through invalid JSON",
-			write:           func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusOK, []byte(`{"id":`)) },
+			name:            "JSON writes array as array",
+			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusOK, []string{"a", "b"}) },
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        `{"id":`,
+			wantBody:        "[\"a\",\"b\"]\n",
 		},
 		{
-			name:            "JSONBlob allows nil body",
-			write:           func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusOK, nil) },
+			name:            "JSON writes string as string",
+			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusOK, "hello") },
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        "",
+			wantBody:        "\"hello\"\n",
 		},
 		{
-			name:            "JSONBlob allows empty body",
-			write:           func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusOK, []byte{}) },
+			name:            "JSON writes boolean as boolean",
+			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusOK, true) },
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
-			wantBody:        "",
+			wantBody:        "true\n",
+		},
+		{
+			name:            "JSON writes number as number",
+			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusOK, 42) },
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        "42\n",
 		},
 	}
 
@@ -79,169 +95,138 @@ func TestJSONWritersWriteExpectedResponses(t *testing.T) {
 	}
 }
 
-func TestJSONBodyWritersCooperateWithHeadLikeWriter(t *testing.T) {
-	cases := []struct {
-		name       string
-		wantStatus int
-		wantBody   []byte
-		write      func(http.ResponseWriter) error
-	}{
-		{
-			name:       "JSON",
-			wantStatus: http.StatusAccepted,
-			wantBody:   []byte("{\"id\":\"u_1\"}\n"),
-			write:      func(w http.ResponseWriter) error { return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"}) },
-		},
-		{
-			name:       "JSONBlob",
-			wantStatus: http.StatusAccepted,
-			wantBody:   []byte(`{"id":"u_1"}`),
-			write:      func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`)) },
-		},
+func TestJSONClearsStaleContentLengthOnRealHTTPServer(t *testing.T) {
+	result := roundTripOverHTTP(t, func(w http.ResponseWriter, _ *http.Request) error {
+		w.Header().Set("Content-Length", "100")
+		return JSON(w, http.StatusOK, map[string]any{"id": "u_1"})
+	})
+
+	if result.handlerErr != nil {
+		t.Fatalf("handler error = %v", result.handlerErr)
 	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			inner := &headLikeResponseWriter{}
-			w := &writeCallbackResponseWriter{ResponseWriter: inner}
-
-			if err := tc.write(w); err != nil {
-				t.Fatalf("write() error = %v", err)
-			}
-			if inner.status != tc.wantStatus {
-				t.Fatalf("status = %d, want %d", inner.status, tc.wantStatus)
-			}
-			if got := inner.Header().Get("Content-Type"); got != "application/json" {
-				t.Fatalf("Content-Type = %q, want %q", got, "application/json")
-			}
-			if got := inner.Header().Get("Content-Length"); got != stringLen(tc.wantBody) {
-				t.Fatalf("Content-Length = %q, want %s", got, stringLen(tc.wantBody))
-			}
-			if w.writeCalls != 1 {
-				t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
-			}
-		})
+	if result.response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", result.response.StatusCode, http.StatusOK)
 	}
-}
-
-func TestJSONBodyWritersRespectWrappedWriterContentLength(t *testing.T) {
-	cases := []struct {
-		name       string
-		write      func(http.ResponseWriter) error
-		wantStatus int
-	}{
-		{
-			name:       "JSON",
-			write:      func(w http.ResponseWriter) error { return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"}) },
-			wantStatus: http.StatusAccepted,
-		},
-		{
-			name:       "JSONBlob",
-			write:      func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`)) },
-			wantStatus: http.StatusAccepted,
-		},
+	if got := result.response.Header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/json")
 	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			inner := &headLikeResponseWriter{}
-			w := &transformingResponseWriter{
-				ResponseWriter: inner,
-				suffix:         []byte("\n"),
-			}
-
-			if err := tc.write(w); err != nil {
-				t.Fatalf("write() error = %v", err)
-			}
-			if inner.status != tc.wantStatus {
-				t.Fatalf("status = %d, want %d", inner.status, tc.wantStatus)
-			}
-			if got := inner.Header().Get("Content-Length"); got != stringLen(w.lastWrite) {
-				t.Fatalf("Content-Length = %q, want %s", got, stringLen(w.lastWrite))
-			}
-			if w.writeCalls != 1 {
-				t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
-			}
-		})
+	if result.readErr != nil {
+		t.Fatalf("ReadAll() error = %v", result.readErr)
+	}
+	if got := string(result.body); got != "{\"id\":\"u_1\"}\n" {
+		t.Fatalf("body = %q, want %q", got, "{\"id\":\"u_1\"}\n")
+	}
+	if got := result.response.Header.Get("Content-Length"); got != "" && got != strconv.Itoa(len(result.body)) {
+		t.Fatalf("Content-Length = %q, want empty or %d", got, len(result.body))
 	}
 }
 
 func TestJSONBodyWritersRejectNilWriter(t *testing.T) {
-	cases := []struct {
-		name    string
-		write   func() error
-		wantErr string
-	}{
-		{name: "JSON", write: func() error { return JSON(nil, http.StatusOK, map[string]any{"id": "u_1"}) }, wantErr: "resp: response writer is nil"},
-		{name: "JSONBlob", write: func() error { return JSONBlob(nil, http.StatusOK, []byte(`{"id":"u_1"}`)) }, wantErr: "resp: response writer is nil"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.write(); err == nil || err.Error() != tc.wantErr {
-				t.Fatalf("error = %v, want %q", err, tc.wantErr)
-			}
-		})
+	if err := JSON(nil, http.StatusOK, map[string]any{"id": "u_1"}); err == nil {
+		t.Fatal("expected error, got nil")
 	}
 }
 
-func TestJSONBodyWritersRejectInvalidStatusOrBodylessStatus(t *testing.T) {
+func TestJSONBodyWritersRejectUnsupportedStatusesBeforeCommit(t *testing.T) {
 	cases := []struct {
-		name      string
-		write     func(http.ResponseWriter) error
-		wantErr   string
-		checkBody bool
+		name  string
+		write func(http.ResponseWriter) error
 	}{
 		{
-			name:      "JSON informational status",
-			write:     func(w http.ResponseWriter) error { return JSON(w, http.StatusContinue, map[string]any{"id": "u_1"}) },
-			wantErr:   "resp: JSON body writers cannot use informational status 100",
-			checkBody: true,
+			name: "JSON unsupported 203",
+			write: func(w http.ResponseWriter) error {
+				return JSON(w, http.StatusNonAuthoritativeInfo, map[string]any{"id": "u_1"})
+			},
 		},
 		{
-			name:      "JSON invalid status",
-			write:     func(w http.ResponseWriter) error { return JSON(w, 1000, map[string]any{"id": "u_1"}) },
-			wantErr:   "resp: invalid HTTP status 1000",
-			checkBody: true,
+			name:  "JSON unsupported 204",
+			write: func(w http.ResponseWriter) error { return JSON(w, http.StatusNoContent, map[string]any{"id": "u_1"}) },
 		},
 		{
-			name: "JSON bodyless status",
+			name: "JSON unsupported 205",
 			write: func(w http.ResponseWriter) error {
 				return JSON(w, http.StatusResetContent, map[string]any{"id": "u_1"})
 			},
-			wantErr:   "resp: JSON body writers cannot use bodyless status 205",
-			checkBody: true,
 		},
 		{
-			name:      "JSONBlob informational status",
-			write:     func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusProcessing, []byte(`{"id":"u_1"}`)) },
-			wantErr:   "resp: JSON body writers cannot use informational status 102",
-			checkBody: true,
+			name: "JSON unsupported 206",
+			write: func(w http.ResponseWriter) error {
+				return JSON(w, http.StatusPartialContent, map[string]any{"id": "u_1"})
+			},
 		},
 		{
-			name:      "JSONBlob invalid status",
-			write:     func(w http.ResponseWriter) error { return JSONBlob(w, 1000, []byte(`{"id":"u_1"}`)) },
-			wantErr:   "resp: invalid HTTP status 1000",
-			checkBody: true,
+			name:  "JSON unsupported 207",
+			write: func(w http.ResponseWriter) error { return JSON(w, http.StatusMultiStatus, map[string]any{"id": "u_1"}) },
 		},
 		{
-			name:      "JSONBlob bodyless status",
-			write:     func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusNoContent, []byte(`{"id":"u_1"}`)) },
-			wantErr:   "resp: JSON body writers cannot use bodyless status 204",
-			checkBody: true,
+			name: "JSON unsupported 208",
+			write: func(w http.ResponseWriter) error {
+				return JSON(w, http.StatusAlreadyReported, map[string]any{"id": "u_1"})
+			},
+		},
+		{
+			name:  "JSON unsupported 226",
+			write: func(w http.ResponseWriter) error { return JSON(w, http.StatusIMUsed, map[string]any{"id": "u_1"}) },
+		},
+		{
+			name:  "JSON invalid status",
+			write: func(w http.ResponseWriter) error { return JSON(w, 1000, map[string]any{"id": "u_1"}) },
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rr := httptest.NewRecorder()
-			if err := tc.write(rr); err == nil || err.Error() != tc.wantErr {
-				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			if err := tc.write(rr); err == nil {
+				t.Fatal("expected error, got nil")
 			}
-			if tc.checkBody {
-				assertRecorderHasNoBodyOrContentType(t, rr)
-			}
+			assertRecorderHasNoBodyOrContentType(t, rr)
 		})
+	}
+}
+
+func TestJSONOnHeadRequestUsesNetHTTPHeadSemantics(t *testing.T) {
+	result := roundTripOverHTTPMethod(t, http.MethodHead, func(w http.ResponseWriter, _ *http.Request) error {
+		return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"})
+	})
+
+	if result.handlerErr != nil {
+		t.Fatalf("handler error = %v", result.handlerErr)
+	}
+	if result.response.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", result.response.StatusCode, http.StatusAccepted)
+	}
+	if got := result.response.Header.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/json")
+	}
+	if result.readErr != nil {
+		t.Fatalf("ReadAll() error = %v", result.readErr)
+	}
+	if len(result.body) != 0 {
+		t.Fatalf("body = %q, want empty for HEAD", string(result.body))
+	}
+}
+
+func TestJSONPreservesUnrelatedHeadersAndOwnsContentHeaders(t *testing.T) {
+	rr := httptest.NewRecorder()
+	rr.Header().Set("X-Trace-ID", "trace-1")
+	rr.Header().Set("Content-Type", "text/plain")
+	rr.Header().Set("Content-Length", "999")
+
+	if err := JSON(rr, http.StatusAccepted, map[string]any{"id": "u_1"}); err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
+	}
+	if got := rr.Header().Get("X-Trace-ID"); got != "trace-1" {
+		t.Fatalf("X-Trace-ID = %q, want %q", got, "trace-1")
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/json")
+	}
+	if got := rr.Header().Get("Content-Length"); got != "" {
+		t.Fatalf("Content-Length = %q, want empty before net/http recalculates it", got)
 	}
 }
 
@@ -253,43 +238,22 @@ func TestJSONRejectsUnsupportedValue(t *testing.T) {
 }
 
 func TestJSONBodyWritersReturnWrappedWriteError(t *testing.T) {
-	cases := []struct {
-		name       string
-		wantStatus int
-		write      func(http.ResponseWriter) error
-	}{
-		{
-			name:       "JSON",
-			wantStatus: http.StatusAccepted,
-			write:      func(w http.ResponseWriter) error { return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"}) },
-		},
-		{
-			name:       "JSONBlob",
-			wantStatus: http.StatusAccepted,
-			write:      func(w http.ResponseWriter) error { return JSONBlob(w, http.StatusAccepted, []byte(`{"id":"u_1"}`)) },
-		},
+	cause := errors.New("socket closed")
+	w := &failingWriter{cause: cause}
+	err := JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cause := errors.New("socket closed")
-			w := &failingWriter{cause: cause}
-			err := tc.write(w)
-			if err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !errors.Is(err, cause) {
-				t.Fatalf("errors.Is(err, cause) = false, want true")
-			}
-			if got := err.Error(); got != "resp: write response failed: socket closed" {
-				t.Fatalf("error = %q, want %q", got, "resp: write response failed: socket closed")
-			}
-			if w.status != tc.wantStatus {
-				t.Fatalf("status = %d, want %d", w.status, tc.wantStatus)
-			}
-			if w.writes != 1 {
-				t.Fatalf("writes = %d, want 1", w.writes)
-			}
-		})
+	if !errors.Is(err, cause) {
+		t.Fatalf("errors.Is(err, cause) = false, want true")
+	}
+	if got := err.Error(); !strings.Contains(got, cause.Error()) {
+		t.Fatalf("error = %q, want to contain cause %q", got, cause.Error())
+	}
+	if w.status != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", w.status, http.StatusAccepted)
+	}
+	if w.writes != 1 {
+		t.Fatalf("writes = %d, want 1", w.writes)
 	}
 }

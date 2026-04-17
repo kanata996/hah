@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/kanata996/hah/errx"
 )
 
@@ -18,7 +19,7 @@ func Path(r *http.Request, name string) *PathParam {
 		spec: paramSpec{
 			r:      r,
 			name:   strings.TrimSpace(name),
-			input:  errx.ViolationInPath,
+			input:  errx.InPath,
 			lookup: pathParamValues,
 		},
 	}
@@ -30,28 +31,28 @@ func (p *PathParam) String() *StringParam {
 }
 
 // Int 读取 int 参数。
-func (p *PathParam) Int() *IntParam {
-	return newIntParam(p.spec)
+func (p *PathParam) Int() *OrderedParam[int] {
+	return newOrderedParam(p.spec, parseIntValue)
 }
 
 // Int64 读取 int64 参数。
-func (p *PathParam) Int64() *Int64Param {
-	return newInt64Param(p.spec)
+func (p *PathParam) Int64() *OrderedParam[int64] {
+	return newOrderedParam(p.spec, parseInt64Value)
 }
 
 // Uint64 读取 uint64 参数。
-func (p *PathParam) Uint64() *Uint64Param {
-	return newUint64Param(p.spec)
+func (p *PathParam) Uint64() *OrderedParam[uint64] {
+	return newOrderedParam(p.spec, parseUint64Value)
 }
 
 // Uint 读取 uint 参数。
-func (p *PathParam) Uint() *UintParam {
-	return newUintParam(p.spec)
+func (p *PathParam) Uint() *OrderedParam[uint] {
+	return newOrderedParam(p.spec, parseUintValue)
 }
 
 // UUID 读取 uuid.UUID 参数。
-func (p *PathParam) UUID() *UUIDParam {
-	return newUUIDParam(p.spec)
+func (p *PathParam) UUID() *ValueParam[uuid.UUID] {
+	return newValueParam(p.spec, parseUUIDValue)
 }
 
 func pathParamValues(r *http.Request, name string) ([]string, bool) {

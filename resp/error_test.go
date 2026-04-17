@@ -4,15 +4,30 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/kanata996/hah/errx"
 )
+
+type asHTTPError struct {
+	httpErr *errx.HTTPError
+}
+
+func (e asHTTPError) Error() string {
+	return "as http error"
+}
+
+func (e asHTTPError) As(target any) bool {
+	httpErrTarget, ok := target.(**errx.HTTPError)
+	if !ok {
+		return false
+	}
+	*httpErrTarget = e.httpErr
+	return true
+}
 
 // WriteError 会把 HTTPError 写成标准 problem JSON。
 func TestWriteErrorWritesEnvelope(t *testing.T) {
@@ -23,7 +38,7 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 		"",
 		"",
 	).WithViolations([]errx.Violation{
-		{Field: "name", Code: "required", Detail: "is required"},
+		{Field: "name", In: errx.InBody, Code: "required", Detail: "is required"},
 	}))
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
@@ -55,6 +70,7 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 	}
 	assertPublicErrorObject(t, errors[0], map[string]any{
 		"field":  "name",
+		"in":     "body",
 		"code":   "required",
 		"detail": "is required",
 	})
@@ -97,6 +113,32 @@ func TestWriteErrorPreservesExplicitPublicFieldsFromWrappedHTTPError(t *testing.
 		"code":   "required",
 		"detail": "is required",
 	})
+}
+
+func TestWriteErrorWritesNotFoundProblem(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := WriteError(rr, errx.NotFound("", "")); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "not_found" {
+		t.Fatalf("code = %#v, want not_found", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusNotFound) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusNotFound))
+	}
+	if got := body["status"]; got != float64(http.StatusNotFound) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusNotFound)
+	}
 }
 
 // 多个 violation 对象应圆整进入 problem JSON 的 errors 数组。
@@ -165,64 +207,116 @@ func TestWriteErrorRejectsNilWriter(t *testing.T) {
 		}
 	}()
 
-	err := WriteError(nil, errors.New("db timeout"))
-	if err == nil || !strings.Contains(err.Error(), "response writer is nil") {
-		t.Fatalf("WriteError() error = %v, want response writer is nil", err)
+	if err := WriteError(nil, errors.New("db timeout")); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestWriteErrorReturnsResponseWriteErrorUnchanged(t *testing.T) {
+	rr := httptest.NewRecorder()
+	cause := errors.New("socket closed")
+	original := &responseWriteError{cause: cause}
+
+	err := WriteError(rr, original)
+	if err != original {
+		t.Fatalf("WriteError() error = %#v, want original %#v", err, original)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("errors.Is(err, cause) = false, want true")
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
+func TestWriteErrorNilWriterAndNilErrorIsNoop(t *testing.T) {
+	if err := WriteError(nil, nil); err != nil {
+		t.Fatalf("WriteError() error = %v, want nil", err)
 	}
 }
 
 // HEAD 请求写错误时仍走正常 Write 链路，但最终对外只保留状态和头语义。
-func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
-	expected := httptest.NewRecorder()
+func TestWriteErrorOnHeadRequestUsesNetHTTPHeadSemantics(t *testing.T) {
 	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
 		{Field: "name", Code: "required", Detail: "is required"},
 	})
+
+	result := roundTripOverHTTPMethod(t, http.MethodHead, func(w http.ResponseWriter, _ *http.Request) error {
+		return WriteError(w, httpErr)
+	})
+
+	if result.handlerErr != nil {
+		t.Fatalf("handler error = %v", result.handlerErr)
+	}
+	if result.response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", result.response.StatusCode, http.StatusBadRequest)
+	}
+	if got := result.response.Header.Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/problem+json")
+	}
+	if result.readErr != nil {
+		t.Fatalf("ReadAll() error = %v", result.readErr)
+	}
+	if len(result.body) != 0 {
+		t.Fatalf("body = %q, want empty for HEAD", string(result.body))
+	}
+}
+
+func TestWriteErrorClearsStaleContentLengthOnRealHTTPServer(t *testing.T) {
+	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
+		{Field: "name", Code: "required", Detail: "is required"},
+	})
+
+	expected := httptest.NewRecorder()
 	if err := WriteError(expected, httpErr); err != nil {
 		t.Fatalf("WriteError() expected recorder error = %v", err)
 	}
 
-	inner := &headLikeResponseWriter{}
-	w := &writeCallbackResponseWriter{ResponseWriter: inner}
+	result := roundTripOverHTTP(t, func(w http.ResponseWriter, _ *http.Request) error {
+		w.Header().Set("Content-Length", "100")
+		return WriteError(w, httpErr)
+	})
 
-	err := WriteError(w, httpErr)
-	if err != nil {
-		t.Fatalf("WriteError() error = %v", err)
+	if result.handlerErr != nil {
+		t.Fatalf("handler error = %v", result.handlerErr)
 	}
-	if inner.status != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", inner.status, http.StatusBadRequest)
+	if result.response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", result.response.StatusCode, http.StatusBadRequest)
 	}
-	if got := inner.Header().Get("Content-Type"); got != "application/problem+json" {
-		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	if got := result.response.Header.Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/problem+json")
 	}
-	if got := inner.Header().Get("Content-Length"); got != strconv.Itoa(expected.Body.Len()) {
-		t.Fatalf("Content-Length = %q, want %d", got, expected.Body.Len())
+	if result.readErr != nil {
+		t.Fatalf("ReadAll() error = %v", result.readErr)
 	}
-	if w.writeCalls != 1 {
-		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
+	if got := string(result.body); got != expected.Body.String() {
+		t.Fatalf("body = %q, want %q", got, expected.Body.String())
+	}
+	if got := result.response.Header.Get("Content-Length"); got != "" && got != strconv.Itoa(len(result.body)) {
+		t.Fatalf("Content-Length = %q, want empty or %d", got, len(result.body))
 	}
 }
 
-func TestWriteErrorRespectsWrappedWriterContentLength(t *testing.T) {
-	inner := &headLikeResponseWriter{}
-	w := &transformingResponseWriter{
-		ResponseWriter: inner,
-		suffix:         []byte("\n"),
-	}
-	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
-		{Field: "name", Code: "required", Detail: "is required"},
-	})
+func TestWriteErrorPreservesUnrelatedHeadersAndOwnsContentHeaders(t *testing.T) {
+	rr := httptest.NewRecorder()
+	rr.Header().Set("X-Trace-ID", "trace-1")
+	rr.Header().Set("Content-Type", "text/plain")
+	rr.Header().Set("Content-Length", "999")
 
-	if err := WriteError(w, httpErr); err != nil {
+	err := WriteError(rr, errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid"))
+	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
-	if inner.status != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", inner.status, http.StatusBadRequest)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
 	}
-	if got := inner.Header().Get("Content-Length"); got != strconv.Itoa(len(w.lastWrite)) {
-		t.Fatalf("Content-Length = %q, want %d", got, len(w.lastWrite))
+	if got := rr.Header().Get("X-Trace-ID"); got != "trace-1" {
+		t.Fatalf("X-Trace-ID = %q, want %q", got, "trace-1")
 	}
-	if w.writeCalls != 1 {
-		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
+	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/problem+json")
+	}
+	if got := rr.Header().Get("Content-Length"); got != "" {
+		t.Fatalf("Content-Length = %q, want empty before net/http recalculates it", got)
 	}
 }
 
@@ -254,6 +348,126 @@ func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
 	}
 }
 
+func TestWriteErrorSkipsTypedNilHTTPErrorAndChoosesFirstNonNilCandidate(t *testing.T) {
+	var typedNil *errx.HTTPError
+
+	first := errx.NewHTTPError(http.StatusConflict, "version_conflict", "version mismatch")
+	later := errx.NewHTTPError(http.StatusNotFound, "not_found", "resource missing")
+	input := errors.Join(typedNil, context.Canceled, first, later)
+
+	rr := httptest.NewRecorder()
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusConflict)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "version_conflict" {
+		t.Fatalf("code = %#v, want version_conflict", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusConflict) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusConflict))
+	}
+	if got := body["detail"]; got != "version mismatch" {
+		t.Fatalf("detail = %#v, want version mismatch", got)
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
+	}
+}
+
+func TestWriteErrorUsesErrorsAsHTTPErrorCandidate(t *testing.T) {
+	input := errors.Join(
+		context.Canceled,
+		asHTTPError{
+			httpErr: errx.NewHTTPError(http.StatusForbidden, "forbidden", "access denied"),
+		},
+	)
+
+	rr := httptest.NewRecorder()
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "forbidden" {
+		t.Fatalf("code = %#v, want forbidden", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusForbidden) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusForbidden))
+	}
+	if got := body["detail"]; got != "access denied" {
+		t.Fatalf("detail = %#v, want access denied", got)
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
+	}
+}
+
+func TestWriteErrorTypedNilHTTPErrorFallsBackToContextOrDefault(t *testing.T) {
+	var typedNil *errx.HTTPError
+
+	cases := []struct {
+		name       string
+		err        error
+		wantCode   string
+		wantTitle  string
+		wantStatus int
+	}{
+		{
+			name:       "context canceled",
+			err:        errors.Join(typedNil, context.Canceled),
+			wantStatus: 499,
+			wantCode:   "client_closed_request",
+			wantTitle:  "Client Closed Request",
+		},
+		{
+			name:       "default internal error",
+			err:        typedNil,
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "internal_error",
+			wantTitle:  http.StatusText(http.StatusInternalServerError),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			if err := WriteError(rr, tc.err); err != nil {
+				t.Fatalf("WriteError() error = %v", err)
+			}
+
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rr.Code, tc.wantStatus)
+			}
+
+			body := decodePayload(t, rr.Body.Bytes())
+			if got := body["code"]; got != tc.wantCode {
+				t.Fatalf("code = %#v, want %q", got, tc.wantCode)
+			}
+			if got := body["title"]; got != tc.wantTitle {
+				t.Fatalf("title = %#v, want %q", got, tc.wantTitle)
+			}
+			if got := body["status"]; got != float64(tc.wantStatus) {
+				t.Fatalf("status = %#v, want %d", got, tc.wantStatus)
+			}
+			if _, exists := body["detail"]; exists {
+				t.Fatalf("detail unexpectedly present: %#v", body["detail"])
+			}
+			if _, exists := body["errors"]; exists {
+				t.Fatalf("errors unexpectedly present: %#v", body["errors"])
+			}
+		})
+	}
+}
+
 // context.Canceled 会映射为对外可见的 client closed request 错误。
 func TestWriteErrorMapsContextCanceled(t *testing.T) {
 	rr := httptest.NewRecorder()
@@ -267,11 +481,20 @@ func TestWriteErrorMapsContextCanceled(t *testing.T) {
 	if rr.Code != 499 {
 		t.Fatalf("status = %d, want 499", rr.Code)
 	}
+	if got := body["status"]; got != float64(499) {
+		t.Fatalf("status = %#v, want 499", got)
+	}
 	if got := body["code"]; got != "client_closed_request" {
 		t.Fatalf("code = %#v, want client_closed_request", got)
 	}
 	if got := body["title"]; got != "Client Closed Request" {
 		t.Fatalf("title = %#v, want Client Closed Request", got)
+	}
+	if _, exists := body["detail"]; exists {
+		t.Fatalf("detail unexpectedly present: %#v", body["detail"])
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
 	}
 }
 
@@ -288,14 +511,53 @@ func TestWriteErrorMapsContextDeadlineExceeded(t *testing.T) {
 	if rr.Code != http.StatusGatewayTimeout {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusGatewayTimeout)
 	}
+	if got := body["status"]; got != float64(http.StatusGatewayTimeout) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusGatewayTimeout)
+	}
 	if got := body["code"]; got != "timeout" {
 		t.Fatalf("code = %#v, want timeout", got)
 	}
 	if got := body["title"]; got != http.StatusText(http.StatusGatewayTimeout) {
 		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
 	}
-	if got := body["detail"]; got != http.StatusText(http.StatusGatewayTimeout) {
-		t.Fatalf("detail = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
+	if _, exists := body["detail"]; exists {
+		t.Fatalf("detail unexpectedly present: %#v", body["detail"])
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
+	}
+}
+
+func TestWriteErrorPrefersHTTPErrorOverContextErrors(t *testing.T) {
+	input := errors.Join(
+		context.Canceled,
+		errx.NewHTTPError(http.StatusForbidden, "forbidden", "access denied"),
+	)
+
+	rr := httptest.NewRecorder()
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["status"]; got != float64(http.StatusForbidden) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusForbidden)
+	}
+	if got := body["code"]; got != "forbidden" {
+		t.Fatalf("code = %#v, want forbidden", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusForbidden) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusForbidden))
+	}
+	if got := body["detail"]; got != "access denied" {
+		t.Fatalf("detail = %#v, want access denied", got)
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
 	}
 }
 
@@ -319,67 +581,18 @@ func TestWriteErrorMapsUnknownErrorToInternalError(t *testing.T) {
 	if got := body["title"]; got != "Internal Server Error" {
 		t.Fatalf("title = %#v, want Internal Server Error", got)
 	}
+	if _, exists := body["detail"]; exists {
+		t.Fatalf("detail unexpectedly present: %#v", body["detail"])
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
+	}
 	if bytes.Contains(rr.Body.Bytes(), []byte("db timeout")) {
 		t.Fatalf("body leaked internal cause: %q", rr.Body.String())
 	}
 }
 
-// resp 自己的写响应错误再次传回 WriteError 时，应直接原样返回，避免重复写。
-func TestWriteErrorReturnsRespWriteErrorWithoutRewrite(t *testing.T) {
-	w := &failingWriter{}
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
-	err := OK(w, map[string]any{"id": "u_1"})
-	if err == nil {
-		t.Fatal("expected write error, got nil")
-	}
-	if w.status != http.StatusOK {
-		t.Fatalf("status = %d, want %d", w.status, http.StatusOK)
-	}
-	if w.writes != 1 {
-		t.Fatalf("writes = %d, want 1", w.writes)
-	}
-
-	writtenErr := WriteError(w, err)
-	if !errors.Is(writtenErr, err) {
-		t.Fatalf("WriteError() error = %v, want original error %v", writtenErr, err)
-	}
-	if w.writes != 1 {
-		t.Fatalf("writes = %d, want still 1", w.writes)
-	}
-	if defaultBuf.Len() != 0 {
-		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
-	}
-}
-
-func TestWriteErrorDoesNotWriteStandaloneLogForServerError(t *testing.T) {
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
-	rr := httptest.NewRecorder()
-	if err := WriteError(rr, errors.New("db timeout")); err != nil {
-		t.Fatalf("WriteError() error = %v", err)
-	}
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
-	}
-	if defaultBuf.Len() != 0 {
-		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
-	}
-}
-
-func TestWriteErrorWriteFailureDoesNotWriteStandaloneLog(t *testing.T) {
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
+func TestWriteErrorReturnsWriteFailureAfterFirstCommit(t *testing.T) {
 	cause := errors.New("socket closed")
 	w := &failingWriter{cause: cause}
 	err := WriteError(w, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"))
@@ -388,9 +601,6 @@ func TestWriteErrorWriteFailureDoesNotWriteStandaloneLog(t *testing.T) {
 	}
 	if !errors.Is(err, cause) {
 		t.Fatalf("errors.Is(err, cause) = false, want true")
-	}
-	if got := err.Error(); got != "resp: write response failed: socket closed" {
-		t.Fatalf("error = %q, want %q", got, "resp: write response failed: socket closed")
 	}
 	if w.status != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.status, http.StatusInternalServerError)
@@ -401,7 +611,87 @@ func TestWriteErrorWriteFailureDoesNotWriteStandaloneLog(t *testing.T) {
 	if w.writes != 1 {
 		t.Fatalf("writes = %d, want 1", w.writes)
 	}
-	if defaultBuf.Len() != 0 {
-		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
+}
+
+func TestEncodeProblemBodyFallsBackToInternalErrorWhenEncodingPayloadFails(t *testing.T) {
+	calls := 0
+	status, body := encodeProblemBody(problemPayload{
+		Title:  http.StatusText(http.StatusBadRequest),
+		Status: http.StatusBadRequest,
+		Code:   "bad_request",
+		Errors: []errx.Violation{
+			{Field: "name", Code: "required", Detail: "is required"},
+		},
+	}, func(any) ([]byte, error) {
+		calls++
+		return nil, errors.New("encode payload failed")
+	})
+	if calls != 1 {
+		t.Fatalf("encode calls = %d, want 1", calls)
+	}
+	if status != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", status, http.StatusInternalServerError)
+	}
+
+	payload := decodePayload(t, body)
+	if got := payload["code"]; got != "internal_error" {
+		t.Fatalf("code = %#v, want internal_error", got)
+	}
+	if got := payload["title"]; got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusInternalServerError))
+	}
+	if got := payload["status"]; got != float64(http.StatusInternalServerError) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusInternalServerError)
+	}
+	if _, exists := payload["detail"]; exists {
+		t.Fatalf("detail unexpectedly present: %#v", payload["detail"])
+	}
+	if _, exists := payload["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", payload["errors"])
+	}
+}
+
+func TestWriteErrorFallsBackToInternalErrorWhenProblemEncodingFails(t *testing.T) {
+	t.Cleanup(func() {
+		problemBodyEncoder = encodeJSON
+	})
+	problemBodyEncoder = func(any) ([]byte, error) {
+		return nil, errors.New("encode payload failed")
+	}
+
+	rr := httptest.NewRecorder()
+	err := WriteError(rr, errx.NewHTTPError(
+		http.StatusBadRequest,
+		"invalid_json",
+		"payload invalid",
+	).WithViolations([]errx.Violation{
+		{Field: "name", Code: "required", Detail: "is required"},
+	}))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v, want nil after fallback write", err)
+	}
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	}
+
+	payload := decodePayload(t, rr.Body.Bytes())
+	if got := payload["code"]; got != "internal_error" {
+		t.Fatalf("code = %#v, want internal_error", got)
+	}
+	if got := payload["title"]; got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusInternalServerError))
+	}
+	if got := payload["status"]; got != float64(http.StatusInternalServerError) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusInternalServerError)
+	}
+	if _, exists := payload["detail"]; exists {
+		t.Fatalf("detail unexpectedly present: %#v", payload["detail"])
+	}
+	if _, exists := payload["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", payload["errors"])
 	}
 }

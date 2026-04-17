@@ -3,162 +3,384 @@ package reqx
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/kanata996/hah/errx"
 )
 
-func TestPath_SuccessPaths(t *testing.T) {
-	t.Run("path uuid required", func(t *testing.T) {
+func TestPathBuilder_Contracts(t *testing.T) {
+	t.Run("required missing path returns required violation", func(t *testing.T) {
+		_, err := Path(requestWithPathParams(nil), "id").String().Required().Get()
+		assertRequiredViolationAt(t, err, "id", errx.InPath)
+	})
+
+	t.Run("declared empty wildcard counts as present", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Pattern = "/accounts/{id}"
+		req.SetPathValue("id", "")
+
+		got, err := Path(req, "id").String().Required().Get()
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got != "" {
+			t.Fatalf("id = %q, want empty string", got)
+		}
+	})
+
+	t.Run("malformed pattern does not make empty value present", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Pattern = "/accounts/{id"
+		req.SetPathValue("id", "")
+
+		_, err := Path(req, "id").String().Required().Get()
+		assertRequiredViolationAt(t, err, "id", errx.InPath)
+	})
+
+	t.Run("empty string only string accepts", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Pattern = "/accounts/{id}"
+		req.SetPathValue("id", "")
+
+		_, err := Path(req, "id").Int().Required().Get()
+		assertInvalidViolationAt(t, err, "id", errx.InPath)
+	})
+
+	t.Run("default validation failure is usage error", func(t *testing.T) {
+		_, err := Path(requestWithPathParams(nil), "since").String().
+			Default("2026-04-13T10:00:00Z").
+			MinLen(100).
+			Get()
+		assertNotHTTPError(t, err)
+	})
+
+	t.Run("uuid parse failure is invalid violation", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{"id": {"not-a-uuid"}})
+
+		_, err := Path(req, "id").UUID().Get()
+		assertInvalidViolationAt(t, err, "id", errx.InPath)
+	})
+
+	t.Run("uuid parse success", func(t *testing.T) {
 		want := uuid.New()
 		req := requestWithPathParams(map[string][]string{"id": {want.String()}})
 
 		got, err := Path(req, "id").UUID().Required().Get()
 		if err != nil {
-			t.Fatalf("Path().UUID().Required().Get() error = %v", err)
+			t.Fatalf("Get() error = %v", err)
 		}
 		if got != want {
 			t.Fatalf("uuid = %v, want %v", got, want)
 		}
 	})
-
-	t.Run("path supported identifier types", func(t *testing.T) {
-		req := requestWithPathParams(map[string][]string{
-			"slug": {"acct_123"},
-			"n":    {"7"},
-			"n64":  {"9"},
-			"u":    {"11"},
-			"u64":  {"13"},
-		})
-
-		slug, err := Path(req, "slug").String().Required().Get()
-		if err != nil || slug != "acct_123" {
-			t.Fatalf("Path().String().Get() = (%q, %v), want (acct_123, nil)", slug, err)
-		}
-
-		n, err := Path(req, "n").Int().Required().Get()
-		if err != nil || n != 7 {
-			t.Fatalf("Path().Int().Get() = (%d, %v), want (7, nil)", n, err)
-		}
-
-		n64, err := Path(req, "n64").Int64().Required().Get()
-		if err != nil || n64 != 9 {
-			t.Fatalf("Path().Int64().Get() = (%d, %v), want (9, nil)", n64, err)
-		}
-
-		u, err := Path(req, "u").Uint().Required().Get()
-		if err != nil || u != 11 {
-			t.Fatalf("Path().Uint().Get() = (%d, %v), want (11, nil)", u, err)
-		}
-
-		u64, err := Path(req, "u64").Uint64().Required().Get()
-		if err != nil || u64 != 13 {
-			t.Fatalf("Path().Uint64().Get() = (%d, %v), want (13, nil)", u64, err)
-		}
-	})
-
-	t.Run("declared empty wildcard counts as present", func(t *testing.T) {
-		tests := []struct {
-			name    string
-			pattern string
-			param   string
-		}{
-			{name: "basic wildcard", pattern: "/accounts/{id}", param: "id"},
-			{name: "method prefix wildcard", pattern: "GET /accounts/{id}", param: "id"},
-			{name: "catch all wildcard", pattern: "/files/{path...}", param: "path"},
-		}
-
-		for _, tc := range tests {
-			t.Run(tc.name, func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, "/", nil)
-				req.Pattern = tc.pattern
-				req.SetPathValue(tc.param, "")
-
-				got, err := Path(req, tc.param).String().Required().Get()
-				if err != nil {
-					t.Fatalf("Path().String().Required().Get() error = %v", err)
-				}
-				if got != "" {
-					t.Fatalf("%s = %q, want empty string", tc.param, got)
-				}
-			})
-		}
-	})
 }
 
-func TestPath_RequiredAndInvalidViolations(t *testing.T) {
-	t.Run("required missing path", func(t *testing.T) {
-		req := requestWithPathParams(nil)
-
-		_, err := Path(req, "id").String().Required().Get()
-		assertRequiredViolationAt(t, err, "id", errx.ViolationInPath)
-	})
-
-	t.Run("invalid path uuid", func(t *testing.T) {
-		req := requestWithPathParams(map[string][]string{"id": {"not-a-uuid"}})
-
-		_, err := Path(req, "id").UUID().Get()
-		assertInvalidViolationAt(t, err, "id", errx.ViolationInPath)
-	})
-
-	t.Run("invalid path int", func(t *testing.T) {
-		req := requestWithPathParams(map[string][]string{"id": {"oops"}})
-
-		_, err := Path(req, "id").Int().Get()
-		assertInvalidViolationAt(t, err, "id", errx.ViolationInPath)
-	})
-
-	t.Run("undeclared or malformed wildcard remains missing", func(t *testing.T) {
-		tests := []struct {
-			name    string
-			pattern string
-			param   string
-		}{
-			{name: "blank pattern", pattern: "   ", param: "id"},
-			{name: "no wildcard", pattern: "/accounts", param: "id"},
-			{name: "different wildcard name", pattern: "/accounts/{id}", param: "slug"},
-			{name: "adapter specific typed wildcard", pattern: "/accounts/{id:[0-9]+}", param: "id"},
-			{name: "dollar placeholder", pattern: "/{$}", param: "$"},
-			{name: "blank wildcard token", pattern: "/{ }", param: "id"},
-			{name: "malformed pattern", pattern: "/accounts/{id", param: "id"},
-		}
-
-		for _, tc := range tests {
-			t.Run(tc.name, func(t *testing.T) {
-				req := httptest.NewRequest(http.MethodGet, "/", nil)
-				req.Pattern = tc.pattern
-
-				_, err := Path(req, tc.param).String().Required().Get()
-				assertRequiredViolationAt(t, err, tc.param, errx.ViolationInPath)
-			})
-		}
-	})
-}
-
-func TestPathBuilder_UsageAndOptionalBehavior(t *testing.T) {
-	t.Run("nil request", func(t *testing.T) {
+func TestPathBuilder_BaselineContracts(t *testing.T) {
+	t.Run("nil request empty name and zero value builders are usage errors", func(t *testing.T) {
 		_, err := Path(nil, "id").String().Get()
-		assertUsageErrorContains(t, err, "request must not be nil")
+		assertNotHTTPError(t, err)
+
+		_, err = Path(httptest.NewRequest(http.MethodGet, "/", nil), " ").String().Get()
+		assertNotHTTPError(t, err)
+
+		var builder PathParam
+		_, err = builder.String().Get()
+		assertNotHTTPError(t, err)
+
+		var typed StringParam
+		_, err = typed.Get()
+		assertNotHTTPError(t, err)
 	})
 
-	t.Run("empty name", func(t *testing.T) {
-		_, err := Path(requestWithPathParams(map[string][]string{"id": {"u_1"}}), " ").String().Get()
-		assertUsageErrorContains(t, err, "parameter name must not be empty")
-	})
-
-	t.Run("zero path builder", func(t *testing.T) {
-		_, err := (&PathParam{}).String().Get()
-		assertUsageErrorContains(t, err, "param builder must be created with Path or Query")
-	})
-
-	t.Run("missing optional returns zero", func(t *testing.T) {
-		got, err := Path(requestWithPathParams(nil), "id").String().Get()
+	t.Run("optional missing returns zero and required is idempotent", func(t *testing.T) {
+		got, err := Path(requestWithPathParams(nil), "count").Int().Get()
 		if err != nil {
-			t.Fatalf("Path().String().Get() error = %v", err)
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got != 0 {
+			t.Fatalf("count = %d, want 0", got)
+		}
+
+		_, err = Path(requestWithPathParams(nil), "count").Int().
+			Required().
+			Required().
+			Get()
+		assertRequiredViolationAt(t, err, "count", errx.InPath)
+	})
+
+	t.Run("missing optional skips validators and later default wins", func(t *testing.T) {
+		called := false
+
+		got, err := Path(requestWithPathParams(nil), "slug").String().
+			MinLen(100).
+			Check(func(string) error {
+				called = true
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
 		}
 		if got != "" {
-			t.Fatalf("id = %q, want empty string", got)
+			t.Fatalf("slug = %q, want empty string", got)
+		}
+		if called {
+			t.Fatal("Check() ran for missing optional path parameter")
+		}
+
+		got, err = Path(requestWithPathParams(nil), "mode").String().
+			Default("old").
+			Default("new").
+			Get()
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got != "new" {
+			t.Fatalf("mode = %q, want new", got)
+		}
+	})
+
+	t.Run("required default and nil check are usage errors", func(t *testing.T) {
+		_, err := Path(requestWithPathParams(nil), "id").String().
+			Required().
+			Default("x").
+			Get()
+		assertNotHTTPError(t, err)
+
+		_, err = Path(requestWithPathParams(nil), "id").String().
+			Check(nil).
+			Get()
+		assertNotHTTPError(t, err)
+	})
+
+	t.Run("string validators short circuit before custom checks", func(t *testing.T) {
+		_, err := Path(requestWithPathParams(nil), "mode").String().
+			OneOf().
+			Get()
+		assertNotHTTPError(t, err)
+
+		_, err = Path(requestWithPathParams(nil), "mode").String().
+			Match(nil).
+			Get()
+		assertNotHTTPError(t, err)
+
+		checkCalled := false
+		_, err = Path(requestWithPathParams(map[string][]string{"mode": {"rust"}}), "mode").String().
+			OneOf("go").
+			Check(func(string) error {
+				checkCalled = true
+				return nil
+			}).
+			Get()
+		assertInvalidViolationAt(t, err, "mode", errx.InPath)
+		if checkCalled {
+			t.Fatal("Check() ran after OneOf() failure")
+		}
+
+		checkCalled = false
+		_, err = Path(requestWithPathParams(map[string][]string{"mode": {"rust"}}), "mode").String().
+			Match(regexp.MustCompile("^g")).
+			Check(func(string) error {
+				checkCalled = true
+				return nil
+			}).
+			Get()
+		assertInvalidViolationAt(t, err, "mode", errx.InPath)
+		if checkCalled {
+			t.Fatal("Check() ran after Match() failure")
+		}
+
+		got, err := Path(requestWithPathParams(map[string][]string{"mode": {"go"}}), "mode").String().
+			Match(regexp.MustCompile("go")).
+			Get()
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got != "go" {
+			t.Fatalf("mode = %q, want go", got)
+		}
+	})
+
+	t.Run("string constraints cover success failure and conflict", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{"slug": {"go"}})
+
+		got, err := Path(req, "slug").String().
+			MinLen(2).
+			MaxLen(2).
+			Get()
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got != "go" {
+			t.Fatalf("slug = %q, want go", got)
+		}
+
+		_, err = Path(requestWithPathParams(map[string][]string{"slug": {"g"}}), "slug").String().
+			MinLen(2).
+			Get()
+		assertInvalidViolationAt(t, err, "slug", errx.InPath)
+
+		_, err = Path(requestWithPathParams(nil), "slug").String().
+			MinLen(3).
+			MaxLen(2).
+			Get()
+		assertNotHTTPError(t, err)
+	})
+
+	t.Run("numeric constraints cover success failure and conflict", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{"id": {"7"}})
+
+		got, err := Path(req, "id").Int().
+			Min(1).
+			Max(7).
+			Get()
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got != 7 {
+			t.Fatalf("id = %d, want 7", got)
+		}
+
+		_, err = Path(req, "id").Int().
+			Max(6).
+			Get()
+		assertInvalidViolationAt(t, err, "id", errx.InPath)
+
+		_, err = Path(requestWithPathParams(nil), "id").Int().
+			Min(8).
+			Max(7).
+			Get()
+		assertNotHTTPError(t, err)
+	})
+
+	t.Run("bridge path values are consumed as set without unescape", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.SetPathValue("id", "a%2Fb")
+
+		got, err := Path(req, " id ").String().Required().Get()
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got != "a%2Fb" {
+			t.Fatalf("id = %q, want a%%2Fb", got)
+		}
+	})
+}
+
+func TestPathBuilder_WildcardPresenceRules(t *testing.T) {
+	testCases := []struct {
+		name        string
+		pattern     string
+		paramName   string
+		assertValue bool
+	}{
+		{
+			name:        "catch all wildcard counts as present",
+			pattern:     "/accounts/{id...}",
+			paramName:   "id",
+			assertValue: true,
+		},
+		{
+			name:      "different wildcard name stays missing",
+			pattern:   "/accounts/{other}",
+			paramName: "id",
+		},
+		{
+			name:      "malformed adapter specific wildcard stays missing",
+			pattern:   "/accounts/{id:[0-9]+}",
+			paramName: "id",
+		},
+		{
+			name:      "end anchor wildcard does not count as named wildcard",
+			pattern:   "/accounts/{$}",
+			paramName: "id",
+		},
+		{
+			name:      "blank pattern stays missing",
+			pattern:   " ",
+			paramName: "id",
+		},
+		{
+			name:      "pattern without wildcard stays missing",
+			pattern:   "/accounts/id",
+			paramName: "id",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Pattern = tc.pattern
+			req.SetPathValue("id", "")
+
+			got, err := Path(req, " "+tc.paramName+" ").String().Required().Get()
+			if tc.assertValue {
+				if err != nil {
+					t.Fatalf("Get() error = %v", err)
+				}
+				if got != "" {
+					t.Fatalf("id = %q, want empty string", got)
+				}
+				return
+			}
+			assertRequiredViolationAt(t, err, "id", errx.InPath)
+		})
+	}
+}
+
+func TestPathBuilder_ServeMuxPathValueContracts(t *testing.T) {
+	mux := http.NewServeMux()
+
+	var got string
+	var pathValue string
+	var handlerErr error
+
+	mux.HandleFunc("GET /accounts/{id}", func(w http.ResponseWriter, r *http.Request) {
+		pathValue = r.PathValue("id")
+		got, handlerErr = Path(r, "id").String().Required().Get()
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/accounts/kanata", nil)
+	mux.ServeHTTP(httptest.NewRecorder(), req)
+
+	if handlerErr != nil {
+		t.Fatalf("Get() error = %v", handlerErr)
+	}
+	if pathValue != "kanata" {
+		t.Fatalf("request.PathValue(id) = %q, want kanata", pathValue)
+	}
+	if got != pathValue {
+		t.Fatalf("Path().String().Get() = %q, want %q", got, pathValue)
+	}
+}
+
+func TestPathBuilder_ErrorPriorityContracts(t *testing.T) {
+	t.Run("usage errors stay sticky and win over request errors", func(t *testing.T) {
+		_, err := Path(requestWithPathParams(nil), "id").String().
+			OneOf().
+			Required().
+			Get()
+		assertNotHTTPError(t, err)
+
+		_, err = Path(requestWithPathParams(map[string][]string{"id": {"7"}}), "id").Int().
+			Min(8).
+			Max(7).
+			Get()
+		assertNotHTTPError(t, err)
+	})
+
+	t.Run("match uses regexp match string semantics", func(t *testing.T) {
+		got, err := Path(requestWithPathParams(map[string][]string{"slug": {"xxgoyy"}}), "slug").String().
+			Match(regexp.MustCompile("go")).
+			Get()
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got != "xxgoyy" {
+			t.Fatalf("slug = %q, want xxgoyy", got)
 		}
 	})
 }

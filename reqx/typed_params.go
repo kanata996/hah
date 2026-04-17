@@ -15,45 +15,21 @@ func newStringParam(spec paramSpec) *StringParam {
 	return &StringParam{value: newParamValue(spec, parseStringValue)}
 }
 
-func newIntParam(spec paramSpec) *IntParam {
-	return &IntParam{value: newOrderedRangeParam(spec, parseIntValue)}
+func newValueParam[T any](spec paramSpec, parse func(string) (T, error)) *ValueParam[T] {
+	return &ValueParam[T]{value: newParamValue(spec, parse)}
 }
 
-func newInt64Param(spec paramSpec) *Int64Param {
-	return &Int64Param{value: newOrderedRangeParam(spec, parseInt64Value)}
-}
-
-func newUint64Param(spec paramSpec) *Uint64Param {
-	return &Uint64Param{value: newOrderedRangeParam(spec, parseUint64Value)}
-}
-
-func newUintParam(spec paramSpec) *UintParam {
-	return &UintParam{value: newOrderedRangeParam(spec, parseUintValue)}
-}
-
-func newBoolParam(spec paramSpec) *BoolParam {
-	return &BoolParam{value: newParamValue(spec, parseBoolValue)}
-}
-
-func newFloat64Param(spec paramSpec) *Float64Param {
-	return &Float64Param{value: newOrderedRangeParam(spec, parseFloat64Value)}
-}
-
-func newDurationParam(spec paramSpec) *DurationParam {
-	return &DurationParam{value: newOrderedRangeParam(spec, parseDurationValue)}
-}
-
-func newUUIDParam(spec paramSpec) *UUIDParam {
-	return &UUIDParam{value: newParamValue(spec, parseUUIDValue)}
+func newOrderedParam[T cmp.Ordered](spec paramSpec, parse func(string) (T, error)) *OrderedParam[T] {
+	return &OrderedParam[T]{value: newOrderedRangeParam(spec, parse)}
 }
 
 func newTimeParam(spec paramSpec, parse func(string) (time.Time, error)) *TimeParam {
 	return &TimeParam{value: newTimeRangeParam(spec, parse)}
 }
 
-func newValuesParam(spec paramSpec) *ValuesParam {
-	return &ValuesParam{
-		value: newMultiParamValue(spec, parseRawValues, cloneStringSlice),
+func newMultiParam[T any](spec paramSpec, parse func([]string) []T) *MultiParam[T] {
+	return &MultiParam[T]{
+		value: newMultiParamValue(spec, parse, cloneSlice[T]),
 	}
 }
 
@@ -204,7 +180,7 @@ func (p *timeRangeParam) setAfter(value time.Time) {
 	p.after = &value
 	p.lastConstraint = rangeConstraintAfter
 	p.value.state.setNamedCheck("after", func(v time.Time) error {
-		if v.Before(value) {
+		if !v.After(value) {
 			return errInvalidParamValue
 		}
 		return nil
@@ -215,7 +191,7 @@ func (p *timeRangeParam) setBefore(value time.Time) {
 	p.before = &value
 	p.lastConstraint = rangeConstraintBefore
 	p.value.state.setNamedCheck("before", func(v time.Time) error {
-		if v.After(value) {
+		if !v.Before(value) {
 			return errInvalidParamValue
 		}
 		return nil
@@ -223,14 +199,24 @@ func (p *timeRangeParam) setBefore(value time.Time) {
 }
 
 func (p *timeRangeParam) constraintUsageErr() error {
-	if p.after == nil || p.before == nil || !p.after.After(*p.before) {
+	if p.after == nil || p.before == nil || p.after.Before(*p.before) {
 		return nil
 	}
 
 	if p.lastConstraint == rangeConstraintAfter {
-		return usageErrorf("after time must be less than or equal to before time")
+		return usageErrorf("after time must be earlier than before time")
 	}
-	return usageErrorf("before time must be greater than or equal to after time")
+	return usageErrorf("before time must be later than after time")
+}
+
+// ValueParam 读取并校验通用单值参数。
+type ValueParam[T any] struct {
+	value paramValue[T]
+}
+
+// OrderedParam 读取并校验可比较范围的单值参数。
+type OrderedParam[T cmp.Ordered] struct {
+	value orderedRangeParam[T]
 }
 
 // StringParam 读取并校验 string 参数。
@@ -241,24 +227,55 @@ type StringParam struct {
 	lastConstraint rangeConstraint
 }
 
-// ValuesParam 读取并校验 query 多值参数的原始 []string。
-type ValuesParam struct {
-	value multiParamValue[[]string]
+// TimeParam 读取并校验 time.Time 参数。
+type TimeParam struct {
+	value timeRangeParam
 }
 
-func (p *ValuesParam) Required() *ValuesParam {
+// MultiParam 读取并校验多值参数。
+type MultiParam[T any] struct {
+	value multiParamValue[[]T]
+}
+
+func (p *ValueParam[T]) Required() *ValueParam[T] {
 	return requireParam(p, &p.value)
 }
 
-func (p *ValuesParam) Default(value []string) *ValuesParam {
+func (p *ValueParam[T]) Default(value T) *ValueParam[T] {
 	return defaultParam(p, &p.value, value)
 }
 
-func (p *ValuesParam) Check(check func([]string) error) *ValuesParam {
+func (p *ValueParam[T]) Check(check func(T) error) *ValueParam[T] {
 	return checkParam(p, p.value.addCheck, check)
 }
 
-func (p *ValuesParam) Get() ([]string, error) {
+func (p *ValueParam[T]) Get() (T, error) {
+	return getParam(&p.value)
+}
+
+func (p *OrderedParam[T]) Required() *OrderedParam[T] {
+	return requireParam(p, &p.value)
+}
+
+func (p *OrderedParam[T]) Default(value T) *OrderedParam[T] {
+	return defaultParam(p, &p.value, value)
+}
+
+func (p *OrderedParam[T]) Min(value T) *OrderedParam[T] {
+	p.value.setMin(value)
+	return p
+}
+
+func (p *OrderedParam[T]) Max(value T) *OrderedParam[T] {
+	p.value.setMax(value)
+	return p
+}
+
+func (p *OrderedParam[T]) Check(check func(T) error) *OrderedParam[T] {
+	return checkParam(p, p.value.addCheck, check)
+}
+
+func (p *OrderedParam[T]) Get() (T, error) {
 	return getParam(&p.value)
 }
 
@@ -359,239 +376,6 @@ func (p *StringParam) constraintUsageErr() error {
 	return usageErrorf("maximum length must be greater than or equal to minimum length")
 }
 
-// IntParam 读取并校验 int 参数。
-type IntParam struct {
-	value orderedRangeParam[int]
-}
-
-func (p *IntParam) Required() *IntParam {
-	return requireParam(p, &p.value)
-}
-
-func (p *IntParam) Default(value int) *IntParam {
-	return defaultParam(p, &p.value, value)
-}
-
-func (p *IntParam) Min(value int) *IntParam {
-	p.value.setMin(value)
-	return p
-}
-
-func (p *IntParam) Max(value int) *IntParam {
-	p.value.setMax(value)
-	return p
-}
-
-func (p *IntParam) Check(check func(int) error) *IntParam {
-	return checkParam(p, p.value.addCheck, check)
-}
-
-func (p *IntParam) Get() (int, error) {
-	return getParam(&p.value)
-}
-
-// Int64Param 读取并校验 int64 参数。
-type Int64Param struct {
-	value orderedRangeParam[int64]
-}
-
-func (p *Int64Param) Required() *Int64Param {
-	return requireParam(p, &p.value)
-}
-
-func (p *Int64Param) Default(value int64) *Int64Param {
-	return defaultParam(p, &p.value, value)
-}
-
-func (p *Int64Param) Min(value int64) *Int64Param {
-	p.value.setMin(value)
-	return p
-}
-
-func (p *Int64Param) Max(value int64) *Int64Param {
-	p.value.setMax(value)
-	return p
-}
-
-func (p *Int64Param) Check(check func(int64) error) *Int64Param {
-	return checkParam(p, p.value.addCheck, check)
-}
-
-func (p *Int64Param) Get() (int64, error) {
-	return getParam(&p.value)
-}
-
-// UintParam 读取并校验 uint 参数。
-type UintParam struct {
-	value orderedRangeParam[uint]
-}
-
-func (p *UintParam) Required() *UintParam {
-	return requireParam(p, &p.value)
-}
-
-func (p *UintParam) Default(value uint) *UintParam {
-	return defaultParam(p, &p.value, value)
-}
-
-func (p *UintParam) Min(value uint) *UintParam {
-	p.value.setMin(value)
-	return p
-}
-
-func (p *UintParam) Max(value uint) *UintParam {
-	p.value.setMax(value)
-	return p
-}
-
-func (p *UintParam) Check(check func(uint) error) *UintParam {
-	return checkParam(p, p.value.addCheck, check)
-}
-
-func (p *UintParam) Get() (uint, error) {
-	return getParam(&p.value)
-}
-
-// Uint64Param 读取并校验 uint64 参数。
-type Uint64Param struct {
-	value orderedRangeParam[uint64]
-}
-
-func (p *Uint64Param) Required() *Uint64Param {
-	return requireParam(p, &p.value)
-}
-
-func (p *Uint64Param) Default(value uint64) *Uint64Param {
-	return defaultParam(p, &p.value, value)
-}
-
-func (p *Uint64Param) Min(value uint64) *Uint64Param {
-	p.value.setMin(value)
-	return p
-}
-
-func (p *Uint64Param) Max(value uint64) *Uint64Param {
-	p.value.setMax(value)
-	return p
-}
-
-func (p *Uint64Param) Check(check func(uint64) error) *Uint64Param {
-	return checkParam(p, p.value.addCheck, check)
-}
-
-func (p *Uint64Param) Get() (uint64, error) {
-	return getParam(&p.value)
-}
-
-// BoolParam 读取并校验 bool 参数。
-type BoolParam struct {
-	value paramValue[bool]
-}
-
-func (p *BoolParam) Required() *BoolParam {
-	return requireParam(p, &p.value)
-}
-
-func (p *BoolParam) Default(value bool) *BoolParam {
-	return defaultParam(p, &p.value, value)
-}
-
-func (p *BoolParam) Check(check func(bool) error) *BoolParam {
-	return checkParam(p, p.value.addCheck, check)
-}
-
-func (p *BoolParam) Get() (bool, error) {
-	return getParam(&p.value)
-}
-
-// Float64Param 读取并校验 float64 参数。
-type Float64Param struct {
-	value orderedRangeParam[float64]
-}
-
-func (p *Float64Param) Required() *Float64Param {
-	return requireParam(p, &p.value)
-}
-
-func (p *Float64Param) Default(value float64) *Float64Param {
-	return defaultParam(p, &p.value, value)
-}
-
-func (p *Float64Param) Min(value float64) *Float64Param {
-	p.value.setMin(value)
-	return p
-}
-
-func (p *Float64Param) Max(value float64) *Float64Param {
-	p.value.setMax(value)
-	return p
-}
-
-func (p *Float64Param) Check(check func(float64) error) *Float64Param {
-	return checkParam(p, p.value.addCheck, check)
-}
-
-func (p *Float64Param) Get() (float64, error) {
-	return getParam(&p.value)
-}
-
-// DurationParam 读取并校验 time.Duration 参数。
-type DurationParam struct {
-	value orderedRangeParam[time.Duration]
-}
-
-func (p *DurationParam) Required() *DurationParam {
-	return requireParam(p, &p.value)
-}
-
-func (p *DurationParam) Default(value time.Duration) *DurationParam {
-	return defaultParam(p, &p.value, value)
-}
-
-func (p *DurationParam) Min(value time.Duration) *DurationParam {
-	p.value.setMin(value)
-	return p
-}
-
-func (p *DurationParam) Max(value time.Duration) *DurationParam {
-	p.value.setMax(value)
-	return p
-}
-
-func (p *DurationParam) Check(check func(time.Duration) error) *DurationParam {
-	return checkParam(p, p.value.addCheck, check)
-}
-
-func (p *DurationParam) Get() (time.Duration, error) {
-	return getParam(&p.value)
-}
-
-// UUIDParam 读取并校验 uuid.UUID 参数。
-type UUIDParam struct {
-	value paramValue[uuid.UUID]
-}
-
-func (p *UUIDParam) Required() *UUIDParam {
-	return requireParam(p, &p.value)
-}
-
-func (p *UUIDParam) Default(value uuid.UUID) *UUIDParam {
-	return defaultParam(p, &p.value, value)
-}
-
-func (p *UUIDParam) Check(check func(uuid.UUID) error) *UUIDParam {
-	return checkParam(p, p.value.addCheck, check)
-}
-
-func (p *UUIDParam) Get() (uuid.UUID, error) {
-	return getParam(&p.value)
-}
-
-// TimeParam 读取并校验 time.Time 参数。
-type TimeParam struct {
-	value timeRangeParam
-}
-
 func (p *TimeParam) Required() *TimeParam {
 	return requireParam(p, &p.value)
 }
@@ -618,31 +402,36 @@ func (p *TimeParam) Get() (time.Time, error) {
 	return getParam(&p.value)
 }
 
-func parseRawValues(values []string) []string {
-	return cloneStringSlice(values)
+func (p *MultiParam[T]) Required() *MultiParam[T] {
+	return requireParam(p, &p.value)
+}
+
+func (p *MultiParam[T]) Default(value []T) *MultiParam[T] {
+	return defaultParam(p, &p.value, value)
+}
+
+func (p *MultiParam[T]) Check(check func([]T) error) *MultiParam[T] {
+	return checkParam(p, p.value.addCheck, check)
+}
+
+func (p *MultiParam[T]) Get() ([]T, error) {
+	return getParam(&p.value)
 }
 
 func parseStringValue(value string) (string, error) {
 	return value, nil
 }
 
-func defaultEmptyValue(value, fallback string) string {
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
 func parseIntBits(value string, bits int) (int64, error) {
-	return strconv.ParseInt(defaultEmptyValue(value, "0"), 10, bits)
+	return strconv.ParseInt(value, 10, bits)
 }
 
 func parseUintBits(value string, bits int) (uint64, error) {
-	return strconv.ParseUint(defaultEmptyValue(value, "0"), 10, bits)
+	return strconv.ParseUint(value, 10, bits)
 }
 
 func parseFloatBits(value string, bits int) (float64, error) {
-	return strconv.ParseFloat(defaultEmptyValue(value, "0.0"), bits)
+	return strconv.ParseFloat(value, bits)
 }
 
 func parseIntValue(value string) (int, error) {
@@ -664,7 +453,7 @@ func parseUint64Value(value string) (uint64, error) {
 }
 
 func parseBoolValue(value string) (bool, error) {
-	return strconv.ParseBool(defaultEmptyValue(value, "false"))
+	return strconv.ParseBool(value)
 }
 
 func parseFloat64Value(value string) (float64, error) {
@@ -672,7 +461,7 @@ func parseFloat64Value(value string) (float64, error) {
 }
 
 func parseDurationValue(value string) (time.Duration, error) {
-	return time.ParseDuration(defaultEmptyValue(value, "0"))
+	return time.ParseDuration(value)
 }
 
 func parseUUIDValue(value string) (uuid.UUID, error) {
@@ -708,4 +497,11 @@ func parseFixedWidthTimestamp(value string, digits int) (int64, error) {
 		return 0, errors.New("timestamp has invalid width")
 	}
 	return strconv.ParseInt(value, 10, 64)
+}
+
+func cloneSlice[T any](values []T) []T {
+	if values == nil {
+		return nil
+	}
+	return append([]T(nil), values...)
 }

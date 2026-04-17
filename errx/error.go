@@ -2,6 +2,7 @@ package errx
 
 import (
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 )
@@ -37,7 +38,7 @@ func NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPEr
 		status: status,
 		code:   normalizeErrorCode(status, code),
 		detail: normalizeErrorDetail(status, detail),
-		cause:  cause,
+		cause:  normalizeErrorCause(cause),
 	}
 }
 
@@ -52,22 +53,10 @@ func (e *HTTPError) WithViolations(violations []Violation) *HTTPError {
 	return &cloned
 }
 
-// Error 实现 error 接口。
-// 若保留了底层 cause，则优先返回 cause 的文本，便于日志和 errors.Is/As 诊断；
-// 若 cause 文本为空白或其 Error() 实现不安全，则回退为当前对象稳定的公开 Detail。
-func (e *HTTPError) Error() (message string) {
+// Error 实现 error 接口，始终返回公开 Detail。
+func (e *HTTPError) Error() string {
 	if e == nil {
 		return ""
-	}
-	if e.cause != nil {
-		defer func() {
-			if recover() != nil {
-				message = e.Detail()
-			}
-		}()
-		if message = strings.TrimSpace(e.cause.Error()); message != "" {
-			return message
-		}
 	}
 	return e.Detail()
 }
@@ -171,6 +160,22 @@ func cloneViolations(violations []Violation) []Violation {
 		return nil
 	}
 	return slices.Clone(violations)
+}
+
+// normalizeErrorCause 把 typed-nil error 收敛为真正的 nil，避免污染 Error/Unwrap 链语义。
+func normalizeErrorCause(cause error) error {
+	if cause == nil {
+		return nil
+	}
+
+	value := reflect.ValueOf(cause)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		if value.IsNil() {
+			return nil
+		}
+	}
+	return cause
 }
 
 // normalizeErrorStatus 把非法或越界状态码收敛到 500。
