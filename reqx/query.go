@@ -18,7 +18,7 @@ func Query(r *http.Request, name string) *QueryParam {
 		spec: paramSpec{
 			r:      r,
 			name:   strings.TrimSpace(name),
-			input:  errx.ViolationInQuery,
+			input:  errx.InQuery,
 			lookup: queryParamValues,
 		},
 	}

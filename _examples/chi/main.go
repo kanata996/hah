@@ -149,7 +149,7 @@ func validateListAccountsRequest(req *listAccountsRequest) error {
 	if req.Limit < 1 || req.Limit > 100 {
 		return hah.InvalidRequest(hah.Violation{
 			Field:  "limit",
-			In:     hah.ViolationInQuery,
+			In:     hah.InQuery,
 			Detail: "must be between 1 and 100",
 		})
 	}
@@ -166,19 +166,19 @@ func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) er
 	case req.Name == "":
 		return hah.InvalidRequest(hah.Violation{
 			Field: "name",
-			In:    hah.ViolationInBody,
-			Code:  hah.ViolationCodeRequired,
+			In:    hah.InBody,
+			Code:  hah.CodeRequired,
 		})
 	case nameLen < 3:
 		return hah.InvalidRequest(hah.Violation{
 			Field:  "name",
-			In:     hah.ViolationInBody,
+			In:     hah.InBody,
 			Detail: "must be at least 3 characters",
 		})
 	case nameLen > 64:
 		return hah.InvalidRequest(hah.Violation{
 			Field:  "name",
-			In:     hah.ViolationInBody,
+			In:     hah.InBody,
 			Detail: "must be at most 64 characters",
 		})
 	default:
@@ -190,8 +190,8 @@ func validateDeleteActor(actor string) error {
 	if strings.TrimSpace(actor) == "" {
 		return hah.InvalidRequest(hah.Violation{
 			Field: "X-Actor",
-			In:    hah.ViolationInHeader,
-			Code:  hah.ViolationCodeRequired,
+			In:    hah.InHeader,
+			Code:  hah.CodeRequired,
 		})
 	}
 	return nil

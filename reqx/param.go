@@ -3,7 +3,6 @@ package reqx
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/kanata996/hah/errx"
 )
@@ -20,7 +19,7 @@ type paramCheck[T any] struct {
 type paramSpec struct {
 	r      *http.Request
 	name   string
-	input  string
+	input  errx.ViolationIn
 	lookup paramLookupFunc
 }
 
@@ -110,22 +109,31 @@ func (p *paramState[T]) resolveMissing(spec paramSpec) (T, error) {
 	var zero T
 	switch {
 	case p.hasDefault:
-		return p.runChecks(spec, p.cloneValue(p.defaultValue))
+		value := p.cloneValue(p.defaultValue)
+		if err := p.runDefaultChecks(value); err != nil {
+			return zero, err
+		}
+		return value, nil
 	case p.required:
-		return zero, InvalidRequest(newViolation(spec.name, spec.input, errx.ViolationCodeRequired, ""))
+		return zero, InvalidRequest(newViolation(spec.name, spec.input, errx.CodeRequired, ""))
 	default:
 		return zero, nil
 	}
 }
 
-func (p *paramState[T]) runChecks(spec paramSpec, value T) (T, error) {
+func (p *paramState[T]) runDefaultChecks(value T) error {
 	for _, check := range p.checks {
 		if err := check.fn(value); err != nil {
-			detail := ""
-			if !errors.Is(err, errInvalidParamValue) {
-				detail = strings.TrimSpace(err.Error())
-			}
-			return value, InvalidRequest(newViolation(spec.name, spec.input, errx.ViolationCodeInvalid, detail))
+			return usageErrorf("default value failed validation")
+		}
+	}
+	return nil
+}
+
+func (p *paramState[T]) runRequestChecks(spec paramSpec, value T) (T, error) {
+	for _, check := range p.checks {
+		if err := check.fn(value); err != nil {
+			return value, InvalidRequest(newViolation(spec.name, spec.input, errx.CodeInvalid, ""))
 		}
 	}
 	return value, nil
@@ -174,13 +182,16 @@ func (p *paramValue[T]) resolve() (T, error) {
 	if !exists || len(values) == 0 {
 		return p.state.resolveMissing(p.spec)
 	}
+	if len(values) > 1 {
+		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeMultiple, ""))
+	}
 
 	value, err := p.parse(values[0])
 	if err != nil {
-		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.ViolationCodeInvalid, ""))
+		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
 	}
 
-	return p.state.runChecks(p.spec, value)
+	return p.state.runRequestChecks(p.spec, value)
 }
 
 type multiParamValue[T any] struct {
@@ -224,7 +235,7 @@ func (p *multiParamValue[T]) resolve() (T, error) {
 	}
 
 	value := p.parse(values)
-	return p.state.runChecks(p.spec, value)
+	return p.state.runRequestChecks(p.spec, value)
 }
 
 func cloneStringSlice(values []string) []string {

@@ -1,24 +1,27 @@
 package errx
 
+type ViolationCode string
+type ViolationIn string
+
 const (
-	ViolationCodeInvalid  = "invalid"
-	ViolationCodeRequired = "required"
-	ViolationCodeUnknown  = "unknown"
-	ViolationCodeType     = "type"
-	ViolationCodeMultiple = "multiple"
+	CodeInvalid  ViolationCode = "invalid"
+	CodeRequired ViolationCode = "required"
+	CodeUnknown  ViolationCode = "unknown"
+	CodeType     ViolationCode = "type"
+	CodeMultiple ViolationCode = "multiple"
 )
 
 const (
-	ViolationInBody   = "body"
-	ViolationInQuery  = "query"
-	ViolationInPath   = "path"
-	ViolationInHeader = "header"
+	InBody   ViolationIn = "body"
+	InQuery  ViolationIn = "query"
+	InPath   ViolationIn = "path"
+	InHeader ViolationIn = "header"
 )
 
 // Violation 描述单个公开请求违规。
 type Violation struct {
-	Field  string `json:"field,omitempty"`
-	In     string `json:"in,omitempty"`
-	Code   string `json:"code"`
-	Detail string `json:"detail"`
+	Field  string        `json:"field,omitempty"`
+	In     ViolationIn   `json:"in,omitempty"`
+	Code   ViolationCode `json:"code"`
+	Detail string        `json:"detail"`
 }

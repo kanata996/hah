@@ -76,15 +76,14 @@ func validateJSONBodyWriter(w http.ResponseWriter, status int) error {
 	switch {
 	case status < 100 || status > 999:
 		return fmt.Errorf("resp: invalid HTTP status %d", status)
-	case status < http.StatusOK:
-		return fmt.Errorf("resp: JSON body writers cannot use informational status %d", status)
 	}
 
 	switch status {
-	case http.StatusNoContent, http.StatusResetContent, http.StatusNotModified:
-		return fmt.Errorf("resp: JSON body writers cannot use bodyless status %d", status)
+	case http.StatusOK, http.StatusCreated, http.StatusAccepted:
+		return nil
+	default:
+		return fmt.Errorf("resp: JSON only supports status 200, 201, or 202")
 	}
-	return nil
 }
 
 // writePreparedJSONBytes 假定 writer 与 status 已完成校验，直接执行头和 body 的实际写回。

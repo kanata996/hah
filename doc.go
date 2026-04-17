@@ -18,7 +18,7 @@
 //   - 绑定相关类型：BindUnmarshaler、BindMultipleUnmarshaler
 //   - 请求级规则 helper：RequireBody、InvalidRequest
 //   - 公共错误模型：Violation、HTTPError、NewHTTPError、NewHTTPErrorWithCause
-//   - 公开 violation 常量：ViolationCode*、ViolationIn*
+//   - 公开 violation 常量：Code*、In*
 //   - 错误响应入口：WriteError
 //   - 成功响应入口：JSON、JSONBlob、OK、Created、NoContent
 //

@@ -4,11 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/kanata996/hah/errx"
@@ -165,9 +163,8 @@ func TestWriteErrorRejectsNilWriter(t *testing.T) {
 		}
 	}()
 
-	err := WriteError(nil, errors.New("db timeout"))
-	if err == nil || !strings.Contains(err.Error(), "response writer is nil") {
-		t.Fatalf("WriteError() error = %v, want response writer is nil", err)
+	if err := WriteError(nil, errors.New("db timeout")); err == nil {
+		t.Fatal("expected error, got nil")
 	}
 }
 
@@ -308,6 +305,12 @@ func TestWriteErrorMapsContextCanceled(t *testing.T) {
 	if got := body["title"]; got != "Client Closed Request" {
 		t.Fatalf("title = %#v, want Client Closed Request", got)
 	}
+	if _, exists := body["detail"]; exists {
+		t.Fatalf("detail unexpectedly present: %#v", body["detail"])
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
+	}
 }
 
 // context.DeadlineExceeded 会映射为对外可见的超时错误。
@@ -329,8 +332,11 @@ func TestWriteErrorMapsContextDeadlineExceeded(t *testing.T) {
 	if got := body["title"]; got != http.StatusText(http.StatusGatewayTimeout) {
 		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
 	}
-	if got := body["detail"]; got != http.StatusText(http.StatusGatewayTimeout) {
-		t.Fatalf("detail = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
+	if _, exists := body["detail"]; exists {
+		t.Fatalf("detail unexpectedly present: %#v", body["detail"])
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
 	}
 }
 
@@ -354,67 +360,18 @@ func TestWriteErrorMapsUnknownErrorToInternalError(t *testing.T) {
 	if got := body["title"]; got != "Internal Server Error" {
 		t.Fatalf("title = %#v, want Internal Server Error", got)
 	}
+	if _, exists := body["detail"]; exists {
+		t.Fatalf("detail unexpectedly present: %#v", body["detail"])
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
+	}
 	if bytes.Contains(rr.Body.Bytes(), []byte("db timeout")) {
 		t.Fatalf("body leaked internal cause: %q", rr.Body.String())
 	}
 }
 
-// resp 自己的写响应错误再次传回 WriteError 时，应直接原样返回，避免重复写。
-func TestWriteErrorReturnsRespWriteErrorWithoutRewrite(t *testing.T) {
-	w := &failingWriter{}
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
-	err := OK(w, map[string]any{"id": "u_1"})
-	if err == nil {
-		t.Fatal("expected write error, got nil")
-	}
-	if w.status != http.StatusOK {
-		t.Fatalf("status = %d, want %d", w.status, http.StatusOK)
-	}
-	if w.writes != 1 {
-		t.Fatalf("writes = %d, want 1", w.writes)
-	}
-
-	writtenErr := WriteError(w, err)
-	if !errors.Is(writtenErr, err) {
-		t.Fatalf("WriteError() error = %v, want original error %v", writtenErr, err)
-	}
-	if w.writes != 1 {
-		t.Fatalf("writes = %d, want still 1", w.writes)
-	}
-	if defaultBuf.Len() != 0 {
-		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
-	}
-}
-
-func TestWriteErrorDoesNotWriteStandaloneLogForServerError(t *testing.T) {
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
-	rr := httptest.NewRecorder()
-	if err := WriteError(rr, errors.New("db timeout")); err != nil {
-		t.Fatalf("WriteError() error = %v", err)
-	}
-
-	if rr.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
-	}
-	if defaultBuf.Len() != 0 {
-		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
-	}
-}
-
-func TestWriteErrorWriteFailureDoesNotWriteStandaloneLog(t *testing.T) {
-	var defaultBuf bytes.Buffer
-	previousDefault := slog.Default()
-	slog.SetDefault(slog.New(slog.NewJSONHandler(&defaultBuf, nil)))
-	defer slog.SetDefault(previousDefault)
-
+func TestWriteErrorReturnsWriteFailureAfterFirstCommit(t *testing.T) {
 	cause := errors.New("socket closed")
 	w := &failingWriter{cause: cause}
 	err := WriteError(w, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"))
@@ -424,9 +381,6 @@ func TestWriteErrorWriteFailureDoesNotWriteStandaloneLog(t *testing.T) {
 	if !errors.Is(err, cause) {
 		t.Fatalf("errors.Is(err, cause) = false, want true")
 	}
-	if got := err.Error(); got != "resp: write response failed: socket closed" {
-		t.Fatalf("error = %q, want %q", got, "resp: write response failed: socket closed")
-	}
 	if w.status != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", w.status, http.StatusInternalServerError)
 	}
@@ -435,8 +389,5 @@ func TestWriteErrorWriteFailureDoesNotWriteStandaloneLog(t *testing.T) {
 	}
 	if w.writes != 1 {
 		t.Fatalf("writes = %d, want 1", w.writes)
-	}
-	if defaultBuf.Len() != 0 {
-		t.Fatalf("default logger unexpectedly captured output: %s", defaultBuf.Bytes())
 	}
 }

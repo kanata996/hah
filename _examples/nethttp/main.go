@@ -156,19 +156,19 @@ func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) er
 	case req.Name == "":
 		return hah.InvalidRequest(hah.Violation{
 			Field: "name",
-			In:    hah.ViolationInBody,
-			Code:  hah.ViolationCodeRequired,
+			In:    hah.InBody,
+			Code:  hah.CodeRequired,
 		})
 	case nameLen < 3:
 		return hah.InvalidRequest(hah.Violation{
 			Field:  "name",
-			In:     hah.ViolationInBody,
+			In:     hah.InBody,
 			Detail: "must be at least 3 characters",
 		})
 	case nameLen > 64:
 		return hah.InvalidRequest(hah.Violation{
 			Field:  "name",
-			In:     hah.ViolationInBody,
+			In:     hah.InBody,
 			Detail: "must be at most 64 characters",
 		})
 	default:

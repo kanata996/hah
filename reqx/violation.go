@@ -20,7 +20,7 @@ const (
 	violationDetailRequired      = "is required"
 	violationDetailUnknownField  = "unknown field"
 	violationDetailInvalidType   = "has invalid type"
-	violationDetailMustNotRepeat = "must not be repeated"
+	violationDetailMustNotRepeat = "must appear only once"
 )
 
 func invalidFieldsError(violations []errx.Violation) error {
@@ -35,7 +35,7 @@ func invalidFieldsError(violations []errx.Violation) error {
 	).WithViolations(details)
 }
 
-func newViolation(field, input, code, detail string) errx.Violation {
+func newViolation(field string, input errx.ViolationIn, code errx.ViolationCode, detail string) errx.Violation {
 	return errx.Violation{
 		Field:  field,
 		In:     input,
@@ -46,7 +46,7 @@ func newViolation(field, input, code, detail string) errx.Violation {
 
 func normalizeViolation(violation errx.Violation) errx.Violation {
 	if violation.Code == "" {
-		violation.Code = errx.ViolationCodeInvalid
+		violation.Code = errx.CodeInvalid
 	}
 	if violation.Detail == "" {
 		violation.Detail = violationDetailForCode(violation.Code)
@@ -54,15 +54,15 @@ func normalizeViolation(violation errx.Violation) errx.Violation {
 	return violation
 }
 
-func violationDetailForCode(code string) string {
+func violationDetailForCode(code errx.ViolationCode) string {
 	switch code {
-	case errx.ViolationCodeRequired:
+	case errx.CodeRequired:
 		return violationDetailRequired
-	case errx.ViolationCodeUnknown:
+	case errx.CodeUnknown:
 		return violationDetailUnknownField
-	case errx.ViolationCodeType:
+	case errx.CodeType:
 		return violationDetailInvalidType
-	case errx.ViolationCodeMultiple:
+	case errx.CodeMultiple:
 		return violationDetailMustNotRepeat
 	default:
 		return violationDetailInvalid

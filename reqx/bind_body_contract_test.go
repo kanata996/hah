@@ -1,0 +1,195 @@
+package reqx
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
+
+type bindBodyNamedTags []string
+
+type bindBodyReadErrorCloser struct{ err error }
+
+func (r bindBodyReadErrorCloser) Read([]byte) (int, error) { return 0, r.err }
+func (r bindBodyReadErrorCloser) Close() error             { return nil }
+
+func TestBindBody_Contracts(t *testing.T) {
+	t.Run("zero byte body is noop and does not require json content type", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", http.NoBody)
+		dst := request{Name: "existing"}
+
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("non empty body only accepts application json", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
+		req.Header.Set("Content-Type", "application/problem+json")
+
+		err := BindBody(req, &request{})
+		_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
+	})
+
+	t.Run("supports nested struct family named slice family and time", func(t *testing.T) {
+		type address struct {
+			Street string `json:"street"`
+		}
+		type request struct {
+			Name    string            `json:"name"`
+			Address address           `json:"address"`
+			Tags    bindBodyNamedTags `json:"tags"`
+			When    time.Time         `json:"when"`
+		}
+
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata","address":{"street":"main"},"tags":["a","b"],"when":"2026-04-13T10:00:00Z"}`)
+
+		var dst request
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst.Name != "kanata" || dst.Address.Street != "main" || !reflect.DeepEqual(dst.Tags, bindBodyNamedTags{"a", "b"}) {
+			t.Fatalf("dst = %#v, want nested struct and named slice bound", dst)
+		}
+		if got := dst.When.UTC().Format(time.RFC3339); got != "2026-04-13T10:00:00Z" {
+			t.Fatalf("when = %q, want 2026-04-13T10:00:00Z", got)
+		}
+	})
+
+	t.Run("missing fields do not inherit previous target values", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+			Age  int    `json:"age"`
+		}
+
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+		dst := request{Name: "existing", Age: 17}
+
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst != (request{Name: "kanata"}) {
+			t.Fatalf("dst = %#v, want zero-based replacement semantics", dst)
+		}
+	})
+
+	t.Run("recursive unknown field is invalid json and target unchanged", func(t *testing.T) {
+		type address struct {
+			Street string `json:"street"`
+		}
+		type request struct {
+			Address address `json:"address"`
+		}
+
+		req := newJSONRequest(http.MethodPost, "/", `{"address":{"street":"main","extra":"x"}}`)
+		dst := request{Address: address{Street: "existing"}}
+
+		err := BindBody(req, &dst)
+		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		if dst != (request{Address: address{Street: "existing"}}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("duplicate object key is invalid json", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		err := BindBody(newJSONRequest(http.MethodPost, "/", `{"name":"first","name":"second"}`), &request{})
+		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+	})
+
+	t.Run("top level non object is invalid json", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		err := BindBody(newJSONRequest(http.MethodPost, "/", `[]`), &request{})
+		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+	})
+
+	t.Run("unsupported field family is usage error", func(t *testing.T) {
+		type request struct {
+			Raw json.RawMessage `json:"raw"`
+		}
+
+		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{"raw":{}}`), &request{}))
+	})
+
+	t.Run("body read error returns ordinary error", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		wantErr := errors.New("read failed")
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = bindBodyReadErrorCloser{err: wantErr}
+		req.ContentLength = -1
+
+		err := BindBody(req, &request{})
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+		}
+	})
+
+	t.Run("whitespace body is invalid json not empty body", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		err := BindBody(newJSONRequest(http.MethodPost, "/", " \n\t "), &request{})
+		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+	})
+
+	t.Run("request body nil counts as zero byte body", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Body = nil
+		dst := request{Name: "existing"}
+
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("probe read eof keeps request body usable", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", io.NopCloser(strings.NewReader(`{"name":"kanata"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		var dst request
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst.Name != "kanata" {
+			t.Fatalf("dst = %#v, want bound body", dst)
+		}
+	})
+}

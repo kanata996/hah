@@ -18,7 +18,7 @@ func Path(r *http.Request, name string) *PathParam {
 		spec: paramSpec{
 			r:      r,
 			name:   strings.TrimSpace(name),
-			input:  errx.ViolationInPath,
+			input:  errx.InPath,
 			lookup: pathParamValues,
 		},
 	}

@@ -12,29 +12,23 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-const (
-	wantNilRequestErr     = "reqx: request must not be nil"
-	wantNilDestinationErr = "reqx: destination must not be nil"
-)
+type eofReadCloser struct {
+	reads int
+}
+
+func (r *eofReadCloser) Read(_ []byte) (int, error) {
+	r.reads++
+	return 0, io.EOF
+}
+
+func (r *eofReadCloser) Close() error {
+	return nil
+}
 
 func newJSONRequest(method, target, body string) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	return req
-}
-
-func setRequestBody(req *http.Request, contentType, body string) {
-	req.Header.Set("Content-Type", contentType)
-	req.Body = io.NopCloser(strings.NewReader(body))
-	req.ContentLength = int64(len(body))
-}
-
-func mustBindQuery(t *testing.T, req *http.Request, target any) {
-	t.Helper()
-
-	if err := BindQuery(req, target); err != nil {
-		t.Fatalf("BindQuery() error = %v", err)
-	}
 }
 
 func requestWithPathParams(params map[string][]string) *http.Request {
@@ -107,23 +101,6 @@ func assertNotHTTPError(t *testing.T, err error) {
 	}
 }
 
-func assertErrorString(t *testing.T, err error, want string) {
-	t.Helper()
-
-	if err == nil {
-		t.Fatalf("error = nil, want %q", want)
-	}
-	if got := err.Error(); got != want {
-		t.Fatalf("error = %q, want %q", got, want)
-	}
-}
-
-func assertUsageError(t *testing.T, err error, want string) {
-	t.Helper()
-
-	assertErrorString(t, err, want)
-}
-
 func assertBadRequest(t *testing.T, err error) *errx.HTTPError {
 	t.Helper()
 
@@ -152,4 +129,34 @@ func assertSingleViolation(t *testing.T, err error) errx.Violation {
 		t.Fatalf("violations len = %d, want 1", len(violations))
 	}
 	return violations[0]
+}
+
+func assertViolation(t *testing.T, err error, want errx.Violation) {
+	t.Helper()
+
+	if got := assertSingleViolation(t, err); got != want {
+		t.Fatalf("violation = %#v, want %#v", got, want)
+	}
+}
+
+func assertInvalidViolationAt(t *testing.T, err error, field string, in errx.ViolationIn) {
+	t.Helper()
+
+	assertViolation(t, err, errx.Violation{
+		Field:  field,
+		In:     in,
+		Code:   errx.CodeInvalid,
+		Detail: "is invalid",
+	})
+}
+
+func assertRequiredViolationAt(t *testing.T, err error, field string, in errx.ViolationIn) {
+	t.Helper()
+
+	assertViolation(t, err, errx.Violation{
+		Field:  field,
+		In:     in,
+		Code:   errx.CodeRequired,
+		Detail: "is required",
+	})
 }

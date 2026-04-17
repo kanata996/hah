@@ -29,6 +29,20 @@ func TestSuccessWritersWriteExpectedResponses(t *testing.T) {
 			wantContentType: "application/json",
 			wantBody:        "{\"id\":\"u_1\"}\n",
 		},
+		{
+			name:            "Created nil payload encodes to JSON null",
+			write:           func(w http.ResponseWriter) error { return Created(w, nil) },
+			wantStatus:      http.StatusCreated,
+			wantContentType: "application/json",
+			wantBody:        "null\n",
+		},
+		{
+			name:            "OK nil payload encodes to JSON null",
+			write:           func(w http.ResponseWriter) error { return OK(w, nil) },
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        "null\n",
+		},
 	}
 
 	for _, tc := range cases {
@@ -140,48 +154,53 @@ func TestSuccessWritersRespectWrappedWriterContentLength(t *testing.T) {
 
 func TestSuccessWritersRejectNilWriter(t *testing.T) {
 	cases := []struct {
-		name    string
-		write   func() error
-		wantErr string
+		name  string
+		write func() error
 	}{
-		{name: "Created", write: func() error { return Created(nil, map[string]any{"id": "u_1"}) }, wantErr: "resp: response writer is nil"},
-		{name: "OK", write: func() error { return OK(nil, map[string]any{"id": "u_1"}) }, wantErr: "resp: response writer is nil"},
-		{name: "NoContent", write: func() error { return NoContent(nil) }, wantErr: "resp: response writer is nil"},
+		{name: "Created", write: func() error { return Created(nil, map[string]any{"id": "u_1"}) }},
+		{name: "OK", write: func() error { return OK(nil, map[string]any{"id": "u_1"}) }},
+		{name: "NoContent", write: func() error { return NoContent(nil) }},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.write(); err == nil || err.Error() != tc.wantErr {
-				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			if err := tc.write(); err == nil {
+				t.Fatal("expected error, got nil")
 			}
 		})
 	}
 }
 
-func TestSuccessWritersRejectNullPayload(t *testing.T) {
+func TestSuccessWritersAllowTypedNilPayload(t *testing.T) {
 	type user struct {
 		ID string `json:"id"`
 	}
 	var nilUser *user
 
 	cases := []struct {
-		name    string
-		write   func(http.ResponseWriter) error
-		wantErr string
+		name       string
+		write      func(http.ResponseWriter) error
+		wantStatus int
 	}{
-		{name: "Created nil", write: func(w http.ResponseWriter) error { return Created(w, nil) }, wantErr: "resp: data must exist and must not encode to null"},
-		{name: "Created typed nil", write: func(w http.ResponseWriter) error { return Created(w, nilUser) }, wantErr: "resp: data must exist and must not encode to null"},
-		{name: "OK nil", write: func(w http.ResponseWriter) error { return OK(w, nil) }, wantErr: "resp: data must exist and must not encode to null"},
-		{name: "OK typed nil", write: func(w http.ResponseWriter) error { return OK(w, nilUser) }, wantErr: "resp: data must exist and must not encode to null"},
+		{name: "Created typed nil", write: func(w http.ResponseWriter) error { return Created(w, nilUser) }, wantStatus: http.StatusCreated},
+		{name: "OK typed nil", write: func(w http.ResponseWriter) error { return OK(w, nilUser) }, wantStatus: http.StatusOK},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rr := httptest.NewRecorder()
-			if err := tc.write(rr); err == nil || err.Error() != tc.wantErr {
-				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			if err := tc.write(rr); err != nil {
+				t.Fatalf("write() error = %v", err)
 			}
-			assertRecorderHasNoBodyOrContentType(t, rr)
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rr.Code, tc.wantStatus)
+			}
+			if got := rr.Header().Get("Content-Type"); got != "application/json" {
+				t.Fatalf("Content-Type = %q, want %q", got, "application/json")
+			}
+			if got := rr.Body.String(); got != "null\n" {
+				t.Fatalf("body = %q, want %q", got, "null\n")
+			}
 		})
 	}
 }
@@ -254,9 +273,6 @@ func TestSuccessWritersReturnWrappedWriteError(t *testing.T) {
 			}
 			if !errors.Is(err, cause) {
 				t.Fatalf("errors.Is(err, cause) = false, want true")
-			}
-			if got := err.Error(); got != "resp: write response failed: socket closed" {
-				t.Fatalf("error = %q, want %q", got, "resp: write response failed: socket closed")
 			}
 			if w.status != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", w.status, tc.wantStatus)

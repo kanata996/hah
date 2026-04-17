@@ -37,7 +37,7 @@ func RequireBody(r *http.Request) error {
 
 	return InvalidRequest(errx.Violation{
 		Field: "body",
-		In:    errx.ViolationInBody,
-		Code:  errx.ViolationCodeRequired,
+		In:    errx.InBody,
+		Code:  errx.CodeRequired,
 	})
 }

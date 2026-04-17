@@ -53,22 +53,10 @@ func (e *HTTPError) WithViolations(violations []Violation) *HTTPError {
 	return &cloned
 }
 
-// Error 实现 error 接口。
-// 若保留了底层 cause，则优先返回 cause 的文本，便于日志和 errors.Is/As 诊断；
-// 若 cause 文本为空白或其 Error() 实现不安全，则回退为当前对象稳定的公开 Detail。
-func (e *HTTPError) Error() (message string) {
+// Error 实现 error 接口，始终返回公开 Detail。
+func (e *HTTPError) Error() string {
 	if e == nil {
 		return ""
-	}
-	if e.cause != nil {
-		defer func() {
-			if recover() != nil {
-				message = e.Detail()
-			}
-		}()
-		if message = strings.TrimSpace(e.cause.Error()); message != "" {
-			return message
-		}
 	}
 	return e.Detail()
 }

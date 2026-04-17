@@ -40,13 +40,12 @@ var (
 			Tags:   []string{"prod", "priority"},
 		},
 	}
-	benchmarkJSONBlobPayload = []byte(`{"id":"acct_123456","name":"kanata","email":"kanata@example.com","active":true,"roles":["owner","billing"],"profile":{"plan":"pro","region":"ap-southeast-1","tags":["prod","priority"]}}`)
 	benchmarkClientHTTPError = errx.UnprocessableEntity(
 		"validation_failed",
 		"request validation failed",
 	).WithViolations([]errx.Violation{
-		{Field: "email", In: errx.ViolationInBody, Code: errx.ViolationCodeInvalid, Detail: "must be a valid email"},
-		{Field: "name", In: errx.ViolationInBody, Code: errx.ViolationCodeRequired, Detail: "must not be blank"},
+		{Field: "email", In: errx.InBody, Code: errx.CodeInvalid, Detail: "must be a valid email"},
+		{Field: "name", In: errx.InBody, Code: errx.CodeRequired, Detail: "must not be blank"},
 	})
 	errBenchmarkServer = errors.New("dial tcp 10.0.0.7:5432: connect: connection reset by peer")
 )
@@ -71,18 +70,6 @@ func BenchmarkJSON_Typical(b *testing.B) {
 
 	for b.Loop() {
 		if err := JSON(w, http.StatusOK, benchmarkJSONPayload); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkJSONBlob_Typical(b *testing.B) {
-	b.ReportAllocs()
-
-	w := &benchmarkResponseWriter{header: make(http.Header, 1)}
-
-	for b.Loop() {
-		if err := JSONBlob(w, http.StatusOK, benchmarkJSONBlobPayload); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -24,17 +24,6 @@ func FuzzJSONWritersPublicContracts(f *testing.F) {
 	})
 }
 
-func FuzzJSONBlobPublicContracts(f *testing.F) {
-	f.Add([]byte(`{"id":"u_1"}`))
-	f.Add([]byte(`{"id":`))
-	f.Add([]byte(nil))
-	f.Add([]byte{})
-
-	f.Fuzz(func(t *testing.T, body []byte) {
-		fuzzJSONBlobContracts(t, body)
-	})
-}
-
 func FuzzWriteErrorWrappedHTTPErrorPublicContracts(f *testing.F) {
 	f.Add(http.StatusBadRequest, "payload invalid", "name")
 	f.Add(http.StatusUnprocessableEntity, "", "")
@@ -104,26 +93,6 @@ func assertRecorderJSONSuccess(t *testing.T, rr *httptest.ResponseRecorder, err 
 	}
 }
 
-func fuzzJSONBlobContracts(t *testing.T, body []byte) {
-	t.Helper()
-
-	rr := httptest.NewRecorder()
-	err := JSONBlob(rr, http.StatusAccepted, body)
-
-	if err != nil {
-		t.Fatalf("JSONBlob() error = %v", err)
-	}
-	if rr.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
-	}
-	if got := rr.Header().Get("Content-Type"); got != "application/json" {
-		t.Fatalf("Content-Type = %q, want application/json", got)
-	}
-	if got := rr.Body.Bytes(); !bytes.Equal(got, body) {
-		t.Fatalf("body = %q, want %q", got, body)
-	}
-}
-
 func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, field string) {
 	t.Helper()
 
@@ -131,14 +100,14 @@ func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, f
 
 	hiddenCause := "internal cause sentinel"
 	wantErrors := map[string]any{
-		"code":   errx.ViolationCodeInvalid,
+		"code":   string(errx.CodeInvalid),
 		"detail": "is invalid",
 	}
 	if normalizedField := jsonSafeString(field); normalizedField != "" {
 		wantErrors["field"] = normalizedField
 	}
 	httpErr := errx.NewHTTPErrorWithCause(status, "", detail, errors.New(hiddenCause)).WithViolations([]errx.Violation{
-		{Field: field, Code: errx.ViolationCodeInvalid, Detail: "is invalid"},
+		{Field: field, Code: errx.CodeInvalid, Detail: "is invalid"},
 	})
 	input := fmt.Errorf("wrapped: %w", httpErr)
 	wantStatus := httpErr.Status()

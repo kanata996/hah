@@ -3,54 +3,48 @@ package reqx
 import (
 	"bytes"
 	"context"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
+	"reflect"
 	"strings"
+	"time"
 
 	"github.com/kanata996/hah/errx"
 )
 
-// 本文件负责 body 绑定相关逻辑，包括 body 读取、Content-Type 判定、JSON 解码和 body 侧错误收敛。
-//
-// 这里承载的默认 body 契约包括：
-//   - 实际读取到零字节 body 时直接 no-op
-//   - 非空 body 当前只接受 application/json
-//   - body 按默认大小限制读取，超限返回 413 request_too_large
-//   - 非法 JSON 返回 400 invalid_json
-//   - 不支持的 Content-Type 返回 415 unsupported_media_type
-
 const defaultMaxBodyBytes int64 = 1 << 20
 
 const (
-	// CodeInvalidJSON 表示请求 body 不是合法 JSON。
-	CodeInvalidJSON = "invalid_json"
-	// CodeUnsupportedMediaType 表示请求 body 的 Content-Type 不受支持。
+	CodeInvalidJSON          = "invalid_json"
 	CodeUnsupportedMediaType = "unsupported_media_type"
-	// CodeRequestTooLarge 表示请求 body 超出默认大小限制。
-	CodeRequestTooLarge = "request_too_large"
+	CodeRequestTooLarge      = "request_too_large"
 )
 
 const mimeApplicationJSON = "application/json"
 
-// BindBody 只从请求 body 绑定数据。
-//
-// 解码直接作用在调用方传入的 target 上；JSON 中缺失的字段不会覆盖 target
-// 已有值。若解码返回错误，target 可能已经被部分更新，调用方不应继续依赖其
-// 精确状态。
+var (
+	bodyTimeType            = reflect.TypeOf(time.Time{})
+	bodyRawMessageType      = reflect.TypeOf(json.RawMessage{})
+	bodyJSONUnmarshalerType = reflect.TypeOf((*json.Unmarshaler)(nil)).Elem()
+	bodyTextUnmarshalType   = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+)
+
 func BindBody(r *http.Request, target any) error {
 	if err := validateBindInputs(r, target); err != nil {
 		return err
 	}
+	if err := validateBindBodyTarget(reflect.TypeOf(target)); err != nil {
+		return err
+	}
 
-	return bindBody(r, target)
+	return bindBody(r, reflect.ValueOf(target).Elem())
 }
 
-// bindBody 假定 request 和 target 已完成前置校验，只执行默认 body 绑定本身。
-func bindBody(r *http.Request, target any) error {
-	// 先探测是否真的存在 body，这样零字节请求可以在 Content-Type 校验前直接 no-op。
+func bindBody(r *http.Request, dst reflect.Value) error {
 	hasBody, err := hasRequestBody(r)
 	if err != nil {
 		return err
@@ -59,7 +53,10 @@ func bindBody(r *http.Request, target any) error {
 		return nil
 	}
 
-	// 读取优先于 media type 语义判断，确保底层 I/O 错误不会被 415 掩盖。
+	if mediaType, err := bodyMediaType(r); err != nil || mediaType != mimeApplicationJSON {
+		return unsupportedMediaTypeError()
+	}
+
 	body, err := readBody(r.Body)
 	if err != nil {
 		if errors.Is(err, errRequestTooLarge) {
@@ -68,22 +65,91 @@ func bindBody(r *http.Request, target any) error {
 		return err
 	}
 
-	mediaType, err := bodyMediaType(r)
-	if err != nil {
-		return unsupportedMediaTypeError()
+	if err := validateJSONDocument(body); err != nil {
+		return mapJSONBodyDecodeError(err)
 	}
 
-	// 默认 body binder 只分发到显式支持的媒体类型实现。
-	switch mediaType {
-	case mimeApplicationJSON:
-		return decodeJSONBody(body, target)
+	temp := reflect.New(dst.Type()).Elem()
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(temp.Addr().Interface()); err != nil {
+		return mapJSONBodyDecodeError(err)
+	}
+
+	dst.Set(temp)
+	return nil
+}
+
+func validateBindBodyTarget(targetType reflect.Type) error {
+	if targetType.Kind() != reflect.Pointer || targetType.Elem().Kind() != reflect.Struct {
+		return usageErrorf("destination must point to struct")
+	}
+	if targetType.Elem().Kind() == reflect.Pointer {
+		return usageErrorf("destination must point to struct")
+	}
+	return validateBindBodyStructType(targetType.Elem())
+}
+
+func validateBindBodyStructType(t reflect.Type) error {
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		if tag := field.Tag.Get("json"); tag == "-" {
+			continue
+		}
+		if err := validateBindBodyFieldType(field.Type); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateBindBodyFieldType(t reflect.Type) error {
+	base := t
+	if base.Kind() == reflect.Pointer {
+		base = base.Elem()
+		if base.Kind() == reflect.Pointer {
+			return usageErrorf("unsupported body field type")
+		}
+	}
+
+	if base == bodyTimeType {
+		return nil
+	}
+	if base == bodyRawMessageType {
+		return usageErrorf("unsupported body field type")
+	}
+	if disallowedBindBodyDecoder(base) {
+		return usageErrorf("unsupported body field type")
+	}
+
+	switch base.Kind() {
+	case reflect.String, reflect.Bool,
+		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64:
+		return nil
+	case reflect.Struct:
+		return validateBindBodyStructType(base)
+	case reflect.Slice:
+		return validateBindBodyFieldType(base.Elem())
 	default:
-		return unsupportedMediaTypeError()
+		return usageErrorf("unsupported body field type")
 	}
 }
 
-// bodyMediaType 解析请求头中的主 media type。
-// 调用方保证 request 已完成公开入口校验。
+func disallowedBindBodyDecoder(t reflect.Type) bool {
+	ptr := reflect.PointerTo(t)
+	if t != bodyTimeType {
+		if ptr.Implements(bodyJSONUnmarshalerType) || ptr.Implements(bodyTextUnmarshalType) {
+			return true
+		}
+	}
+	return false
+}
+
 func bodyMediaType(r *http.Request) (string, error) {
 	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
 	if contentType == "" {
@@ -97,24 +163,22 @@ func bodyMediaType(r *http.Request) (string, error) {
 	return strings.TrimSpace(mediaType), nil
 }
 
-// decodeJSONBody 负责按默认 JSON 契约解码 body。
-func decodeJSONBody(body []byte, target any) error {
-	dec := json.NewDecoder(bytes.NewReader(body))
-	if err := dec.Decode(target); err != nil {
-		return mapJSONBodyDecodeError(err)
-	}
-	var extra any
-	// 第二次 decode 只用于验证“恰好一个 JSON 值”的契约，不消费业务结果。
-	if err := dec.Decode(&extra); err != nil {
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		return mapJSONBodyDecodeError(err)
-	}
-	return mapJSONBodyDecodeError(errors.New("request body must contain exactly one JSON value"))
+func unsupportedMediaTypeError() error {
+	return errx.NewHTTPError(
+		http.StatusUnsupportedMediaType,
+		CodeUnsupportedMediaType,
+		"Content-Type must be application/json",
+	)
 }
 
-// mapJSONBodyDecodeError 把标准库 JSON 解码错误收敛为公开的 HTTP 错误。
+func requestTooLargeError() error {
+	return errx.NewHTTPError(
+		http.StatusRequestEntityTooLarge,
+		CodeRequestTooLarge,
+		"request body is too large",
+	)
+}
+
 func mapJSONBodyDecodeError(err error) error {
 	var invalidUnmarshalErr *json.InvalidUnmarshalError
 	if errors.As(err, &invalidUnmarshalErr) {
@@ -129,11 +193,10 @@ func mapJSONBodyDecodeError(err error) error {
 	)
 }
 
-// errRequestTooLarge 用于在读取阶段标记 body 超限。
 var errRequestTooLarge = errors.New("reqx: request body too large")
+var errDuplicateJSONObjectKey = errors.New("reqx: duplicate json object key")
+var errExpectedJSONObject = errors.New("reqx: top-level JSON value must be object")
 
-// readBody 在默认大小限制内完整读取请求 body。
-// bindBody 仅在 hasRequestBody 已确认存在非空 body 后调用这里，因此 body 非 nil。
 func readBody(body io.ReadCloser) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(body, defaultMaxBodyBytes+1))
 	if err != nil {
@@ -145,22 +208,80 @@ func readBody(body io.ReadCloser) ([]byte, error) {
 	return data, nil
 }
 
-// unsupportedMediaTypeError 返回默认 body binder 的 415 错误。
-func unsupportedMediaTypeError() error {
-	return errx.NewHTTPError(
-		http.StatusUnsupportedMediaType,
-		CodeUnsupportedMediaType,
-		"Content-Type must be application/json",
-	)
+func validateJSONDocument(body []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok || delim != '{' {
+		return errExpectedJSONObject
+	}
+	if err := consumeJSONObject(dec); err != nil {
+		return err
+	}
+
+	if _, err := dec.Token(); err != io.EOF {
+		if err == nil {
+			return errors.New("request body must contain exactly one JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
-// requestTooLargeError 返回默认 body binder 的 413 错误。
-func requestTooLargeError() error {
-	return errx.NewHTTPError(
-		http.StatusRequestEntityTooLarge,
-		CodeRequestTooLarge,
-		"request body is too large",
-	)
+func consumeJSONObject(dec *json.Decoder) error {
+	seen := map[string]struct{}{}
+	for dec.More() {
+		keyToken, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return errors.New("invalid object key")
+		}
+		if _, exists := seen[key]; exists {
+			return errDuplicateJSONObjectKey
+		}
+		seen[key] = struct{}{}
+		if err := consumeJSONValue(dec); err != nil {
+			return err
+		}
+	}
+	_, err := dec.Token()
+	return err
+}
+
+func consumeJSONArray(dec *json.Decoder) error {
+	for dec.More() {
+		if err := consumeJSONValue(dec); err != nil {
+			return err
+		}
+	}
+	_, err := dec.Token()
+	return err
+}
+
+func consumeJSONValue(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		return consumeJSONObject(dec)
+	case '[':
+		return consumeJSONArray(dec)
+	default:
+		return errors.New("invalid JSON delimiter")
+	}
 }
 
 type requestBodyProbeKey struct{}

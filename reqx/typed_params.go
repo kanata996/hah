@@ -626,23 +626,16 @@ func parseStringValue(value string) (string, error) {
 	return value, nil
 }
 
-func defaultEmptyValue(value, fallback string) string {
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
 func parseIntBits(value string, bits int) (int64, error) {
-	return strconv.ParseInt(defaultEmptyValue(value, "0"), 10, bits)
+	return strconv.ParseInt(value, 10, bits)
 }
 
 func parseUintBits(value string, bits int) (uint64, error) {
-	return strconv.ParseUint(defaultEmptyValue(value, "0"), 10, bits)
+	return strconv.ParseUint(value, 10, bits)
 }
 
 func parseFloatBits(value string, bits int) (float64, error) {
-	return strconv.ParseFloat(defaultEmptyValue(value, "0.0"), bits)
+	return strconv.ParseFloat(value, bits)
 }
 
 func parseIntValue(value string) (int, error) {
@@ -664,7 +657,7 @@ func parseUint64Value(value string) (uint64, error) {
 }
 
 func parseBoolValue(value string) (bool, error) {
-	return strconv.ParseBool(defaultEmptyValue(value, "false"))
+	return strconv.ParseBool(value)
 }
 
 func parseFloat64Value(value string) (float64, error) {
@@ -672,7 +665,7 @@ func parseFloat64Value(value string) (float64, error) {
 }
 
 func parseDurationValue(value string) (time.Duration, error) {
-	return time.ParseDuration(defaultEmptyValue(value, "0"))
+	return time.ParseDuration(value)
 }
 
 func parseUUIDValue(value string) (uuid.UUID, error) {

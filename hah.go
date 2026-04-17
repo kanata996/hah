@@ -9,18 +9,18 @@ import (
 )
 
 const (
-	ViolationCodeInvalid  = errx.ViolationCodeInvalid
-	ViolationCodeRequired = errx.ViolationCodeRequired
-	ViolationCodeUnknown  = errx.ViolationCodeUnknown
-	ViolationCodeType     = errx.ViolationCodeType
-	ViolationCodeMultiple = errx.ViolationCodeMultiple
+	CodeInvalid  = errx.CodeInvalid
+	CodeRequired = errx.CodeRequired
+	CodeUnknown  = errx.CodeUnknown
+	CodeType     = errx.CodeType
+	CodeMultiple = errx.CodeMultiple
 )
 
 const (
-	ViolationInBody   = errx.ViolationInBody
-	ViolationInQuery  = errx.ViolationInQuery
-	ViolationInPath   = errx.ViolationInPath
-	ViolationInHeader = errx.ViolationInHeader
+	InBody   = errx.InBody
+	InQuery  = errx.InQuery
+	InPath   = errx.InPath
+	InHeader = errx.InHeader
 )
 
 type (
