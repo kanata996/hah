@@ -237,10 +237,3 @@ func (p *multiParamValue[T]) resolve() (T, error) {
 	value := p.parse(values)
 	return p.state.runRequestChecks(p.spec, value)
 }
-
-func cloneStringSlice(values []string) []string {
-	if values == nil {
-		return nil
-	}
-	return append([]string(nil), values...)
-}

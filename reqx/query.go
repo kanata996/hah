@@ -3,7 +3,9 @@ package reqx
 import (
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/kanata996/hah/errx"
 )
 
@@ -30,43 +32,43 @@ func (p *QueryParam) String() *StringParam {
 }
 
 // Int 读取 int 参数。
-func (p *QueryParam) Int() *IntParam {
-	return newIntParam(p.spec)
+func (p *QueryParam) Int() *OrderedParam[int] {
+	return newOrderedParam(p.spec, parseIntValue)
 }
 
 // Int64 读取 int64 参数。
-func (p *QueryParam) Int64() *Int64Param {
-	return newInt64Param(p.spec)
+func (p *QueryParam) Int64() *OrderedParam[int64] {
+	return newOrderedParam(p.spec, parseInt64Value)
 }
 
 // Uint64 读取 uint64 参数。
-func (p *QueryParam) Uint64() *Uint64Param {
-	return newUint64Param(p.spec)
+func (p *QueryParam) Uint64() *OrderedParam[uint64] {
+	return newOrderedParam(p.spec, parseUint64Value)
 }
 
 // Uint 读取 uint 参数。
-func (p *QueryParam) Uint() *UintParam {
-	return newUintParam(p.spec)
+func (p *QueryParam) Uint() *OrderedParam[uint] {
+	return newOrderedParam(p.spec, parseUintValue)
 }
 
 // Bool 读取 bool 参数。
-func (p *QueryParam) Bool() *BoolParam {
-	return newBoolParam(p.spec)
+func (p *QueryParam) Bool() *ValueParam[bool] {
+	return newValueParam(p.spec, parseBoolValue)
 }
 
 // Float64 读取 float64 参数。
-func (p *QueryParam) Float64() *Float64Param {
-	return newFloat64Param(p.spec)
+func (p *QueryParam) Float64() *OrderedParam[float64] {
+	return newOrderedParam(p.spec, parseFloat64Value)
 }
 
 // Duration 读取 time.Duration 参数。
-func (p *QueryParam) Duration() *DurationParam {
-	return newDurationParam(p.spec)
+func (p *QueryParam) Duration() *OrderedParam[time.Duration] {
+	return newOrderedParam(p.spec, parseDurationValue)
 }
 
 // UUID 读取 uuid.UUID 参数。
-func (p *QueryParam) UUID() *UUIDParam {
-	return newUUIDParam(p.spec)
+func (p *QueryParam) UUID() *ValueParam[uuid.UUID] {
+	return newValueParam(p.spec, parseUUIDValue)
 }
 
 // Time 按 RFC3339 读取 time.Time 参数。
@@ -85,8 +87,8 @@ func (p *QueryParam) UnixMilliTime() *TimeParam {
 }
 
 // Values 读取 query 参数的全部解析后值。
-func (p *QueryParam) Values() *ValuesParam {
-	return newValuesParam(p.spec)
+func (p *QueryParam) Values() *MultiParam[string] {
+	return newMultiParam(p.spec, cloneSlice[string])
 }
 
 func queryParamValues(r *http.Request, name string) ([]string, bool) {

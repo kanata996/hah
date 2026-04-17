@@ -121,15 +121,15 @@ if err := hah.BindQuery(r, &query); err != nil {
 - 目标必须是 struct 或 `map[string]string`
 - 对于 struct，只绑定显式声明了 `query` tag 的字段
 - `query:",inline"` 是唯一的嵌套 DTO 展开方式
-- 普通 `query:"name"` 字段只支持常见内建标量字段及其一级指针
+- 普通 `query:"name"` 字段支持常见内建标量、命名标量、`time.Time`、`time.Duration`、`uuid.UUID` 及其一级指针
 - query 名字按精确值匹配
 - malformed raw query 返回稳定 `400 bad_request`，并保证 target 零修改
 - 未知 query key 默认忽略
-- 重复 query key 默认只消费第一个值
-- 缺失参数不会覆盖 DTO 现有值
+- 任一 query key 只要出现多个值就返回稳定 `400 bad_request`
+- 缺失参数不会继承 DTO 旧值，而是回到零值临时对象中的默认状态
 - DTO/tag 形状本身非法时，先返回普通错误，并保证 target 零修改
 - 绑定在遇到第一个客户端输入错误时停止；后续字段不会继续处理
-- 客户端输入错误下，绑定不是事务性的；如果返回错误，DTO 可能已经被部分更新
+- 对 `struct` target，绑定先写入零值临时对象；客户端输入错误下不会部分污染 DTO
 
 它适合“批量投影”，不适合表达请求级规则。像 `Required`、`Default`、`OneOf`、`Min/Max` 这类规则，仍然优先放在 `reqx.Query(...)` 或绑定后的显式校验里。
 
@@ -191,20 +191,21 @@ if err := hah.BindBody(r, &body); err != nil {
 - `int`、`int8`、`int16`、`int32`、`int64`
 - `uint`、`uint8`、`uint16`、`uint32`、`uint64`
 - `float32`、`float64`
-- 上述字段类型的一级指针 `*T`
+- 底层为上述标量家族的命名类型
+- `time.Time`
+- `time.Duration`
+- `uuid.UUID`
+- 上述受支持叶子类型的一级指针 `*T`
 - `query:",inline"` 的 `struct` / `*struct`
 
 当前默认 query binder 不支持：
 
-- 命名类型
-- `time.Time`
-- `time.Duration`
-- `BindUnmarshaler`
 - `encoding.TextUnmarshaler`
+- 未标记 `inline` 的 `struct` / `*struct`
 - slice、array、map、interface
 - 多级指针
 
-如果你需要时间、duration、枚举或其他自定义语义，优先先绑定为 `string`，再在绑定后显式解析。
+如果你需要 query binder 默认不支持的自定义 decoder、复杂集合或其他扩展语义，优先先绑定为 `string`，再在绑定后显式解析。
 
 ## 绑定后的显式校验
 

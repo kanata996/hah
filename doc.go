@@ -15,7 +15,6 @@
 // 公开 API：
 //   - request helper：Path、Query
 //   - 绑定入口：BindQuery、BindBody
-//   - 绑定相关类型：BindUnmarshaler、BindMultipleUnmarshaler
 //   - 请求级规则 helper：RequireBody、InvalidRequest
 //   - 公共错误模型：Violation、HTTPError、NewHTTPError、NewHTTPErrorWithCause
 //   - 公开 violation 常量：Code*、In*

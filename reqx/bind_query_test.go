@@ -143,11 +143,11 @@ func TestBindQuery_Contracts(t *testing.T) {
 		type unsupportedSlice struct {
 			Tags bindQueryNamedSlice `query:"tag"`
 		}
-		type unsupportedDecoder struct {
+		type unsupportedTextDecoder struct {
 			Value bindQueryTextValue `query:"value"`
 		}
 
 		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?tag=a", nil), &unsupportedSlice{}))
-		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?value=x", nil), &unsupportedDecoder{}))
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?value=x", nil), &unsupportedTextDecoder{}))
 	})
 }

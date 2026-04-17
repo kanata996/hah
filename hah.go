@@ -24,10 +24,6 @@ const (
 )
 
 type (
-	// BindUnmarshaler 允许字段从单个字符串输入值自定义解码。
-	BindUnmarshaler = reqx.BindUnmarshaler
-	// BindMultipleUnmarshaler 允许字段一次性接收同名输入的全部值。
-	BindMultipleUnmarshaler = reqx.BindMultipleUnmarshaler
 	// Violation 描述单个公开请求违规。
 	Violation = errx.Violation
 	// HTTPError 表示 HTTP 边界上的公共错误。
@@ -36,8 +32,7 @@ type (
 
 // BindBody 只从请求 body 绑定数据。
 //
-// 解码直接作用在调用方传入的 target 上；JSON 中缺失的字段不会覆盖 target
-// 已有值。
+// 绑定会先解码到临时值，成功后再一次性提交到 target。
 func BindBody(r *http.Request, target any) error {
 	return reqx.BindBody(r, target)
 }

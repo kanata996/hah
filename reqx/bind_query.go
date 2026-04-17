@@ -13,23 +13,12 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
-// BindUnmarshaler 保留为兼容接口，但默认 BindQuery 契约不支持自定义 decoder。
-type BindUnmarshaler interface {
-	UnmarshalParam(param string) error
-}
-
-// BindMultipleUnmarshaler 保留为兼容接口，但默认 BindQuery 契约不支持多值 decoder。
-type BindMultipleUnmarshaler interface {
-	UnmarshalParams(params []string) error
-}
-
 var (
 	queryTimeType            = reflect.TypeOf(time.Time{})
 	queryUUIDType            = reflect.TypeOf(uuid.UUID{})
 	queryDurationType        = reflect.TypeOf(time.Duration(0))
 	queryStringStringMapType = reflect.TypeOf(map[string]string{})
 	queryTextUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
-	queryBindUnmarshalerType = reflect.TypeOf((*BindUnmarshaler)(nil)).Elem()
 )
 
 type bindQueryFieldPlan struct {
@@ -225,7 +214,7 @@ func isExplicitBindQuerySpecialType(t reflect.Type) bool {
 func disallowedBindQueryDecoder(t reflect.Type) bool {
 	ptr := reflect.PointerTo(t)
 	if t != queryTimeType && t != queryUUIDType {
-		if ptr.Implements(queryTextUnmarshalerType) || ptr.Implements(queryBindUnmarshalerType) {
+		if ptr.Implements(queryTextUnmarshalerType) {
 			return true
 		}
 	}

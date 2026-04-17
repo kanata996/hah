@@ -126,7 +126,7 @@
 以下形状一律不支持，且在规划阶段返回普通 usage error：
 
 - 除 `time.Duration`、`time.Time`、`uuid.UUID` 之外的表外命名类型
-- 除本文显式支持的 `time.Time`、`uuid.UUID` 外，实现 `BindUnmarshaler` / `encoding.TextUnmarshaler` 的类型，包括底层类型原本受支持的命名标量
+- 除本文显式支持的 `time.Time`、`uuid.UUID` 外，实现 `encoding.TextUnmarshaler` 的类型，包括底层类型原本受支持的命名标量
 - 未标记 `inline` 的 `struct` / `*struct`
 - slice / array
 - map / interface
