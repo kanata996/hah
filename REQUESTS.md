@@ -160,7 +160,7 @@ if err := hah.BindBody(r, &body); err != nil {
 - 不接受 `application/*+json`
 - struct 字段支持范围按公开表闭集处理；超出表格的字段类型直接返回 usage error
 - 默认拒绝未知字段
-- 顶层 `null`、array、string、number、boolean 返回 `invalid_json`；重复 object key 的生效结果遵循 `encoding/json`
+- 顶层 `null`、array、string、number、boolean 返回 `invalid_json`；任一 object 层级的重复 key 都返回 `invalid_json`
 - 截断 JSON / `unexpected EOF` 返回 `invalid_json`
 - 非 JSON 语义的 body read failure 返回普通 error，不收敛成 `HTTPError`
 - 绑定先解码到临时值；成功后才一次性提交，因此 JSON 里缺失的字段不会继承 DTO 旧值

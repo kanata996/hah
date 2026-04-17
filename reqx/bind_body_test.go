@@ -561,67 +561,59 @@ func TestBindBody_UsageAndBoundaryContracts(t *testing.T) {
 	})
 }
 
-func TestBindBody_InternalHelpers(t *testing.T) {
-	t.Run("invalid unmarshal error passes through unchanged", func(t *testing.T) {
-		want := &json.InvalidUnmarshalError{Type: reflect.TypeOf(0)}
+func TestBindBody_ErrorPriorityContracts(t *testing.T) {
+	t.Run("usage errors win before body inspection", func(t *testing.T) {
+		wantErr := errors.New("read failed")
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Content-Type", "application/problem+json")
+		req.Body = bindBodyReadErrorCloser{err: wantErr}
+		req.ContentLength = -1
 
-		if got := mapJSONBodyDecodeError(want); got != want {
-			t.Fatalf("mapJSONBodyDecodeError() = %v, want %v", got, want)
+		var unsupported map[string]string
+		err := BindBody(req, &unsupported)
+		assertNotHTTPError(t, err)
+		if errors.Is(err, wantErr) {
+			t.Fatalf("BindBody() error = %v, want usage error before body inspection", err)
 		}
 	})
 
-	t.Run("validate json document returns decoder error for malformed trailing token", func(t *testing.T) {
-		err := validateJSONDocument([]byte(`{} x`))
-		if err == nil || !strings.Contains(err.Error(), "invalid character") {
-			t.Fatalf("validateJSONDocument() error = %v, want decoder error", err)
+	t.Run("probe read errors win before media type checks", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		wantErr := errors.New("read failed")
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Content-Type", "application/problem+json")
+		req.Body = bindBodyReadErrorCloser{err: wantErr}
+		req.ContentLength = -1
+
+		err := BindBody(req, &request{})
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
 		}
 	})
 
-	t.Run("consume object returns key token error for truncated key section", func(t *testing.T) {
-		dec := json.NewDecoder(strings.NewReader(`{1`))
-		if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
-			t.Fatalf("initial token = %v, %v, want {, nil", tok, err)
+	t.Run("unsupported media type wins before size and json validation", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
 		}
 
-		err := consumeJSONObject(dec)
-		if err == nil || !strings.Contains(err.Error(), "invalid character '1'") {
-			t.Fatalf("consumeJSONObject() error = %v, want object key decoder error", err)
-		}
+		payload := "{" + strings.Repeat("a", int(defaultMaxBodyBytes)+1)
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/problem+json")
+
+		err := BindBody(req, &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType)
 	})
 
-	t.Run("consume object propagates value parse errors", func(t *testing.T) {
-		dec := json.NewDecoder(strings.NewReader(`{"name":`))
-		if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
-			t.Fatalf("initial token = %v, %v, want {, nil", tok, err)
+	t.Run("request too large wins before invalid json", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
 		}
 
-		err := consumeJSONObject(dec)
-		if err == nil || !strings.Contains(err.Error(), "EOF") {
-			t.Fatalf("consumeJSONObject() error = %v, want unexpected EOF", err)
-		}
-	})
-
-	t.Run("consume array propagates nested value errors", func(t *testing.T) {
-		dec := json.NewDecoder(strings.NewReader(`[1,}`))
-		if tok, err := dec.Token(); err != nil || tok != json.Delim('[') {
-			t.Fatalf("initial token = %v, %v, want [, nil", tok, err)
-		}
-
-		err := consumeJSONArray(dec)
-		if err == nil || !strings.Contains(err.Error(), "looking for beginning of value") {
-			t.Fatalf("consumeJSONArray() error = %v, want propagated decoder error", err)
-		}
-	})
-
-	t.Run("consume json value rejects closing delimiters", func(t *testing.T) {
-		dec := json.NewDecoder(strings.NewReader(`{}`))
-		if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
-			t.Fatalf("initial token = %v, %v, want {, nil", tok, err)
-		}
-
-		err := consumeJSONValue(dec)
-		if err == nil || err.Error() != "invalid JSON delimiter" {
-			t.Fatalf("consumeJSONValue() error = %v, want invalid JSON delimiter", err)
-		}
+		payload := "{" + strings.Repeat("a", int(defaultMaxBodyBytes)+1)
+		err := BindBody(newJSONRequest(http.MethodPost, "/", payload), &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusRequestEntityTooLarge, CodeRequestTooLarge)
 	})
 }
