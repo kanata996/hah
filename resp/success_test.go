@@ -225,6 +225,7 @@ func TestSuccessWritersRejectUnsupportedValue(t *testing.T) {
 
 func TestNoContentWritesStatusOnly(t *testing.T) {
 	rr := httptest.NewRecorder()
+	rr.Header().Set("X-Trace-ID", "trace-1")
 	rr.Header().Set("Content-Type", "application/json")
 	rr.Header().Set("Content-Length", "10")
 
@@ -242,6 +243,9 @@ func TestNoContentWritesStatusOnly(t *testing.T) {
 	}
 	if got := rr.Header().Get("Content-Length"); got != "" {
 		t.Fatalf("Content-Length = %q, want empty", got)
+	}
+	if got := rr.Header().Get("X-Trace-ID"); got != "trace-1" {
+		t.Fatalf("X-Trace-ID = %q, want %q", got, "trace-1")
 	}
 }
 

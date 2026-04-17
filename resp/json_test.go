@@ -142,6 +142,28 @@ func TestJSONBodyWritersRejectUnsupportedStatusesBeforeCommit(t *testing.T) {
 			write: func(w http.ResponseWriter) error { return JSON(w, http.StatusNoContent, map[string]any{"id": "u_1"}) },
 		},
 		{
+			name: "JSON unsupported 205",
+			write: func(w http.ResponseWriter) error {
+				return JSON(w, http.StatusResetContent, map[string]any{"id": "u_1"})
+			},
+		},
+		{
+			name: "JSON unsupported 206",
+			write: func(w http.ResponseWriter) error {
+				return JSON(w, http.StatusPartialContent, map[string]any{"id": "u_1"})
+			},
+		},
+		{
+			name:  "JSON unsupported 207",
+			write: func(w http.ResponseWriter) error { return JSON(w, http.StatusMultiStatus, map[string]any{"id": "u_1"}) },
+		},
+		{
+			name: "JSON unsupported 208",
+			write: func(w http.ResponseWriter) error {
+				return JSON(w, http.StatusAlreadyReported, map[string]any{"id": "u_1"})
+			},
+		},
+		{
 			name:  "JSON unsupported 226",
 			write: func(w http.ResponseWriter) error { return JSON(w, http.StatusIMUsed, map[string]any{"id": "u_1"}) },
 		},
@@ -158,6 +180,55 @@ func TestJSONBodyWritersRejectUnsupportedStatusesBeforeCommit(t *testing.T) {
 				t.Fatal("expected error, got nil")
 			}
 			assertRecorderHasNoBodyOrContentType(t, rr)
+		})
+	}
+}
+
+func TestJSONBodyWritersPreserveUnrelatedHeadersAndOwnContentHeaders(t *testing.T) {
+	cases := []struct {
+		name       string
+		wantStatus int
+		write      func(http.ResponseWriter) error
+	}{
+		{
+			name:       "JSON",
+			wantStatus: http.StatusAccepted,
+			write:      func(w http.ResponseWriter) error { return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"}) },
+		},
+		{
+			name:       "OK",
+			wantStatus: http.StatusOK,
+			write:      func(w http.ResponseWriter) error { return OK(w, map[string]any{"id": "u_1"}) },
+		},
+		{
+			name:       "Created",
+			wantStatus: http.StatusCreated,
+			write:      func(w http.ResponseWriter) error { return Created(w, map[string]any{"id": "u_1"}) },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			rr.Header().Set("X-Trace-ID", "trace-1")
+			rr.Header().Set("Content-Type", "text/plain")
+			rr.Header().Set("Content-Length", "999")
+
+			if err := tc.write(rr); err != nil {
+				t.Fatalf("write() error = %v", err)
+			}
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rr.Code, tc.wantStatus)
+			}
+			if got := rr.Header().Get("X-Trace-ID"); got != "trace-1" {
+				t.Fatalf("X-Trace-ID = %q, want %q", got, "trace-1")
+			}
+			if got := rr.Header().Get("Content-Type"); got != "application/json" {
+				t.Fatalf("Content-Type = %q, want %q", got, "application/json")
+			}
+			if got := rr.Header().Get("Content-Length"); got != "" {
+				t.Fatalf("Content-Length = %q, want empty before net/http recalculates it", got)
+			}
 		})
 	}
 }

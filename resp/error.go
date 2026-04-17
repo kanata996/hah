@@ -75,10 +75,39 @@ func WriteError(w http.ResponseWriter, err error) error {
 }
 
 func selectedHTTPError(err error) *errx.HTTPError {
-	var httpErr *errx.HTTPError
-	if errors.As(err, &httpErr) && httpErr != nil {
-		return httpErr
+	return firstHTTPErrorCandidate(err)
+}
+
+func firstHTTPErrorCandidate(err error) *errx.HTTPError {
+	if err == nil {
+		return nil
 	}
+
+	if httpErr, ok := err.(*errx.HTTPError); ok {
+		if httpErr != nil {
+			return httpErr
+		}
+	} else if asErr, ok := err.(interface{ As(any) bool }); ok {
+		var httpErr *errx.HTTPError
+		if asErr.As(&httpErr) && httpErr != nil {
+			return httpErr
+		}
+	}
+
+	type unwrapOne interface{ Unwrap() error }
+	type unwrapMany interface{ Unwrap() []error }
+
+	switch e := err.(type) {
+	case unwrapMany:
+		for _, child := range e.Unwrap() {
+			if httpErr := firstHTTPErrorCandidate(child); httpErr != nil {
+				return httpErr
+			}
+		}
+	case unwrapOne:
+		return firstHTTPErrorCandidate(e.Unwrap())
+	}
+
 	return nil
 }
 

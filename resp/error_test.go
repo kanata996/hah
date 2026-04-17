@@ -21,7 +21,7 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 		"",
 		"",
 	).WithViolations([]errx.Violation{
-		{Field: "name", Code: "required", Detail: "is required"},
+		{Field: "name", In: errx.InBody, Code: "required", Detail: "is required"},
 	}))
 	if err != nil {
 		t.Fatalf("WriteError() error = %v", err)
@@ -53,6 +53,7 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 	}
 	assertPublicErrorObject(t, errors[0], map[string]any{
 		"field":  "name",
+		"in":     "body",
 		"code":   "required",
 		"detail": "is required",
 	})
@@ -168,6 +169,12 @@ func TestWriteErrorRejectsNilWriter(t *testing.T) {
 	}
 }
 
+func TestWriteErrorNilWriterAndNilErrorIsNoop(t *testing.T) {
+	if err := WriteError(nil, nil); err != nil {
+		t.Fatalf("WriteError() error = %v, want nil", err)
+	}
+}
+
 // HEAD 请求写错误时仍走正常 Write 链路，但最终对外只保留状态和头语义。
 func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
 	expected := httptest.NewRecorder()
@@ -258,6 +265,31 @@ func TestWriteErrorClearsStaleContentLengthOnRealHTTPServer(t *testing.T) {
 	}
 }
 
+func TestWriteErrorPreservesUnrelatedHeadersAndOwnsContentHeaders(t *testing.T) {
+	rr := httptest.NewRecorder()
+	rr.Header().Set("X-Trace-ID", "trace-1")
+	rr.Header().Set("Content-Type", "text/plain")
+	rr.Header().Set("Content-Length", "999")
+
+	err := WriteError(rr, errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid"))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusBadRequest)
+	}
+	if got := rr.Header().Get("X-Trace-ID"); got != "trace-1" {
+		t.Fatalf("X-Trace-ID = %q, want %q", got, "trace-1")
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/problem+json")
+	}
+	if got := rr.Header().Get("Content-Length"); got != "" {
+		t.Fatalf("Content-Length = %q, want empty before net/http recalculates it", got)
+	}
+}
+
 // 非法状态码会被标准化为 500，且内部 cause 不会泄漏到公开响应。
 func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
 	rr := httptest.NewRecorder()
@@ -283,6 +315,37 @@ func TestWriteErrorNormalizesInvalidStatusAndHidesCause(t *testing.T) {
 	}
 	if bytes.Contains(rr.Body.Bytes(), []byte("db timeout")) {
 		t.Fatalf("body leaked internal cause: %q", rr.Body.String())
+	}
+}
+
+func TestWriteErrorSkipsTypedNilHTTPErrorAndChoosesFirstNonNilCandidate(t *testing.T) {
+	var typedNil *errx.HTTPError
+
+	first := errx.NewHTTPError(http.StatusConflict, "version_conflict", "version mismatch")
+	later := errx.NewHTTPError(http.StatusNotFound, "not_found", "resource missing")
+	input := errors.Join(typedNil, context.Canceled, first, later)
+
+	rr := httptest.NewRecorder()
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusConflict)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "version_conflict" {
+		t.Fatalf("code = %#v, want version_conflict", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusConflict) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusConflict))
+	}
+	if got := body["detail"]; got != "version mismatch" {
+		t.Fatalf("detail = %#v, want version mismatch", got)
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
 	}
 }
 
