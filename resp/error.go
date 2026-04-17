@@ -33,6 +33,8 @@ type problemPayload struct {
 	Errors []errx.Violation `json:"errors,omitempty"`
 }
 
+var internalProblemBody = []byte("{\"title\":\"Internal Server Error\",\"status\":500,\"code\":\"internal_error\"}\n")
+
 // WriteError 是 HTTP 错误写回的统一入口。
 //
 // 职责分为两步：
@@ -58,20 +60,18 @@ func WriteError(w http.ResponseWriter, err error) error {
 	}
 
 	payload := normalizeProblemPayload(err)
-	body, err := encodeJSON(payload)
-	if err != nil {
-		body, err = encodeJSON(problemPayload{
-			Title:  http.StatusText(http.StatusInternalServerError),
-			Status: http.StatusInternalServerError,
-			Code:   "internal_error",
-		})
-		if err != nil {
-			return err
-		}
-		return writePreparedJSONBytes(w, http.StatusInternalServerError, problemJSONContentType, body)
-	}
+	status, body := encodeProblemBody(payload, encodeJSON)
+	return writePreparedJSONBytes(w, status, problemJSONContentType, body)
+}
 
-	return writePreparedJSONBytes(w, payload.Status, problemJSONContentType, body)
+// encodeProblemBody 负责把公开错误 payload 编码成响应体。
+// 若主 payload 意外编码失败，则回退到最小 500 problem JSON，避免对外暴露内部细节。
+func encodeProblemBody(payload problemPayload, encode func(any) ([]byte, error)) (status int, body []byte) {
+	body, err := encode(payload)
+	if err == nil {
+		return payload.Status, body
+	}
+	return http.StatusInternalServerError, internalProblemBody
 }
 
 func selectedHTTPError(err error) *errx.HTTPError {

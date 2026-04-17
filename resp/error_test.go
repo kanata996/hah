@@ -212,6 +212,21 @@ func TestWriteErrorRejectsNilWriter(t *testing.T) {
 	}
 }
 
+func TestWriteErrorReturnsResponseWriteErrorUnchanged(t *testing.T) {
+	rr := httptest.NewRecorder()
+	cause := errors.New("socket closed")
+	original := &responseWriteError{cause: cause}
+
+	err := WriteError(rr, original)
+	if err != original {
+		t.Fatalf("WriteError() error = %#v, want original %#v", err, original)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatalf("errors.Is(err, cause) = false, want true")
+	}
+	assertRecorderHasNoBodyOrContentType(t, rr)
+}
+
 func TestWriteErrorNilWriterAndNilErrorIsNoop(t *testing.T) {
 	if err := WriteError(nil, nil); err != nil {
 		t.Fatalf("WriteError() error = %v, want nil", err)
@@ -556,5 +571,43 @@ func TestWriteErrorReturnsWriteFailureAfterFirstCommit(t *testing.T) {
 	}
 	if w.writes != 1 {
 		t.Fatalf("writes = %d, want 1", w.writes)
+	}
+}
+
+func TestEncodeProblemBodyFallsBackToInternalErrorWhenEncodingPayloadFails(t *testing.T) {
+	calls := 0
+	status, body := encodeProblemBody(problemPayload{
+		Title:  http.StatusText(http.StatusBadRequest),
+		Status: http.StatusBadRequest,
+		Code:   "bad_request",
+		Errors: []errx.Violation{
+			{Field: "name", Code: "required", Detail: "is required"},
+		},
+	}, func(any) ([]byte, error) {
+		calls++
+		return nil, errors.New("encode payload failed")
+	})
+	if calls != 1 {
+		t.Fatalf("encode calls = %d, want 1", calls)
+	}
+	if status != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", status, http.StatusInternalServerError)
+	}
+
+	payload := decodePayload(t, body)
+	if got := payload["code"]; got != "internal_error" {
+		t.Fatalf("code = %#v, want internal_error", got)
+	}
+	if got := payload["title"]; got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusInternalServerError))
+	}
+	if got := payload["status"]; got != float64(http.StatusInternalServerError) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusInternalServerError)
+	}
+	if _, exists := payload["detail"]; exists {
+		t.Fatalf("detail unexpectedly present: %#v", payload["detail"])
+	}
+	if _, exists := payload["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", payload["errors"])
 	}
 }

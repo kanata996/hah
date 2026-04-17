@@ -362,6 +362,26 @@ func TestQueryDefaultContracts(t *testing.T) {
 			t.Fatalf("when = %v, want %v", got, want)
 		}
 	})
+
+	t.Run("values nil default stays nil", func(t *testing.T) {
+		var defaults []string
+
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().
+			Default(defaults).
+			Check(func(values []string) error {
+				if values != nil {
+					return errors.New("want nil values")
+				}
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("Values().Get() error = %v", err)
+		}
+		if got != nil {
+			t.Fatalf("values = %#v, want nil", got)
+		}
+	})
 }
 
 func TestQueryTimeParam_EqualBoundariesAreRejected(t *testing.T) {
