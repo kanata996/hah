@@ -2,6 +2,8 @@ GO ?= go
 PKG ?= ./...
 RUN ?= .
 COVER_FILE ?= coverage.out
+GOCACHE_DIR ?= $(CURDIR)/.gocache
+GOLANGCI_LINT_CACHE_DIR ?= $(CURDIR)/.golangci-lint-cache
 VERSION ?=
 MAIN_BRANCH ?= main
 
@@ -42,7 +44,8 @@ vet:
 	@$(GO) vet ./...
 
 lint:
-	@golangci-lint run ./...
+	@mkdir -p "$(GOCACHE_DIR)" "$(GOLANGCI_LINT_CACHE_DIR)"
+	@GOCACHE="$(GOCACHE_DIR)" GOLANGCI_LINT_CACHE="$(GOLANGCI_LINT_CACHE_DIR)" golangci-lint run ./...
 
 test:
 	@$(GO) test ./...
