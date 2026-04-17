@@ -84,9 +84,6 @@ func validateBindBodyTarget(targetType reflect.Type) error {
 	if targetType.Kind() != reflect.Pointer || targetType.Elem().Kind() != reflect.Struct {
 		return usageErrorf("destination must point to struct")
 	}
-	if targetType.Elem().Kind() == reflect.Pointer {
-		return usageErrorf("destination must point to struct")
-	}
 	return validateBindBodyStructType(targetType.Elem())
 }
 
@@ -239,10 +236,7 @@ func consumeJSONObject(dec *json.Decoder) error {
 		if err != nil {
 			return err
 		}
-		key, ok := keyToken.(string)
-		if !ok {
-			return errors.New("invalid object key")
-		}
+		key := keyToken.(string)
 		if _, exists := seen[key]; exists {
 			return errDuplicateJSONObjectKey
 		}
