@@ -1,6 +1,7 @@
 package reqx
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -181,6 +182,24 @@ func TestBindBody_Contracts(t *testing.T) {
 		}
 	})
 
+	t.Run("readable bytes determine zero byte bodies instead of content length", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Body = io.NopCloser(strings.NewReader(""))
+		req.ContentLength = 5
+
+		dst := request{Name: "existing"}
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
 	t.Run("probe read eof keeps request body usable", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", io.NopCloser(strings.NewReader(`{"name":"kanata"}`)))
 		req.Header.Set("Content-Type", "application/json")
@@ -195,6 +214,203 @@ func TestBindBody_Contracts(t *testing.T) {
 		if dst.Name != "kanata" {
 			t.Fatalf("dst = %#v, want bound body", dst)
 		}
+	})
+}
+
+func TestBindBody_AdditionalBaselineContracts(t *testing.T) {
+	t.Run("context cancellation and deadline errors are ordinary errors", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		testCases := []struct {
+			name string
+			err  error
+		}{
+			{name: "canceled", err: context.Canceled},
+			{name: "deadline exceeded", err: context.DeadlineExceeded},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodPost, "/", nil)
+				req.Header.Set("Content-Type", "application/json")
+				req.Body = bindBodyReadErrorCloser{err: tc.err}
+				req.ContentLength = -1
+
+				err := BindBody(req, &request{})
+				if !errors.Is(err, tc.err) {
+					t.Fatalf("BindBody() error = %v, want %v", err, tc.err)
+				}
+			})
+		}
+	})
+
+	t.Run("top level scalar values are invalid json", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		for _, body := range []string{`"kanata"`, `1`, `true`} {
+			err := BindBody(newJSONRequest(http.MethodPost, "/", body), &request{})
+			_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+		}
+
+		err := BindBody(newJSONRequest(http.MethodPost, "/", `{} {}`), &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+	})
+
+	t.Run("root unknown fields type mismatches and overflow preserve target", func(t *testing.T) {
+		type request struct {
+			Age int8 `json:"age"`
+		}
+
+		dst := request{Age: 7}
+
+		err := BindBody(newJSONRequest(http.MethodPost, "/", `{"extra":1}`), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+		if dst != (request{Age: 7}) {
+			t.Fatalf("dst = %#v, want unchanged after unknown field", dst)
+		}
+
+		err = BindBody(newJSONRequest(http.MethodPost, "/", `{"age":"x"}`), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+		if dst != (request{Age: 7}) {
+			t.Fatalf("dst = %#v, want unchanged after type mismatch", dst)
+		}
+
+		err = BindBody(newJSONRequest(http.MethodPost, "/", `{"age":128}`), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+		if dst != (request{Age: 7}) {
+			t.Fatalf("dst = %#v, want unchanged after overflow", dst)
+		}
+	})
+
+	t.Run("supports named structs pointer structs slices and time pointers", func(t *testing.T) {
+		type address struct {
+			Street string `json:"street"`
+		}
+		type namedAddress address
+		type request struct {
+			Primary   namedAddress `json:"primary"`
+			Secondary *address     `json:"secondary"`
+			Scores    []int        `json:"scores"`
+			When      *time.Time   `json:"when"`
+		}
+
+		var dst request
+		err := BindBody(
+			newJSONRequest(
+				http.MethodPost,
+				"/",
+				`{"primary":{"street":"main"},"secondary":{"street":"second"},"scores":[1,2],"when":"2026-04-13T10:00:00Z"}`,
+			),
+			&dst,
+		)
+		if err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst.Primary.Street != "main" {
+			t.Fatalf("primary = %#v, want street=main", dst.Primary)
+		}
+		if dst.Secondary == nil || dst.Secondary.Street != "second" {
+			t.Fatalf("secondary = %#v, want street=second", dst.Secondary)
+		}
+		if !reflect.DeepEqual(dst.Scores, []int{1, 2}) {
+			t.Fatalf("scores = %#v, want []int{1, 2}", dst.Scores)
+		}
+		if dst.When == nil || dst.When.UTC().Format(time.RFC3339) != "2026-04-13T10:00:00Z" {
+			t.Fatalf("when = %#v, want 2026-04-13T10:00:00Z", dst.When)
+		}
+	})
+
+	t.Run("slice pointer time and nested struct failures are invalid json and preserve target", func(t *testing.T) {
+		t.Run("slice element type mismatch", func(t *testing.T) {
+			type request struct {
+				Scores []int `json:"scores"`
+			}
+
+			dst := request{Scores: []int{7}}
+			err := BindBody(newJSONRequest(http.MethodPost, "/", `{"scores":["x"]}`), &dst)
+			_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+			if !reflect.DeepEqual(dst, request{Scores: []int{7}}) {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
+
+		t.Run("time pointer parse failure", func(t *testing.T) {
+			type request struct {
+				When *time.Time `json:"when"`
+			}
+
+			existing := time.Date(2026, time.April, 13, 10, 0, 0, 0, time.UTC)
+			dst := request{When: &existing}
+			err := BindBody(newJSONRequest(http.MethodPost, "/", `{"when":"not-time"}`), &dst)
+			_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+			if dst.When == nil || !dst.When.Equal(existing) {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
+
+		t.Run("time value parse failure", func(t *testing.T) {
+			type request struct {
+				When time.Time `json:"when"`
+			}
+
+			existing := time.Date(2026, time.April, 13, 10, 0, 0, 0, time.UTC)
+			dst := request{When: existing}
+			err := BindBody(newJSONRequest(http.MethodPost, "/", `{"when":"not-time"}`), &dst)
+			_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+			if !dst.When.Equal(existing) {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
+
+		t.Run("pointer struct field failure", func(t *testing.T) {
+			type address struct {
+				Street string `json:"street"`
+			}
+			type request struct {
+				Secondary *address `json:"secondary"`
+			}
+
+			dst := request{Secondary: &address{Street: "existing"}}
+			err := BindBody(newJSONRequest(http.MethodPost, "/", `{"secondary":{"street":1}}`), &dst)
+			_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+			if dst.Secondary == nil || dst.Secondary.Street != "existing" {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
+	})
+
+	t.Run("nested unsupported field families are usage errors", func(t *testing.T) {
+		type nested struct {
+			Raw json.RawMessage `json:"raw"`
+		}
+		type nestedSliceElem struct {
+			Raw json.RawMessage `json:"raw"`
+		}
+		type requestWithNested struct {
+			Nested nested `json:"nested"`
+		}
+		type requestWithSlice struct {
+			Items []nestedSliceElem `json:"items"`
+		}
+
+		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &requestWithNested{}))
+		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &requestWithSlice{}))
+	})
+
+	t.Run("nested duplicate object keys are invalid json", func(t *testing.T) {
+		type address struct {
+			Street string `json:"street"`
+		}
+		type request struct {
+			Address address `json:"address"`
+		}
+
+		err := BindBody(newJSONRequest(http.MethodPost, "/", `{"address":{"street":"main","street":"dup"}}`), &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
 	})
 }
 

@@ -481,6 +481,9 @@ func TestWriteErrorMapsContextCanceled(t *testing.T) {
 	if rr.Code != 499 {
 		t.Fatalf("status = %d, want 499", rr.Code)
 	}
+	if got := body["status"]; got != float64(499) {
+		t.Fatalf("status = %#v, want 499", got)
+	}
 	if got := body["code"]; got != "client_closed_request" {
 		t.Fatalf("code = %#v, want client_closed_request", got)
 	}
@@ -508,6 +511,9 @@ func TestWriteErrorMapsContextDeadlineExceeded(t *testing.T) {
 	if rr.Code != http.StatusGatewayTimeout {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusGatewayTimeout)
 	}
+	if got := body["status"]; got != float64(http.StatusGatewayTimeout) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusGatewayTimeout)
+	}
 	if got := body["code"]; got != "timeout" {
 		t.Fatalf("code = %#v, want timeout", got)
 	}
@@ -516,6 +522,39 @@ func TestWriteErrorMapsContextDeadlineExceeded(t *testing.T) {
 	}
 	if _, exists := body["detail"]; exists {
 		t.Fatalf("detail unexpectedly present: %#v", body["detail"])
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
+	}
+}
+
+func TestWriteErrorPrefersHTTPErrorOverContextErrors(t *testing.T) {
+	input := errors.Join(
+		context.Canceled,
+		errx.NewHTTPError(http.StatusForbidden, "forbidden", "access denied"),
+	)
+
+	rr := httptest.NewRecorder()
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["status"]; got != float64(http.StatusForbidden) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusForbidden)
+	}
+	if got := body["code"]; got != "forbidden" {
+		t.Fatalf("code = %#v, want forbidden", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusForbidden) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusForbidden))
+	}
+	if got := body["detail"]; got != "access denied" {
+		t.Fatalf("detail = %#v, want access denied", got)
 	}
 	if _, exists := body["errors"]; exists {
 		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
@@ -595,6 +634,51 @@ func TestEncodeProblemBodyFallsBackToInternalErrorWhenEncodingPayloadFails(t *te
 	}
 
 	payload := decodePayload(t, body)
+	if got := payload["code"]; got != "internal_error" {
+		t.Fatalf("code = %#v, want internal_error", got)
+	}
+	if got := payload["title"]; got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusInternalServerError))
+	}
+	if got := payload["status"]; got != float64(http.StatusInternalServerError) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusInternalServerError)
+	}
+	if _, exists := payload["detail"]; exists {
+		t.Fatalf("detail unexpectedly present: %#v", payload["detail"])
+	}
+	if _, exists := payload["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", payload["errors"])
+	}
+}
+
+func TestWriteErrorFallsBackToInternalErrorWhenProblemEncodingFails(t *testing.T) {
+	t.Cleanup(func() {
+		problemBodyEncoder = encodeJSON
+	})
+	problemBodyEncoder = func(any) ([]byte, error) {
+		return nil, errors.New("encode payload failed")
+	}
+
+	rr := httptest.NewRecorder()
+	err := WriteError(rr, errx.NewHTTPError(
+		http.StatusBadRequest,
+		"invalid_json",
+		"payload invalid",
+	).WithViolations([]errx.Violation{
+		{Field: "name", Code: "required", Detail: "is required"},
+	}))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v, want nil after fallback write", err)
+	}
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	}
+
+	payload := decodePayload(t, rr.Body.Bytes())
 	if got := payload["code"]; got != "internal_error" {
 		t.Fatalf("code = %#v, want internal_error", got)
 	}

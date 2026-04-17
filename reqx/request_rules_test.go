@@ -49,6 +49,21 @@ func TestRequireBody(t *testing.T) {
 		}
 	})
 
+	t.Run("null body counts as present for RequireBody while BindBody rejects it", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := newJSONRequest(http.MethodPost, "/", `null`)
+
+		if err := RequireBody(req); err != nil {
+			t.Fatalf("RequireBody(null) error = %v, want nil", err)
+		}
+
+		err := BindBody(req, &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+	})
+
 	t.Run("content length zero body is required violation", func(t *testing.T) {
 		req := newJSONRequest(http.MethodPost, "/", "")
 		req.ContentLength = 0

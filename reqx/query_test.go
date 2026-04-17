@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kanata996/hah/errx"
 )
 
@@ -380,6 +381,172 @@ func TestQueryDefaultContracts(t *testing.T) {
 		}
 		if got != nil {
 			t.Fatalf("values = %#v, want nil", got)
+		}
+	})
+}
+
+func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
+	t.Run("required and default are mutually exclusive", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
+			Required().
+			Default(1).
+			Get()
+		assertNotHTTPError(t, err)
+	})
+
+	t.Run("string and numeric constraints cover failure and conflict", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?mode=go", nil), "mode").String().
+			MinLen(3).
+			Get()
+		assertInvalidViolationAt(t, err, "mode", errx.InQuery)
+
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "mode").String().
+			MinLen(3).
+			MaxLen(2).
+			Get()
+		assertNotHTTPError(t, err)
+
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?page=2", nil), "page").Int().
+			Min(3).
+			Get()
+		assertInvalidViolationAt(t, err, "page", errx.InQuery)
+
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
+			Min(4).
+			Max(3).
+			Get()
+		assertNotHTTPError(t, err)
+	})
+
+	t.Run("duplicate keys short circuit parsing and checks", func(t *testing.T) {
+		checkCalled := false
+
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=bad&page=2", nil), "page").Int().
+			Check(func(int) error {
+				checkCalled = true
+				return nil
+			}).
+			Get()
+		assertViolation(t, err, errx.Violation{
+			Field:  "page",
+			In:     errx.InQuery,
+			Code:   errx.CodeMultiple,
+			Detail: "must appear only once",
+		})
+		if checkCalled {
+			t.Fatal("Check() ran after duplicate-key rejection")
+		}
+	})
+
+	t.Run("string validators short circuit before custom checks", func(t *testing.T) {
+		checkCalled := false
+
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?mode=rust", nil), "mode").String().
+			OneOf("go").
+			Check(func(string) error {
+				checkCalled = true
+				return nil
+			}).
+			Get()
+		assertInvalidViolationAt(t, err, "mode", errx.InQuery)
+		if checkCalled {
+			t.Fatal("Check() ran after OneOf() failure")
+		}
+
+		checkCalled = false
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?mode=rust", nil), "mode").String().
+			Match(regexp.MustCompile("^g")).
+			Check(func(string) error {
+				checkCalled = true
+				return nil
+			}).
+			Get()
+		assertInvalidViolationAt(t, err, "mode", errx.InQuery)
+		if checkCalled {
+			t.Fatal("Check() ran after Match() failure")
+		}
+	})
+
+	t.Run("uuid duration unix-milli and empty-string contracts", func(t *testing.T) {
+		want := uuid.New()
+
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?id="+want.String(), nil), "id").UUID().
+			Required().
+			Get()
+		if err != nil {
+			t.Fatalf("UUID().Get() error = %v", err)
+		}
+		if got != want {
+			t.Fatalf("uuid = %v, want %v", got, want)
+		}
+
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?id=not-a-uuid", nil), "id").UUID().Get()
+		assertInvalidViolationAt(t, err, "id", errx.InQuery)
+
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?wait=5", nil), "wait").Duration().Get()
+		assertInvalidViolationAt(t, err, "wait", errx.InQuery)
+
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?ms=123", nil), "ms").UnixMilliTime().Get()
+		assertInvalidViolationAt(t, err, "ms", errx.InQuery)
+
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?enabled=", nil), "enabled").Bool().Get()
+		assertInvalidViolationAt(t, err, "enabled", errx.InQuery)
+	})
+
+	t.Run("missing optional skips built in constraints and match uses regexp semantics", func(t *testing.T) {
+		called := false
+
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
+			Min(100).
+			Check(func(int) error {
+				called = true
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got != 0 {
+			t.Fatalf("page = %d, want 0", got)
+		}
+		if called {
+			t.Fatal("Check() ran for missing optional query parameter")
+		}
+
+		gotString, err := Query(httptest.NewRequest(http.MethodGet, "/items?mode=xxgoyy", nil), "mode").String().
+			Match(regexp.MustCompile("go")).
+			Get()
+		if err != nil {
+			t.Fatalf("String().Get() error = %v", err)
+		}
+		if gotString != "xxgoyy" {
+			t.Fatalf("mode = %q, want xxgoyy", gotString)
+		}
+	})
+
+	t.Run("typed and values builders keep error priority stable", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=2&page=3", nil), "page").Int().
+			Min(4).
+			Max(3).
+			Get()
+		assertNotHTTPError(t, err)
+
+		_, err = Query(nil, "tag").Values().
+			Required().
+			Get()
+		assertNotHTTPError(t, err)
+
+		checkCalled := false
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().
+			Required().
+			Check(func([]string) error {
+				checkCalled = true
+				return nil
+			}).
+			Get()
+		assertRequiredViolationAt(t, err, "tag", errx.InQuery)
+		if checkCalled {
+			t.Fatal("Values().Check() ran after required violation")
 		}
 	})
 }

@@ -162,6 +162,37 @@ func TestNoContentWritesStatusOnly(t *testing.T) {
 	}
 }
 
+func TestNoContentPreservesUnrelatedHeadersOnRealHTTPServer(t *testing.T) {
+	result := roundTripOverHTTP(t, func(w http.ResponseWriter, _ *http.Request) error {
+		w.Header().Set("X-Trace-ID", "trace-1")
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Length", "10")
+		return NoContent(w)
+	})
+
+	if result.handlerErr != nil {
+		t.Fatalf("handler error = %v", result.handlerErr)
+	}
+	if result.response.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", result.response.StatusCode, http.StatusNoContent)
+	}
+	if got := result.response.Header.Get("X-Trace-ID"); got != "trace-1" {
+		t.Fatalf("X-Trace-ID = %q, want %q", got, "trace-1")
+	}
+	if got := result.response.Header.Get("Content-Type"); got != "" {
+		t.Fatalf("Content-Type = %q, want empty", got)
+	}
+	if got := result.response.Header.Get("Content-Length"); got != "" {
+		t.Fatalf("Content-Length = %q, want empty", got)
+	}
+	if result.readErr != nil {
+		t.Fatalf("ReadAll() error = %v", result.readErr)
+	}
+	if len(result.body) != 0 {
+		t.Fatalf("body = %q, want empty", string(result.body))
+	}
+}
+
 func TestSuccessWritersReturnWrappedWriteError(t *testing.T) {
 	cases := []struct {
 		name       string

@@ -366,6 +366,44 @@ func TestHTTPErrorWithViolationsDoesNotMutateReceiverOrSiblingResults(t *testing
 	assertHTTPErrorErrors(t, first, firstWant...)
 }
 
+// 基于已有 violations 再传入 nil/空切片时，应显式清空旧 violations，而不是保留或合并。
+func TestHTTPErrorWithViolationsNilAndEmptyInputReplaceExistingViolations(t *testing.T) {
+	cause := errors.New("db timeout")
+	baseWant := []Violation{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}}
+	base := NewHTTPErrorWithCause(http.StatusConflict, " account_conflict ", " account already exists ", cause).WithViolations(baseWant)
+
+	testCases := []struct {
+		name       string
+		violations []Violation
+	}{
+		{name: "nil input", violations: nil},
+		{name: "empty input", violations: []Violation{}},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			err := base.WithViolations(tc.violations)
+
+			assertHTTPErrorPublicFields(
+				t,
+				err,
+				http.StatusConflict,
+				"account_conflict",
+				http.StatusText(http.StatusConflict),
+				"account already exists",
+			)
+			assertHTTPErrorPreservesCause(t, err, "account already exists", cause)
+			if got := err.Errors(); got != nil {
+				t.Fatalf("Errors() = %#v, want nil", got)
+			}
+
+			// 原模板必须保持不变，证明这里是“替换”为 nil，而不是污染 receiver。
+			assertHTTPErrorErrors(t, base, baseWant...)
+		})
+	}
+}
+
 // 即使 detail 为空，Error 也应与公开 Detail 保持一致，不返回空串。
 func TestHTTPErrorErrorFallsBackToNormalizedDetail(t *testing.T) {
 	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", nil)
@@ -501,6 +539,75 @@ func TestHTTPErrorDefaultCodeTable(t *testing.T) {
 			err := NewHTTPError(tc.status, "", "")
 			if got := err.Code(); got != tc.wantCode {
 				t.Fatalf("Code() = %q, want %q", got, tc.wantCode)
+			}
+		})
+	}
+}
+
+// 默认 title 表属于锁版公开契约。
+func TestHTTPErrorDefaultTitleTable(t *testing.T) {
+	testCases := []struct {
+		name       string
+		status     int
+		wantStatus int
+		wantTitle  string
+	}{
+		{
+			name:       "standard client error uses net/http status text",
+			status:     http.StatusBadRequest,
+			wantStatus: http.StatusBadRequest,
+			wantTitle:  http.StatusText(http.StatusBadRequest),
+		},
+		{
+			name:       "499 uses explicit client closed request title",
+			status:     499,
+			wantStatus: 499,
+			wantTitle:  "Client Closed Request",
+		},
+		{
+			name:       "other client error with status text uses that text",
+			status:     http.StatusTeapot,
+			wantStatus: http.StatusTeapot,
+			wantTitle:  http.StatusText(http.StatusTeapot),
+		},
+		{
+			name:       "other client error without status text falls back to client error",
+			status:     430,
+			wantStatus: 430,
+			wantTitle:  "Client Error",
+		},
+		{
+			name:       "standard server error uses net/http status text",
+			status:     http.StatusServiceUnavailable,
+			wantStatus: http.StatusServiceUnavailable,
+			wantTitle:  http.StatusText(http.StatusServiceUnavailable),
+		},
+		{
+			name:       "other server error without status text falls back to internal server error",
+			status:     509,
+			wantStatus: 509,
+			wantTitle:  http.StatusText(http.StatusInternalServerError),
+		},
+		{
+			name:       "non error status normalizes to internal server error title",
+			status:     http.StatusOK,
+			wantStatus: http.StatusInternalServerError,
+			wantTitle:  http.StatusText(http.StatusInternalServerError),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := NewHTTPError(tc.status, "", "")
+
+			if got := err.Status(); got != tc.wantStatus {
+				t.Fatalf("Status() = %d, want %d", got, tc.wantStatus)
+			}
+			if got := err.Title(); got != tc.wantTitle {
+				t.Fatalf("Title() = %q, want %q", got, tc.wantTitle)
+			}
+			if got := err.Detail(); got != tc.wantTitle {
+				t.Fatalf("Detail() = %q, want %q", got, tc.wantTitle)
 			}
 		})
 	}

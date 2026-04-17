@@ -18,6 +18,13 @@ func TestJSONWritersWriteExpectedResponses(t *testing.T) {
 		wantBody        string
 	}{
 		{
+			name:            "JSON writes OK response",
+			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusOK, map[string]any{"id": "u_1"}) },
+			wantStatus:      http.StatusOK,
+			wantContentType: "application/json",
+			wantBody:        "{\"id\":\"u_1\"}\n",
+		},
+		{
 			name:            "JSON writes compact JSON",
 			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"}) },
 			wantStatus:      http.StatusAccepted,

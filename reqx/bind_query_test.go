@@ -101,6 +101,21 @@ func TestBindQuery_Contracts(t *testing.T) {
 		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
 	})
 
+	t.Run("query values follow net url decoding", func(t *testing.T) {
+		type request struct {
+			Name string `query:"name"`
+			Plus string `query:"plus"`
+		}
+
+		var dst request
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=a+b&plus=%2B", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Name != "a b" || dst.Plus != "+" {
+			t.Fatalf("dst = %#v, want decoded query values", dst)
+		}
+	})
+
 	t.Run("map string string target becomes single value snapshot", func(t *testing.T) {
 		dst := map[string]string{"stale": "value"}
 
@@ -155,6 +170,22 @@ func TestBindQuery_Contracts(t *testing.T) {
 		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
 		if dst.Count == nil || *dst.Count != 9 {
 			t.Fatalf("dst = %#v, want unchanged pointer field", dst)
+		}
+	})
+
+	t.Run("pointer leaf success overwrites existing value", func(t *testing.T) {
+		type request struct {
+			Count *int `query:"count"`
+		}
+
+		existing := 1
+		dst := request{Count: &existing}
+
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?count=2", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Count == nil || *dst.Count != 2 {
+			t.Fatalf("dst = %#v, want overwritten pointer field", dst)
 		}
 	})
 
@@ -227,6 +258,45 @@ func TestBindQuery_Contracts(t *testing.T) {
 				t.Fatalf("dst = %#v, want unchanged", dst)
 			}
 		})
+	})
+
+	t.Run("special pointer scalar formats bind successfully", func(t *testing.T) {
+		type request struct {
+			Wait  *time.Duration `query:"wait"`
+			When  *time.Time     `query:"when"`
+			Token *uuid.UUID     `query:"token"`
+		}
+
+		token := uuid.New()
+		var dst request
+
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?wait=5s&when=2026-04-13T10:00:00Z&token="+token.String(), nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Wait == nil || *dst.Wait != 5*time.Second {
+			t.Fatalf("wait = %#v, want 5s", dst.Wait)
+		}
+		if dst.When == nil || dst.When.UTC().Format(time.RFC3339) != "2026-04-13T10:00:00Z" {
+			t.Fatalf("when = %#v, want 2026-04-13T10:00:00Z", dst.When)
+		}
+		if dst.Token == nil || *dst.Token != token {
+			t.Fatalf("token = %#v, want %v", dst.Token, token)
+		}
+	})
+
+	t.Run("duration pointer uses parse duration semantics", func(t *testing.T) {
+		type request struct {
+			Wait *time.Duration `query:"wait"`
+		}
+
+		existing := 3 * time.Second
+		dst := request{Wait: &existing}
+
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?wait=5", nil), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if dst.Wait == nil || *dst.Wait != 3*time.Second {
+			t.Fatalf("dst = %#v, want unchanged duration pointer", dst)
+		}
 	})
 
 	t.Run("unsigned and float leaf types bind and reject invalid input", func(t *testing.T) {
@@ -315,6 +385,20 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("unknown query keys are ignored", func(t *testing.T) {
+		type request struct {
+			Name string `query:"name"`
+		}
+
+		dst := request{Name: "stale"}
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?extra=1", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst != (request{}) {
+			t.Fatalf("dst = %#v, want zero value struct", dst)
+		}
+	})
+
 	t.Run("invalid tags and empty inline plans are usage errors", func(t *testing.T) {
 		type emptyTag struct {
 			Name string `query:""`
@@ -358,6 +442,20 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		dst := request{Page: 9}
 		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?page=7", nil), &dst))
 		if dst != (request{Page: 9}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("later client input errors do not commit earlier successful field writes", func(t *testing.T) {
+		type request struct {
+			Name  string `query:"name"`
+			Count int    `query:"count"`
+		}
+
+		dst := request{Name: "existing", Count: 9}
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata&count=bad", nil), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if dst != (request{Name: "existing", Count: 9}) {
 			t.Fatalf("dst = %#v, want unchanged", dst)
 		}
 	})
@@ -415,6 +513,22 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("query dash fields do not participate in duplicate detection", func(t *testing.T) {
+		type request struct {
+			Name    string `query:"name"`
+			Ignored string `query:"-"`
+			Alias   string `query:"alias"`
+		}
+
+		var dst request
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata&alias=friend", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst != (request{Name: "kanata", Alias: "friend"}) {
+			t.Fatalf("dst = %#v, want bound non-dash fields only", dst)
+		}
+	})
+
 	t.Run("query keys match parsed names exactly", func(t *testing.T) {
 		type request struct {
 			Upper string `query:"Name"`
@@ -443,6 +557,22 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata", nil), &dst)
 		assertNotHTTPError(t, err)
 		if dst != (request{Name: "existing", Alias: "keep"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("inline pointer conflicts are rejected regardless of runtime nil state", func(t *testing.T) {
+		type filters struct {
+			Page int `query:"page"`
+		}
+		type request struct {
+			Page    int      `query:"page"`
+			Filters *filters `query:",inline"`
+		}
+
+		var dst request
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?page=7", nil), &dst))
+		if dst != (request{}) {
 			t.Fatalf("dst = %#v, want unchanged", dst)
 		}
 	})
