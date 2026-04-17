@@ -148,6 +148,18 @@ func TestBindQuery_Contracts(t *testing.T) {
 		}
 	})
 
+	t.Run("map target raw query parse failure is bad request and preserves target", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.URL.RawQuery = "%"
+		dst := map[string]string{"stale": "value"}
+
+		err := BindQuery(req, &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if !reflect.DeepEqual(dst, map[string]string{"stale": "value"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
 	t.Run("unsupported map target is usage error and preserves target", func(t *testing.T) {
 		dst := map[string]int{"stale": 9}
 
