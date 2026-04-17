@@ -88,9 +88,10 @@ func firstHTTPErrorCandidate(err error) *errx.HTTPError {
 	}
 
 	if httpErr, ok := err.(*errx.HTTPError); ok {
-		if httpErr != nil {
-			return httpErr
+		if httpErr == nil {
+			return nil
 		}
+		return httpErr
 	} else if asErr, ok := err.(interface{ As(any) bool }); ok {
 		var httpErr *errx.HTTPError
 		if asErr.As(&httpErr) && httpErr != nil {

@@ -1,8 +1,8 @@
 # hah Path 设计方案
 
 - 状态：Locked
-- 版本：v3
-- 锁定日期：2026-04-17
+- 版本：v5
+- 锁定日期：2026-04-18
 - 适用范围：
   - `hah.Path(...)`
   - `reqx.Path(...)`
@@ -54,9 +54,11 @@
 `Path(...)` 对“参数是否存在”的规则固定为：
 
 - 当 `request.PathValue(name) != ""` 时，参数视为存在
-- 当 `request.PathValue(name) == ""` 时，只有 `request.Pattern` 是标准库 `net/http` `ServeMux` 合法 pattern，且其中声明了同名命名 wildcard，该参数才视为存在
-- 只认标准库语义中的 `{name}` 与 `{name...}`
-- `{$}`、malformed pattern、adapter-specific pattern（例如 `{id:[0-9]+}`）都不在默认契约内
+- 当 `request.PathValue(name) == ""` 时，若 `request.Pattern` 是纯 path pattern，或标准库 `net/http` `ServeMux` 的 method-qualified pattern，且其中声明了同名命名 wildcard，该参数才视为存在
+- 只认 path segment 级别的 `{name}` 与 `{name...}`
+- method-qualified pattern 只在 `<METHOD><space-or-tab> + pure path pattern` 这一默认契约内支持
+- host-qualified、`{$}`、malformed pattern、adapter-specific pattern（例如 `{id:[0-9]+}`）都不在默认契约内
+- `Path(...)` 不负责完整解析或校验通用 `ServeMux` pattern，只在默认契约内做最小 presence 判定
 - bridge 若手工写入 `PathValue`，必须先自行完成解码、归一化和 pattern 对齐；`Path(...)` 不做二次 unescape 或额外归一化
 
 ### 2.3 支持类型表
@@ -203,28 +205,14 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 - 空参数名
 - 零值 builder 与零值 typed builder 直接使用
 - usage error 只要求 `err != nil` 且不是 `*errx.HTTPError`
+- 与 `Query(...)` 共享的 typed-builder 通用契约，沿用 `docs/query-design.md` 已锁定的最小黑盒基线；`Path(...)` 只需额外锁住 path source / presence 差异与代表性类型入口
 - 缺失 optional 返回各类型零值
-- 未声明 `Required()` 且参数缺失时，不执行 built-in constraint 或 `Check(...)`
-- `Required()` 缺失时返回单个 `required` violation
-- 重复 `Required()` 幂等
-- `Default(...)` 与 `Required()` 互斥
-- 重复 `Default(...)` 以后一次为准
-- default 值仍然经过后续校验
-- 非法 default 值会返回 usage error
-- `Check(nil)` usage error
-- `OneOf(...)`、`Match(...)`、`Check(...)` 的顺序与短路语义
-- usage error 的 sticky 语义
-- `Get()` 的执行顺序与错误优先级固定
-- `OneOf()` 空参数 usage error
-- `Match(nil)` usage error
-- `Match(...)` 的匹配语义等同于 `Regexp.MatchString`
-- `String().MinLen()` / `MaxLen()` 的成功、失败、冲突路径
-- 数值类型 `Min()` / `Max()` 的成功、失败、冲突路径
 - `UUID()` 的代表性成功 / 失败路径
 - 声明过的空 wildcard 会被视为存在
-- 标准库合法 `Pattern` 中的 `{name}` / `{name...}` 会参与空字符串存在性判定
-- blank pattern、无 wildcard、不同 wildcard 名、`{id:[0-9]+}`、`{$}`、malformed pattern 都不会把空字符串视为存在
+- 纯 path `Pattern` 与标准 method-qualified `Pattern` 中的 `{name}` / `{name...}` 会参与空字符串存在性判定
+- blank pattern、无 wildcard、不同 wildcard 名、host-qualified、`{id:[0-9]+}`、`{$}`、malformed pattern 都不会把空字符串视为存在
 - 标准库 `ServeMux` 命中的请求里，typed builder 看到的值与 `request.PathValue(name)` 一致
+- 标准库 `ServeMux` method-qualified 路由命中的请求里，空 wildcard 的存在性判定与 `request.Pattern` 保持一致
 - bridge 手工填充的 `PathValue` 会被原样消费，不会再做二次 unescape 或额外归一化
 - 空字符串只有 `String()` 接受，其他类型按解析失败处理
 - 客户端输入错误返回稳定 `422 invalid_request`

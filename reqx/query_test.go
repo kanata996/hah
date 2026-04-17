@@ -291,14 +291,76 @@ func TestQueryStringAndMultiValueContracts(t *testing.T) {
 		}
 	})
 
-	t.Run("string usage errors stay ordinary errors", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "mode").String().
-			OneOf().
-			Match(nil).
-			MaxLen(-1).
-			Check(nil).
-			Get()
-		assertNotHTTPError(t, err)
+	t.Run("string accepts explicit empty value and required treats it as present", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?mode=", nil)
+
+		got, err := Query(req, "mode").String().Required().Get()
+		if err != nil {
+			t.Fatalf("String().Required().Get() error = %v", err)
+		}
+		if got != "" {
+			t.Fatalf("mode = %q, want empty string", got)
+		}
+	})
+
+	t.Run("string invalid configurations are usage errors", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			build func(*StringParam) *StringParam
+		}{
+			{
+				name: "one of requires candidates",
+				build: func(p *StringParam) *StringParam {
+					return p.OneOf()
+				},
+			},
+			{
+				name: "match rejects nil regexp",
+				build: func(p *StringParam) *StringParam {
+					return p.Match(nil)
+				},
+			},
+			{
+				name: "check rejects nil function",
+				build: func(p *StringParam) *StringParam {
+					return p.Check(nil)
+				},
+			},
+			{
+				name: "min len rejects negative numbers",
+				build: func(p *StringParam) *StringParam {
+					return p.MinLen(-1)
+				},
+			},
+			{
+				name: "max len rejects negative numbers",
+				build: func(p *StringParam) *StringParam {
+					return p.MaxLen(-1)
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := tc.build(Query(httptest.NewRequest(http.MethodGet, "/items", nil), "mode").String()).Get()
+				assertNotHTTPError(t, err)
+			})
+		}
+	})
+
+	t.Run("min len and max len count utf8 runes", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?mode=%E4%BD%A0", nil)
+
+		got, err := Query(req, "mode").String().MaxLen(1).Get()
+		if err != nil {
+			t.Fatalf("String().MaxLen(1).Get() error = %v", err)
+		}
+		if got != "你" {
+			t.Fatalf("mode = %q, want 你", got)
+		}
+
+		_, err = Query(req, "mode").String().MinLen(2).Get()
+		assertInvalidViolationAt(t, err, "mode", errx.InQuery)
 	})
 
 	t.Run("values required and check are enforced", func(t *testing.T) {
@@ -551,6 +613,82 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 	})
 }
 
+func TestQueryBuilder_NamedConstraintOverrideContracts(t *testing.T) {
+	t.Run("later min replaces earlier min", func(t *testing.T) {
+		order := []string{}
+
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=2", nil), "page").Int().
+			Min(3).
+			Check(func(int) error {
+				order = append(order, "between")
+				return nil
+			}).
+			Min(1).
+			Check(func(int) error {
+				order = append(order, "after")
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got != 2 {
+			t.Fatalf("page = %d, want 2", got)
+		}
+		if !reflect.DeepEqual(order, []string{"between", "after"}) {
+			t.Fatalf("order = %#v, want []string{\"between\", \"after\"}", order)
+		}
+	})
+
+	t.Run("later max len keeps its last declaration position", func(t *testing.T) {
+		order := []string{}
+
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?mode=go", nil), "mode").String().
+			MaxLen(2).
+			Check(func(string) error {
+				order = append(order, "between")
+				return nil
+			}).
+			MaxLen(1).
+			Check(func(string) error {
+				order = append(order, "after")
+				return nil
+			}).
+			Get()
+		assertInvalidViolationAt(t, err, "mode", errx.InQuery)
+		if !reflect.DeepEqual(order, []string{"between"}) {
+			t.Fatalf("order = %#v, want []string{\"between\"}", order)
+		}
+	})
+
+	t.Run("later after replaces earlier after", func(t *testing.T) {
+		boundary := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+		order := []string{}
+
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?at=2026-04-13T10:30:00Z", nil), "at").Time().
+			After(boundary.Add(time.Hour)).
+			Check(func(time.Time) error {
+				order = append(order, "between")
+				return nil
+			}).
+			After(boundary).
+			Check(func(time.Time) error {
+				order = append(order, "after")
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got.UTC().Format(time.RFC3339) != "2026-04-13T10:30:00Z" {
+			t.Fatalf("time = %q, want 2026-04-13T10:30:00Z", got.UTC().Format(time.RFC3339))
+		}
+		if !reflect.DeepEqual(order, []string{"between", "after"}) {
+			t.Fatalf("order = %#v, want []string{\"between\", \"after\"}", order)
+		}
+	})
+}
+
 func TestQueryTimeParam_EqualBoundariesAreRejected(t *testing.T) {
 	boundary := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
 
@@ -605,21 +743,18 @@ func TestQueryTimeParam_EqualAfterBeforeIsUsageError(t *testing.T) {
 	testCases := []struct {
 		name  string
 		build func(*TimeParam) *TimeParam
-		want  string
 	}{
 		{
 			name: "after configured last",
 			build: func(p *TimeParam) *TimeParam {
 				return p.Before(boundary).After(boundary)
 			},
-			want: "reqx: after time must be earlier than before time",
 		},
 		{
 			name: "before configured last",
 			build: func(p *TimeParam) *TimeParam {
 				return p.After(boundary).Before(boundary)
 			},
-			want: "reqx: before time must be later than after time",
 		},
 	}
 
@@ -627,9 +762,6 @@ func TestQueryTimeParam_EqualAfterBeforeIsUsageError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tc.build(Query(httptest.NewRequest(http.MethodGet, "/items", nil), "at").Time()).Get()
 			assertNotHTTPError(t, err)
-			if got := err.Error(); got != tc.want {
-				t.Fatalf("error = %q, want %q", got, tc.want)
-			}
 		})
 	}
 }
@@ -694,5 +826,28 @@ func TestQueryValues_ReReadsCurrentRequest(t *testing.T) {
 	}
 	if !reflect.DeepEqual(again, []string{"c", "d"}) {
 		t.Fatalf("values second = %#v, want []string{\"c\", \"d\"}", again)
+	}
+}
+
+func TestQueryTypedBuilder_ReReadsCurrentRequest(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/items?page=1", nil)
+	builder := Query(req, "page").Int()
+
+	got, err := builder.Get()
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got != 1 {
+		t.Fatalf("page = %d, want 1", got)
+	}
+
+	req.URL.RawQuery = "page=2"
+
+	again, err := builder.Get()
+	if err != nil {
+		t.Fatalf("Get() second error = %v", err)
+	}
+	if again != 2 {
+		t.Fatalf("page second = %d, want 2", again)
 	}
 }

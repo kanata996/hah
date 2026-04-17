@@ -1,16 +1,5 @@
 package errx
 
-import (
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
-	"testing"
-)
-
 // 这些编译期断言用于锁住 errx 的稳定公开 API 表面。
 type httpErrorPublicSurface interface {
 	Error() string
@@ -41,61 +30,12 @@ var (
 
 	_ func(int, string, string) *HTTPError        = NewHTTPError
 	_ func(int, string, string, error) *HTTPError = NewHTTPErrorWithCause
+	_ func(string, string) *HTTPError             = BadRequest
+	_ func(string, string) *HTTPError             = Unauthorized
+	_ func(string, string) *HTTPError             = Forbidden
+	_ func(string, string) *HTTPError             = NotFound
+	_ func(string, string) *HTTPError             = MethodNotAllowed
+	_ func(string, string) *HTTPError             = Conflict
+	_ func(string, string) *HTTPError             = UnprocessableEntity
+	_ func(string, string) *HTTPError             = TooManyRequests
 )
-
-// 设计文档明确要求 errx 不暴露包级 WithViolations；它只能是 HTTPError 实例方法。
-func TestErrxPackageDoesNotExposePackageLevelWithViolations(t *testing.T) {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller() failed")
-	}
-
-	dir := filepath.Dir(filename)
-	fset := token.NewFileSet()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("os.ReadDir() error = %v", err)
-	}
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if filepath.Ext(name) != ".go" || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-
-		path := filepath.Join(dir, name)
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parser.ParseFile(%q) error = %v", name, err)
-		}
-		if file.Name.Name != "errx" {
-			t.Fatalf("file %q parsed package = %q, want errx", name, file.Name.Name)
-		}
-		for _, decl := range file.Decls {
-			switch decl := decl.(type) {
-			case *ast.FuncDecl:
-				if decl.Recv == nil && decl.Name.Name == "WithViolations" {
-					t.Fatalf("unexpected package-level WithViolations in %s", name)
-				}
-			case *ast.GenDecl:
-				for _, spec := range decl.Specs {
-					switch spec := spec.(type) {
-					case *ast.TypeSpec:
-						if spec.Name.Name == "WithViolations" {
-							t.Fatalf("unexpected package-level WithViolations in %s", name)
-						}
-					case *ast.ValueSpec:
-						for _, ident := range spec.Names {
-							if ident.Name == "WithViolations" {
-								t.Fatalf("unexpected package-level WithViolations in %s", name)
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-}

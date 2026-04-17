@@ -3,6 +3,7 @@ package reqx
 import (
 	"net/http"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/kanata996/hah/errx"
@@ -76,28 +77,127 @@ func pathHasWildcard(pattern, name string) bool {
 		return false
 	}
 
-	for i := 0; i < len(pattern); i++ {
-		if pattern[i] != '{' {
+	pattern, ok := pathPatternPart(pattern)
+	if !ok {
+		return false
+	}
+
+	matched := false
+	seen := make(map[string]struct{})
+	segments := strings.Split(pattern, "/")
+	for i, segment := range segments {
+		if segment == "" {
+			continue
+		}
+		if !strings.ContainsAny(segment, "{}") {
 			continue
 		}
 
-		end := strings.IndexByte(pattern[i+1:], '}')
-		if end < 0 {
-			break
+		wildcard, catchAll, ok := parsePathWildcard(segment)
+		if !ok {
+			return false
 		}
-
-		token := strings.TrimSpace(pattern[i+1 : i+1+end])
-		token = strings.TrimSuffix(token, "...")
-		token = strings.TrimSpace(token)
-		if token == "$" {
-			token = ""
+		if catchAll && i != len(segments)-1 {
+			return false
 		}
-		if token == name {
-			return true
+		if _, exists := seen[wildcard]; exists {
+			return false
 		}
-
-		i += end + 1
+		seen[wildcard] = struct{}{}
+		if wildcard == name {
+			matched = true
+		}
 	}
 
-	return false
+	return matched
+}
+
+func pathPatternPart(pattern string) (string, bool) {
+	if pattern == "" {
+		return "", false
+	}
+	if pattern[0] == '/' {
+		return pattern, !strings.ContainsAny(pattern, " \t")
+	}
+
+	split := strings.IndexAny(pattern, " \t")
+	if split < 0 {
+		return "", false
+	}
+	method := pattern[:split]
+	if !isValidPathPatternMethod(method) {
+		return "", false
+	}
+
+	pattern = strings.TrimLeft(pattern[split+1:], " \t")
+	if pattern == "" || pattern[0] != '/' || strings.ContainsAny(pattern, " \t") {
+		return "", false
+	}
+	return pattern, true
+}
+
+func parsePathWildcard(segment string) (name string, catchAll bool, ok bool) {
+	if len(segment) < 3 || segment[0] != '{' || segment[len(segment)-1] != '}' {
+		return "", false, false
+	}
+
+	token := segment[1 : len(segment)-1]
+	if token == "" || token == "$" {
+		return "", false, false
+	}
+	if strings.HasSuffix(token, "...") {
+		catchAll = true
+		token = strings.TrimSuffix(token, "...")
+	}
+	if !isValidPathWildcardName(token) {
+		return "", false, false
+	}
+
+	return token, catchAll, true
+}
+
+func isValidPathWildcardName(name string) bool {
+	for i, r := range name {
+		if i == 0 {
+			if r != '_' && !unicode.IsLetter(r) {
+				return false
+			}
+			continue
+		}
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidPathPatternMethod(method string) bool {
+	if method == "" {
+		return false
+	}
+	for i := 0; i < len(method); i++ {
+		if !isPathPatternMethodByte(method[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isPathPatternMethodByte(b byte) bool {
+	if '0' <= b && b <= '9' {
+		return true
+	}
+	if 'A' <= b && b <= 'Z' {
+		return true
+	}
+	if 'a' <= b && b <= 'z' {
+		return true
+	}
+
+	switch b {
+	case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+		return true
+	default:
+		return false
+	}
 }

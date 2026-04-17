@@ -2,7 +2,6 @@ package reqx
 
 import (
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -11,19 +10,6 @@ import (
 
 	"github.com/kanata996/hah/errx"
 )
-
-type eofReadCloser struct {
-	reads int
-}
-
-func (r *eofReadCloser) Read(_ []byte) (int, error) {
-	r.reads++
-	return 0, io.EOF
-}
-
-func (r *eofReadCloser) Close() error {
-	return nil
-}
 
 func newJSONRequest(method, target, body string) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))

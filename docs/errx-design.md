@@ -1,8 +1,8 @@
 # hah errx 设计方案
 
 - 状态：Locked
-- 版本：v2
-- 锁定日期：2026-04-17
+- 版本：v3
+- 锁定日期：2026-04-18
 - 适用范围：
   - `errx`
   - `reqx` 对 `errx` 的错误生产依赖
@@ -52,6 +52,14 @@
 - `ViolationIn`
 - `NewHTTPError(status int, code, detail string) *HTTPError`
 - `NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPError`
+- `BadRequest(code, detail string) *HTTPError`
+- `Unauthorized(code, detail string) *HTTPError`
+- `Forbidden(code, detail string) *HTTPError`
+- `NotFound(code, detail string) *HTTPError`
+- `MethodNotAllowed(code, detail string) *HTTPError`
+- `Conflict(code, detail string) *HTTPError`
+- `UnprocessableEntity(code, detail string) *HTTPError`
+- `TooManyRequests(code, detail string) *HTTPError`
 
 两种构造器的公共字段标准化必须完全一致，差别只在是否保留 `cause`。
 
@@ -87,15 +95,19 @@
 
 ## 3. `HTTPError` 公开语义
 
-### 3.1 标准化顺序
+### 3.1 公开结果
 
-标准化顺序固定为：
+`HTTPError` 的公开契约只锁定：
 
-1. 先确定最终公开状态码
-2. 再根据最终状态码计算 `title`
-3. 再根据最终状态码和调用输入计算 `code`
-4. 再根据最终状态码和调用输入计算 `detail`
-5. 最后绑定 `violations` 与 `cause`
+- `Status()`
+- `Code()`
+- `Title()`
+- `Detail()`
+- `Error()`
+- `Unwrap()`
+- `Errors()`
+
+对外不锁定内部标准化步骤、计算顺序或字段存储方式。
 
 ### 3.2 状态码
 
@@ -189,12 +201,8 @@
 - `Code`
 - `Detail`
 
-若由 `resp` 直接序列化 `Violation`，稳定 JSON 字段名固定为：
-
-- `field`
-- `in`
-- `code`
-- `detail`
+`errx` 只定义 `Violation` 的公开字段和值承载语义；
+若这些字段被写入 Problem JSON，由 `resp` 契约定义输出字段与包络。
 
 `errx` 对 `Violation` 只做承载，不负责：
 
@@ -229,9 +237,9 @@
 
 - `HTTPError`、`Violation`、`ViolationCode`、`ViolationIn` 类型存在
 - 两个构造器存在
+- 八个快捷构造器存在
 - `HTTPError` 的八个公开方法存在
 - 全部 `Code*` / `In*` 常量存在
-- 不存在包级 `WithViolations(...)`
 - 非错误状态码统一回落到 `500`
 - `499` 原样保留
 - 默认 `title` 规则与表格一致
@@ -254,5 +262,4 @@
 - 输入顺序保持不变
 - 重复项被原样保留
 - `WithViolations(...)` 不会重写单个 violation 的字段
-- `Violation` 通过 `resp` 写成 JSON 时字段名稳定为 `field` / `in` / `code` / `detail`
 - 零值 `HTTPError` 的全部 getter 与 `Error()` 语义

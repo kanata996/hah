@@ -15,9 +15,9 @@
 //   - 大多数 handler 也可以直接使用根包 hah 暴露的对应 facade
 //
 // 公开 API：
-//   - 公开类型：HTTPError、Violation
+//   - 公开类型：HTTPError、Violation、ViolationCode、ViolationIn
 //   - HTTPError 公开方法：Error、Unwrap、Status、Code、Title、Detail、Errors、WithViolations
-//   - 公开错误构造：NewHTTPError、NewHTTPErrorWithCause、WithViolations
+//   - 公开错误构造：NewHTTPError、NewHTTPErrorWithCause
 //   - 公开状态快捷构造：BadRequest、Unauthorized、Forbidden、NotFound、
 //     MethodNotAllowed、Conflict、UnprocessableEntity、TooManyRequests
 //   - 公开 violation code 常量：CodeInvalid、CodeRequired、

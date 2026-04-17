@@ -33,18 +33,27 @@ func BindQuery(r *http.Request, target any) error {
 		return err
 	}
 
-	source, err := parseQuerySource(r)
-	if err != nil {
-		return err
-	}
-
 	dst := reflect.ValueOf(target).Elem()
 	switch dst.Kind() {
 	case reflect.Struct:
-		return bindQueryIntoStruct(dst, source)
+		plans, err := buildBindQueryPlan(dst.Type(), nil, map[string]struct{}{})
+		if err != nil {
+			return err
+		}
+
+		source, err := parseQuerySource(r)
+		if err != nil {
+			return err
+		}
+		return bindQueryIntoStruct(dst, source, plans)
 	case reflect.Map:
 		if dst.Type() != queryStringStringMapType {
 			return usageErrorf("destination must point to struct or supported map")
+		}
+
+		source, err := parseQuerySource(r)
+		if err != nil {
+			return err
 		}
 		return bindQueryIntoMap(dst, source)
 	default:
@@ -83,12 +92,7 @@ func bindQueryIntoMap(dst reflect.Value, source url.Values) error {
 	return nil
 }
 
-func bindQueryIntoStruct(dst reflect.Value, source url.Values) error {
-	plans, err := buildBindQueryPlan(dst.Type(), nil, map[string]struct{}{})
-	if err != nil {
-		return err
-	}
-
+func bindQueryIntoStruct(dst reflect.Value, source url.Values, plans []bindQueryFieldPlan) error {
 	for _, values := range source {
 		if len(values) > 1 {
 			return errx.NewHTTPError(http.StatusBadRequest, "bad_request", "Bad Request")

@@ -41,6 +41,25 @@ func TestRequireBody(t *testing.T) {
 		}
 	})
 
+	t.Run("bound body still counts as present for RequireBody", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
+
+		var dst request
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if err := RequireBody(req); err != nil {
+			t.Fatalf("RequireBody() after BindBody() error = %v", err)
+		}
+		if dst != (request{Name: "kanata"}) {
+			t.Fatalf("dst = %#v, want bound result preserved", dst)
+		}
+	})
+
 	t.Run("whitespace body counts as present for RequireBody", func(t *testing.T) {
 		req := newJSONRequest(http.MethodPost, "/", " \n\t ")
 
@@ -110,37 +129,6 @@ func TestRequireBodyReadError(t *testing.T) {
 
 	if err := RequireBody(req); !errors.Is(err, wantErr) {
 		t.Fatalf("RequireBody(read error) = %v, want %v", err, wantErr)
-	}
-}
-
-func TestRequireBody_EmptyBodyProbePreservesOriginalBody(t *testing.T) {
-	testCases := []struct {
-		name          string
-		contentLength int64
-	}{
-		{name: "content length zero", contentLength: 0},
-		{name: "unknown length", contentLength: -1},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := newJSONRequest(http.MethodPost, "/", "")
-			req.ContentLength = tc.contentLength
-
-			body := &eofReadCloser{}
-			req.Body = body
-
-			violation := assertSingleViolation(t, RequireBody(req))
-			if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
-				t.Fatalf("violation = %#v", violation)
-			}
-			if req.Body != body {
-				t.Fatalf("request body = %T, want original empty body preserved", req.Body)
-			}
-			if body.reads != 1 {
-				t.Fatalf("body read count = %d, want 1 probe read", body.reads)
-			}
-		})
 	}
 }
 

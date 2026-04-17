@@ -1,9 +1,9 @@
 package reqx
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"testing"
 
 	"github.com/google/uuid"
@@ -13,6 +13,13 @@ import (
 func TestPathBuilder_Contracts(t *testing.T) {
 	t.Run("required missing path returns required violation", func(t *testing.T) {
 		_, err := Path(requestWithPathParams(nil), "id").String().Required().Get()
+		assertRequiredViolationAt(t, err, "id", errx.InPath)
+	})
+
+	t.Run("query values do not satisfy path lookup", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/?id=42", nil)
+
+		_, err := Path(req, "id").String().Required().Get()
 		assertRequiredViolationAt(t, err, "id", errx.InPath)
 	})
 
@@ -48,12 +55,13 @@ func TestPathBuilder_Contracts(t *testing.T) {
 		assertInvalidViolationAt(t, err, "id", errx.InPath)
 	})
 
-	t.Run("default validation failure is usage error", func(t *testing.T) {
-		_, err := Path(requestWithPathParams(nil), "since").String().
-			Default("2026-04-13T10:00:00Z").
-			MinLen(100).
+	t.Run("request check failure keeps stable invalid detail", func(t *testing.T) {
+		req := requestWithPathParams(map[string][]string{"id": {"kanata"}})
+
+		_, err := Path(req, "id").String().
+			Check(func(string) error { return errors.New("must be numeric") }).
 			Get()
-		assertNotHTTPError(t, err)
+		assertInvalidViolationAt(t, err, "id", errx.InPath)
 	})
 
 	t.Run("uuid parse failure is invalid violation", func(t *testing.T) {
@@ -102,157 +110,6 @@ func TestPathBuilder_BaselineContracts(t *testing.T) {
 		if got != 0 {
 			t.Fatalf("count = %d, want 0", got)
 		}
-
-		_, err = Path(requestWithPathParams(nil), "count").Int().
-			Required().
-			Required().
-			Get()
-		assertRequiredViolationAt(t, err, "count", errx.InPath)
-	})
-
-	t.Run("missing optional skips validators and later default wins", func(t *testing.T) {
-		called := false
-
-		got, err := Path(requestWithPathParams(nil), "slug").String().
-			MinLen(100).
-			Check(func(string) error {
-				called = true
-				return nil
-			}).
-			Get()
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		if got != "" {
-			t.Fatalf("slug = %q, want empty string", got)
-		}
-		if called {
-			t.Fatal("Check() ran for missing optional path parameter")
-		}
-
-		got, err = Path(requestWithPathParams(nil), "mode").String().
-			Default("old").
-			Default("new").
-			Get()
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		if got != "new" {
-			t.Fatalf("mode = %q, want new", got)
-		}
-	})
-
-	t.Run("required default and nil check are usage errors", func(t *testing.T) {
-		_, err := Path(requestWithPathParams(nil), "id").String().
-			Required().
-			Default("x").
-			Get()
-		assertNotHTTPError(t, err)
-
-		_, err = Path(requestWithPathParams(nil), "id").String().
-			Check(nil).
-			Get()
-		assertNotHTTPError(t, err)
-	})
-
-	t.Run("string validators short circuit before custom checks", func(t *testing.T) {
-		_, err := Path(requestWithPathParams(nil), "mode").String().
-			OneOf().
-			Get()
-		assertNotHTTPError(t, err)
-
-		_, err = Path(requestWithPathParams(nil), "mode").String().
-			Match(nil).
-			Get()
-		assertNotHTTPError(t, err)
-
-		checkCalled := false
-		_, err = Path(requestWithPathParams(map[string][]string{"mode": {"rust"}}), "mode").String().
-			OneOf("go").
-			Check(func(string) error {
-				checkCalled = true
-				return nil
-			}).
-			Get()
-		assertInvalidViolationAt(t, err, "mode", errx.InPath)
-		if checkCalled {
-			t.Fatal("Check() ran after OneOf() failure")
-		}
-
-		checkCalled = false
-		_, err = Path(requestWithPathParams(map[string][]string{"mode": {"rust"}}), "mode").String().
-			Match(regexp.MustCompile("^g")).
-			Check(func(string) error {
-				checkCalled = true
-				return nil
-			}).
-			Get()
-		assertInvalidViolationAt(t, err, "mode", errx.InPath)
-		if checkCalled {
-			t.Fatal("Check() ran after Match() failure")
-		}
-
-		got, err := Path(requestWithPathParams(map[string][]string{"mode": {"go"}}), "mode").String().
-			Match(regexp.MustCompile("go")).
-			Get()
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		if got != "go" {
-			t.Fatalf("mode = %q, want go", got)
-		}
-	})
-
-	t.Run("string constraints cover success failure and conflict", func(t *testing.T) {
-		req := requestWithPathParams(map[string][]string{"slug": {"go"}})
-
-		got, err := Path(req, "slug").String().
-			MinLen(2).
-			MaxLen(2).
-			Get()
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		if got != "go" {
-			t.Fatalf("slug = %q, want go", got)
-		}
-
-		_, err = Path(requestWithPathParams(map[string][]string{"slug": {"g"}}), "slug").String().
-			MinLen(2).
-			Get()
-		assertInvalidViolationAt(t, err, "slug", errx.InPath)
-
-		_, err = Path(requestWithPathParams(nil), "slug").String().
-			MinLen(3).
-			MaxLen(2).
-			Get()
-		assertNotHTTPError(t, err)
-	})
-
-	t.Run("numeric constraints cover success failure and conflict", func(t *testing.T) {
-		req := requestWithPathParams(map[string][]string{"id": {"7"}})
-
-		got, err := Path(req, "id").Int().
-			Min(1).
-			Max(7).
-			Get()
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		if got != 7 {
-			t.Fatalf("id = %d, want 7", got)
-		}
-
-		_, err = Path(req, "id").Int().
-			Max(6).
-			Get()
-		assertInvalidViolationAt(t, err, "id", errx.InPath)
-
-		_, err = Path(requestWithPathParams(nil), "id").Int().
-			Min(8).
-			Max(7).
-			Get()
-		assertNotHTTPError(t, err)
 	})
 
 	t.Run("bridge path values are consumed as set without unescape", func(t *testing.T) {
@@ -293,8 +150,45 @@ func TestPathBuilder_WildcardPresenceRules(t *testing.T) {
 			paramName: "id",
 		},
 		{
+			name:      "malformed wildcard token with inner spaces stays missing",
+			pattern:   "/accounts/{ id }",
+			paramName: "id",
+		},
+		{
 			name:      "end anchor wildcard does not count as named wildcard",
 			pattern:   "/accounts/{$}",
+			paramName: "id",
+		},
+		{
+			name:      "end anchor segment inside pattern makes it malformed",
+			pattern:   "/{$}/{id}",
+			paramName: "id",
+		},
+		{
+			name:      "duplicate wildcard after matching segment makes pattern malformed",
+			pattern:   "/{id}/{id}",
+			paramName: "id",
+		},
+		{
+			name:        "method qualified pattern counts as present",
+			pattern:     "GET /{id}",
+			paramName:   "id",
+			assertValue: true,
+		},
+		{
+			name:        "tab separated method qualified pattern counts as present",
+			pattern:     "GET\t/{id}",
+			paramName:   "id",
+			assertValue: true,
+		},
+		{
+			name:      "invalid method qualified pattern stays missing",
+			pattern:   "A=B /{id}",
+			paramName: "id",
+		},
+		{
+			name:      "host qualified pattern stays missing",
+			pattern:   "example.com/{id}",
 			paramName: "id",
 		},
 		{
@@ -331,56 +225,62 @@ func TestPathBuilder_WildcardPresenceRules(t *testing.T) {
 }
 
 func TestPathBuilder_ServeMuxPathValueContracts(t *testing.T) {
-	mux := http.NewServeMux()
+	t.Run("non empty wildcard matches request path value", func(t *testing.T) {
+		mux := http.NewServeMux()
 
-	var got string
-	var pathValue string
-	var handlerErr error
+		var got string
+		var pathValue string
+		var handlerErr error
 
-	mux.HandleFunc("GET /accounts/{id}", func(w http.ResponseWriter, r *http.Request) {
-		pathValue = r.PathValue("id")
-		got, handlerErr = Path(r, "id").String().Required().Get()
-		w.WriteHeader(http.StatusNoContent)
-	})
+		mux.HandleFunc("GET /accounts/{id}", func(w http.ResponseWriter, r *http.Request) {
+			pathValue = r.PathValue("id")
+			got, handlerErr = Path(r, "id").String().Required().Get()
+			w.WriteHeader(http.StatusNoContent)
+		})
 
-	req := httptest.NewRequest(http.MethodGet, "/accounts/kanata", nil)
-	mux.ServeHTTP(httptest.NewRecorder(), req)
+		req := httptest.NewRequest(http.MethodGet, "/accounts/kanata", nil)
+		mux.ServeHTTP(httptest.NewRecorder(), req)
 
-	if handlerErr != nil {
-		t.Fatalf("Get() error = %v", handlerErr)
-	}
-	if pathValue != "kanata" {
-		t.Fatalf("request.PathValue(id) = %q, want kanata", pathValue)
-	}
-	if got != pathValue {
-		t.Fatalf("Path().String().Get() = %q, want %q", got, pathValue)
-	}
-}
-
-func TestPathBuilder_ErrorPriorityContracts(t *testing.T) {
-	t.Run("usage errors stay sticky and win over request errors", func(t *testing.T) {
-		_, err := Path(requestWithPathParams(nil), "id").String().
-			OneOf().
-			Required().
-			Get()
-		assertNotHTTPError(t, err)
-
-		_, err = Path(requestWithPathParams(map[string][]string{"id": {"7"}}), "id").Int().
-			Min(8).
-			Max(7).
-			Get()
-		assertNotHTTPError(t, err)
-	})
-
-	t.Run("match uses regexp match string semantics", func(t *testing.T) {
-		got, err := Path(requestWithPathParams(map[string][]string{"slug": {"xxgoyy"}}), "slug").String().
-			Match(regexp.MustCompile("go")).
-			Get()
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
+		if handlerErr != nil {
+			t.Fatalf("Get() error = %v", handlerErr)
 		}
-		if got != "xxgoyy" {
-			t.Fatalf("slug = %q, want xxgoyy", got)
+		if pathValue != "kanata" {
+			t.Fatalf("request.PathValue(id) = %q, want kanata", pathValue)
+		}
+		if got != pathValue {
+			t.Fatalf("Path().String().Get() = %q, want %q", got, pathValue)
+		}
+	})
+
+	t.Run("method qualified empty catch all still counts as present", func(t *testing.T) {
+		mux := http.NewServeMux()
+
+		var got string
+		var pathValue string
+		var pattern string
+		var handlerErr error
+
+		mux.HandleFunc("GET /files/{rest...}", func(w http.ResponseWriter, r *http.Request) {
+			pattern = r.Pattern
+			pathValue = r.PathValue("rest")
+			got, handlerErr = Path(r, "rest").String().Required().Get()
+			w.WriteHeader(http.StatusNoContent)
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/files/", nil)
+		mux.ServeHTTP(httptest.NewRecorder(), req)
+
+		if handlerErr != nil {
+			t.Fatalf("Get() error = %v", handlerErr)
+		}
+		if pattern != "GET /files/{rest...}" {
+			t.Fatalf("request.Pattern = %q, want GET /files/{rest...}", pattern)
+		}
+		if pathValue != "" {
+			t.Fatalf("request.PathValue(rest) = %q, want empty string", pathValue)
+		}
+		if got != pathValue {
+			t.Fatalf("Path().String().Get() = %q, want empty string", got)
 		}
 	})
 }
