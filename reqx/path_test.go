@@ -293,6 +293,11 @@ func TestPathBuilder_WildcardPresenceRules(t *testing.T) {
 			paramName: "id",
 		},
 		{
+			name:      "malformed wildcard token with inner spaces stays missing",
+			pattern:   "/accounts/{ id }",
+			paramName: "id",
+		},
+		{
 			name:      "end anchor wildcard does not count as named wildcard",
 			pattern:   "/accounts/{$}",
 			paramName: "id",

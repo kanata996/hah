@@ -291,14 +291,76 @@ func TestQueryStringAndMultiValueContracts(t *testing.T) {
 		}
 	})
 
-	t.Run("string usage errors stay ordinary errors", func(t *testing.T) {
-		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "mode").String().
-			OneOf().
-			Match(nil).
-			MaxLen(-1).
-			Check(nil).
-			Get()
-		assertNotHTTPError(t, err)
+	t.Run("string accepts explicit empty value and required treats it as present", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?mode=", nil)
+
+		got, err := Query(req, "mode").String().Required().Get()
+		if err != nil {
+			t.Fatalf("String().Required().Get() error = %v", err)
+		}
+		if got != "" {
+			t.Fatalf("mode = %q, want empty string", got)
+		}
+	})
+
+	t.Run("string invalid configurations are usage errors", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			build func(*StringParam) *StringParam
+		}{
+			{
+				name: "one of requires candidates",
+				build: func(p *StringParam) *StringParam {
+					return p.OneOf()
+				},
+			},
+			{
+				name: "match rejects nil regexp",
+				build: func(p *StringParam) *StringParam {
+					return p.Match(nil)
+				},
+			},
+			{
+				name: "check rejects nil function",
+				build: func(p *StringParam) *StringParam {
+					return p.Check(nil)
+				},
+			},
+			{
+				name: "min len rejects negative numbers",
+				build: func(p *StringParam) *StringParam {
+					return p.MinLen(-1)
+				},
+			},
+			{
+				name: "max len rejects negative numbers",
+				build: func(p *StringParam) *StringParam {
+					return p.MaxLen(-1)
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := tc.build(Query(httptest.NewRequest(http.MethodGet, "/items", nil), "mode").String()).Get()
+				assertNotHTTPError(t, err)
+			})
+		}
+	})
+
+	t.Run("min len and max len count utf8 runes", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?mode=%E4%BD%A0", nil)
+
+		got, err := Query(req, "mode").String().MaxLen(1).Get()
+		if err != nil {
+			t.Fatalf("String().MaxLen(1).Get() error = %v", err)
+		}
+		if got != "你" {
+			t.Fatalf("mode = %q, want 你", got)
+		}
+
+		_, err = Query(req, "mode").String().MinLen(2).Get()
+		assertInvalidViolationAt(t, err, "mode", errx.InQuery)
 	})
 
 	t.Run("values required and check are enforced", func(t *testing.T) {

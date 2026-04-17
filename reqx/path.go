@@ -3,6 +3,7 @@ package reqx
 import (
 	"net/http"
 	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/kanata996/hah/errx"
@@ -76,28 +77,82 @@ func pathHasWildcard(pattern, name string) bool {
 		return false
 	}
 
-	for i := 0; i < len(pattern); i++ {
-		if pattern[i] != '{' {
+	path, ok := serveMuxPatternPath(pattern)
+	if !ok {
+		return false
+	}
+
+	seen := make(map[string]struct{})
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		if segment == "" || segment == "{$}" {
+			continue
+		}
+		if !strings.ContainsAny(segment, "{}") {
 			continue
 		}
 
-		end := strings.IndexByte(pattern[i+1:], '}')
-		if end < 0 {
-			break
+		wildcard, catchAll, ok := parseServeMuxWildcard(segment)
+		if !ok {
+			return false
 		}
-
-		token := strings.TrimSpace(pattern[i+1 : i+1+end])
-		token = strings.TrimSuffix(token, "...")
-		token = strings.TrimSpace(token)
-		if token == "$" {
-			token = ""
+		if catchAll && i != len(segments)-1 {
+			return false
 		}
-		if token == name {
+		if _, exists := seen[wildcard]; exists {
+			return false
+		}
+		seen[wildcard] = struct{}{}
+		if wildcard == name {
 			return true
 		}
-
-		i += end + 1
 	}
 
 	return false
+}
+
+func serveMuxPatternPath(pattern string) (string, bool) {
+	slash := strings.IndexByte(pattern, '/')
+	if slash < 0 {
+		return "", false
+	}
+	if strings.ContainsAny(pattern[:slash], "{}") {
+		return "", false
+	}
+	return pattern[slash:], true
+}
+
+func parseServeMuxWildcard(segment string) (name string, catchAll bool, ok bool) {
+	if len(segment) < 3 || segment[0] != '{' || segment[len(segment)-1] != '}' {
+		return "", false, false
+	}
+
+	token := segment[1 : len(segment)-1]
+	if token == "" || token == "$" {
+		return "", false, false
+	}
+	if strings.HasSuffix(token, "...") {
+		catchAll = true
+		token = strings.TrimSuffix(token, "...")
+	}
+	if !isValidServeMuxWildcardName(token) {
+		return "", false, false
+	}
+
+	return token, catchAll, true
+}
+
+func isValidServeMuxWildcardName(name string) bool {
+	for i, r := range name {
+		if i == 0 {
+			if r != '_' && !unicode.IsLetter(r) {
+				return false
+			}
+			continue
+		}
+		if r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
