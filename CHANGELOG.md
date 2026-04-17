@@ -13,6 +13,23 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.6.1] - 2026-04-18
+
+### Fixed
+
+- Tightened `reqx.BindBody(...)` target validation and error precedence so unsupported top-level custom decoders and unsupported field shapes are rejected as usage errors before body inspection, while supported struct-slice fields continue to decode normally.
+- Tightened `reqx.BindQuery(...)` planning so invalid targets and invalid query-tag shapes fail before malformed raw query parsing, keeping caller-owned destination state unchanged on usage errors.
+- Hardened `reqx.Path(...)` wildcard detection to honor only valid `net/http` ServeMux-style wildcards, including method-qualified patterns, while preventing query-string values from being treated as path parameters and keeping `Check(...)` failures mapped to stable invalid-request violations.
+- Guarded `resp.WriteError(...)` against typed-nil `*errx.HTTPError` candidates in wrapped error chains so nil HTTP error pointers no longer masquerade as concrete public problem responses.
+
+### Testing
+
+- Expanded regression and fuzz coverage across `reqx`, `errx`, and `resp`, including body/query binding priority rules, path wildcard parsing, and response error-writing edge cases.
+
+### Documentation
+
+- Refreshed the request and design docs around body binding, query binding, `errx`, and path-pattern handling to match the tightened public contracts in this release.
+
 ## [v0.6.0] - 2026-04-18
 
 ### Fixed
