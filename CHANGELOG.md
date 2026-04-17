@@ -13,6 +13,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.6.0] - 2026-04-17
+
 ### Fixed
 
 - Normalized typed-nil `error` values passed to `errx.NewHTTPErrorWithCause(...)` so they are treated as no cause, keeping `HTTPError.Error()` / `Unwrap()` / `errors.Is` / `errors.As` aligned with the public no-cause contract.
