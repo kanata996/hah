@@ -84,6 +84,9 @@ func validateBindBodyTarget(targetType reflect.Type) error {
 	if targetType.Kind() != reflect.Pointer || targetType.Elem().Kind() != reflect.Struct {
 		return usageErrorf("destination must point to struct")
 	}
+	if disallowedBindBodyDecoder(targetType.Elem()) {
+		return usageErrorf("unsupported body field type")
+	}
 	return validateBindBodyStructType(targetType.Elem())
 }
 
@@ -112,6 +115,10 @@ func validateBindBodyFieldType(t reflect.Type) error {
 		}
 	}
 
+	return validateBindBodyNonPointerType(base, true)
+}
+
+func validateBindBodyNonPointerType(base reflect.Type, allowSlice bool) error {
 	if base == bodyTimeType {
 		return nil
 	}
@@ -131,10 +138,20 @@ func validateBindBodyFieldType(t reflect.Type) error {
 	case reflect.Struct:
 		return validateBindBodyStructType(base)
 	case reflect.Slice:
-		return validateBindBodyFieldType(base.Elem())
+		if !allowSlice {
+			return usageErrorf("unsupported body field type")
+		}
+		return validateBindBodySliceElementType(base.Elem())
 	default:
 		return usageErrorf("unsupported body field type")
 	}
+}
+
+func validateBindBodySliceElementType(t reflect.Type) error {
+	if t.Kind() == reflect.Pointer {
+		return usageErrorf("unsupported body field type")
+	}
+	return validateBindBodyNonPointerType(t, false)
 }
 
 func disallowedBindBodyDecoder(t reflect.Type) bool {

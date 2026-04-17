@@ -17,12 +17,16 @@ type bindBodyNamedTags []string
 
 type bindBodyReadErrorCloser struct{ err error }
 type bindBodyUnsupportedJSONDecoder struct{}
+type bindBodyTopLevelJSONDecoder struct {
+	Name string `json:"name"`
+}
 
 func (r bindBodyReadErrorCloser) Read([]byte) (int, error) { return 0, r.err }
 func (r bindBodyReadErrorCloser) Close() error             { return nil }
 func (*bindBodyUnsupportedJSONDecoder) UnmarshalJSON([]byte) error {
 	return nil
 }
+func (*bindBodyTopLevelJSONDecoder) UnmarshalJSON([]byte) error { return nil }
 
 func TestBindBody_Contracts(t *testing.T) {
 	t.Run("zero byte body is noop and does not require json content type", func(t *testing.T) {
@@ -431,6 +435,16 @@ func TestBindBody_UsageAndBoundaryContracts(t *testing.T) {
 		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &unsupported))
 	})
 
+	t.Run("rejects top level custom decoder target", func(t *testing.T) {
+		dst := bindBodyTopLevelJSONDecoder{Name: "existing"}
+
+		err := BindBody(newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`), &dst)
+		assertNotHTTPError(t, err)
+		if dst != (bindBodyTopLevelJSONDecoder{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
 	t.Run("rejects unsupported body field families", func(t *testing.T) {
 		t.Run("pointer to pointer field", func(t *testing.T) {
 			type request struct {
@@ -451,6 +465,22 @@ func TestBindBody_UsageAndBoundaryContracts(t *testing.T) {
 		t.Run("map field", func(t *testing.T) {
 			type request struct {
 				Meta map[string]string `json:"meta"`
+			}
+
+			assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &request{}))
+		})
+
+		t.Run("nested slice field", func(t *testing.T) {
+			type request struct {
+				Tags [][]string `json:"tags"`
+			}
+
+			assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &request{}))
+		})
+
+		t.Run("slice pointer element field", func(t *testing.T) {
+			type request struct {
+				When []*time.Time `json:"when"`
 			}
 
 			assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &request{}))

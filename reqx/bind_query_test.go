@@ -352,6 +352,36 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), &unsupported))
 	})
 
+	t.Run("usage errors win before raw query parsing", func(t *testing.T) {
+		t.Run("unsupported target shape", func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.URL.RawQuery = "%"
+
+			dst := map[string]int{"stale": 9}
+			err := BindQuery(req, &dst)
+			assertNotHTTPError(t, err)
+			if !reflect.DeepEqual(dst, map[string]int{"stale": 9}) {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
+
+		t.Run("invalid tag", func(t *testing.T) {
+			type request struct {
+				Name string `query:""`
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.URL.RawQuery = "%"
+
+			dst := request{Name: "existing"}
+			err := BindQuery(req, &dst)
+			assertNotHTTPError(t, err)
+			if dst != (request{Name: "existing"}) {
+				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
+	})
+
 	t.Run("untagged and tagged unexported fields are ignored before validation", func(t *testing.T) {
 		type request struct {
 			Name     string              `query:"name"`

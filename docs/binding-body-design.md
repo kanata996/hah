@@ -62,6 +62,7 @@
 - 零字节 body 是 no-op，target 保持不变
 - 零字节 body 不要求 `Content-Type` 为 JSON
 - 判定依据是“实际可读取字节”，不是 `Content-Length`
+- 顶层 target 类型本身不得通过 `json.Unmarshaler` / `encoding.TextUnmarshaler` 自定义整体解码；否则属于 usage error
 
 ### 2.2 非空 body 的输入模型
 
