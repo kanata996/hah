@@ -1,7 +1,7 @@
 # hah BindQuery 设计方案
 
 - 状态：Locked
-- 版本：v4
+- 版本：v5
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.BindQuery(...)`
@@ -33,7 +33,7 @@
 - 多值 query 模型
 - 业务规则校验
 - 自定义 decoder 扩展
-- 时间、duration 等复杂字段语义
+- Unix 秒 / 毫秒时间戳等多格式时间语义
 - 默认严格模式
 
 ## 2. 稳定公开契约
@@ -100,23 +100,33 @@
 
 `query:"name"` 只支持以下字段形状：
 
-| 字段形状                                          | 是否支持 | 缺失参数         | 命中参数时                         |
-| ------------------------------------------------- | -------- | ---------------- | ---------------------------------- |
-| `string`                                          | 是       | 保持零值         | 直接写入首值                       |
-| `bool`                                            | 是       | 保持零值         | 按 `strconv.ParseBool` 解析        |
-| `int` / `int8` / `int16` / `int32` / `int64`      | 是       | 保持零值         | 按十进制 `strconv.ParseInt` 解析   |
-| `uint` / `uint8` / `uint16` / `uint32` / `uint64` | 是       | 保持零值         | 按十进制 `strconv.ParseUint` 解析  |
-| `float32` / `float64`                             | 是       | 保持零值         | 按 `strconv.ParseFloat` 解析       |
-| 指向上述内建标量的一级指针 `*T`                   | 是       | 保持 `nil`       | 先解码到临时值，成功后再分配或覆盖 |
-| `query:",inline"` 的 `struct` / `*struct`         | 是       | 保持零值语义     | 递归按子字段计划写入               |
+| 字段形状                                                    | 是否支持 | 缺失参数         | 命中参数时                         |
+| ----------------------------------------------------------- | -------- | ---------------- | ---------------------------------- |
+| `string`                                                    | 是       | 保持零值         | 直接写入首值                       |
+| `bool`                                                      | 是       | 保持零值         | 按 `strconv.ParseBool` 解析        |
+| `int` / `int8` / `int16` / `int32` / `int64`                | 是       | 保持零值         | 按十进制 `strconv.ParseInt` 解析   |
+| `uint` / `uint8` / `uint16` / `uint32` / `uint64`           | 是       | 保持零值         | 按十进制 `strconv.ParseUint` 解析  |
+| `float32` / `float64`                                       | 是       | 保持零值         | 按 `strconv.ParseFloat` 解析       |
+| 命名标量类型                                                | 是       | 保持零值         | 按其底层标量家族规则解析后写入     |
+| `time.Duration`                                             | 是       | 保持零值         | 按 `time.ParseDuration` 解析       |
+| `time.Time`                                                 | 是       | 保持零值         | 按 RFC3339 解析                    |
+| `uuid.UUID`                                                 | 是       | 保持零值         | 按 `uuid.Parse` 解析               |
+| 指向上述受支持叶子类型的一级指针 `*T`                       | 是       | 保持 `nil`       | 先解码到临时值，成功后再分配或覆盖 |
+| `query:",inline"` 的 `struct` / `*struct`                   | 是       | 保持零值语义     | 递归按子字段计划写入               |
 
 除上表外，其他字段形状一律不支持。
 
+解析规则固定为：
+
+- 命名标量类型：前提是其底层类型属于受支持的内建标量家族，且不实现自定义 decoder；按其底层标量家族的规则解析
+- `time.Duration`：`time.ParseDuration`
+- `time.Time`：RFC3339，不额外归一化时区
+- `uuid.UUID`：`uuid.Parse`
+
 以下形状一律不支持，且在规划阶段返回普通 usage error：
 
-- 命名类型，即使底层类型是受支持标量
-- `time.Time` / `time.Duration`
-- 实现 `BindUnmarshaler` / `encoding.TextUnmarshaler` 的类型
+- 除 `time.Duration`、`time.Time`、`uuid.UUID` 之外的表外命名类型
+- 除本文显式支持的 `time.Time`、`uuid.UUID` 外，实现 `BindUnmarshaler` / `encoding.TextUnmarshaler` 的类型，包括底层类型原本受支持的命名标量
 - 未标记 `inline` 的 `struct` / `*struct`
 - slice / array
 - map / interface
@@ -137,7 +147,7 @@
 - 对 `struct` 目标，未知 key 默认忽略；但未知 key 也受单值模型约束
 - 缺失 key 不会继承 target 旧值；对应字段保持零值临时对象中的默认状态
 - 参数存在但首值为空字符串时，仍视为“已提交参数”
-- 只有 `string` 与 `*string` 接受空字符串；其他受支持类型把空字符串当解析失败处理
+- 只有 `string`、底层为 `string` 的命名标量及其一级指针接受空字符串；其他受支持类型把空字符串当解析失败处理
 
 ### 2.5 `map[string]string` target
 
@@ -206,8 +216,8 @@
 
 - raw query 解析失败
 - query source 中存在重复 key
-- 内建标量解析失败
-- 空字符串落到非 `string` 字段
+- 受支持字段类型解析失败
+- 空字符串落到非字符串家族字段
 
 稳定契约只锁以下结果：
 
@@ -221,6 +231,7 @@
 
 - `BindQuery(...)` 与 `Query(...)` 共享“空字符串视为已提交参数”“单值入口拒绝重复 key”“默认忽略未知 key（在各自适用范围内）”的输入模型。
 - `BindQuery(...)` 比 `Query(...)` 更严格，因为它还要处理 DTO 规划、整条 raw query 解析、字段白名单和原子提交。
+- `BindQuery(...)` 现在支持常见叶子类型如命名标量、`uuid.UUID`、`time.Duration`、`time.Time`，但仍故意比 `Query(...)` 更窄：字段类型本身不足以表达 `UnixTime()` / `UnixMilliTime()` 这类模式，因此默认不支持。
 - 顶层错误模型来自 `errx`；对外如何写成 Problem JSON 由 `resp` 决定。
 - 若未来需要严格模式，只能作为独立 opt-in 契约引入，不能直接改变本文档的默认行为。
 
@@ -254,14 +265,15 @@
 - `query:"name"` 的 key 与解析后的 query key 精确匹配，不做 trim、大小写归一化或额外解码
 - tagged 但不可设置字段返回 usage error
 - 不支持字段类型在规划阶段返回 usage error
-- 命名类型、多级指针、`time.Time`、`time.Duration`、自定义 decoder 类型返回 usage error
+- 命名标量类型、`uuid.UUID`、`time.Time`、`time.Duration` 及其一级指针的代表性成功 / 失败路径
+- 除 `time.Duration`、`time.Time`、`uuid.UUID` 外的表外命名类型、多级指针、自定义 decoder 类型返回 usage error
 - inline 非 `struct` / `*struct` 返回 usage error
 - 冲突 query key 在写入前返回 usage error
 - 规划阶段 usage error 时 target 零修改
 - 未知 query key 默认忽略
 - 缺失参数不会继承 target 旧值
 - 空字符串参数视为存在
-- 只有 `string` / `*string` 接受空字符串
+- 只有 `string`、底层为 `string` 的命名标量及其一级指针接受空字符串
 - 普通 pointer 字段命中时按成功结果分配或覆盖
 - 普通 pointer 字段单字段解码失败不污染字段当前值
 - inline `*struct` 冲突检测不依赖运行时 `nil` 状态
@@ -271,5 +283,6 @@
 - 字段执行顺序按声明顺序加 inline 深度优先
 - 第一个客户端输入错误具有确定性
 - `string` / `bool` / `int` / `uint` / `float` 的代表性成功 / 失败路径
-- 内建标量解码失败收敛为 `400 bad_request`
+- `uuid.UUID` / `time.Time` / `time.Duration` 的代表性成功 / 失败路径
+- 受支持字段类型解码失败收敛为 `400 bad_request`
 - 客户端输入错误下 target 零修改
