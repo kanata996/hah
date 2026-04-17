@@ -8,8 +8,8 @@
 
 当前设计里：
 
-- `reqx.Path(...)` / `reqx.Query(...)` 是请求侧核心 API
-- `reqx.BindQuery(...)` / `reqx.BindBody(...)` 是 DTO 场景下的补充能力
+- `hah.Path(...)` / `hah.Query(...)` 是默认请求侧 API，`reqx.Path(...)` / `reqx.Query(...)` 承载同一底层契约
+- `hah.BindQuery(...)` / `hah.BindBody(...)` 是默认 DTO 绑定入口，`reqx` 公开对应的底层实现
 
 ## 先看选型
 
@@ -94,11 +94,12 @@ tags, err := hah.Query(r, "tag").Values().Get()
 
 `Query(...)` 更完整的公开 API、类型面和错误边界，见 [docs/query-design.md](./docs/query-design.md)。
 
-## 用 `reqx` 绑定 DTO
+## 绑定 DTO
 
-`reqx` 里的 DTO binder 只负责 source-to-DTO 映射，不做 Normalize、请求级规则或字段校验。
+默认场景优先用根包 `hah.BindQuery(...)` / `hah.BindBody(...)`；如果你更偏好底层包边界，也可以直接用 `reqx`。DTO binder 只负责 source-to-DTO 映射，不做 Normalize、请求级规则或字段校验。
 
 `BindQuery(...)` 更完整的公开契约、字段白名单和演进边界，见 [docs/binding-query-design.md](./docs/binding-query-design.md)。
+`BindBody(...)` 更完整的公开契约和字段支持边界，见 [docs/binding-body-design.md](./docs/binding-body-design.md)。
 
 ### query DTO 绑定
 
@@ -131,7 +132,7 @@ if err := hah.BindQuery(r, &query); err != nil {
 - 绑定在遇到第一个客户端输入错误时停止；后续字段不会继续处理
 - 对 `struct` target，绑定先写入零值临时对象；客户端输入错误下不会部分污染 DTO
 
-它适合“批量投影”，不适合表达请求级规则。像 `Required`、`Default`、`OneOf`、`Min/Max` 这类规则，仍然优先放在 `reqx.Query(...)` 或绑定后的显式校验里。
+它适合“批量投影”，不适合表达请求级规则。像 `Required`、`Default`、`OneOf`、`Min/Max` 这类规则，仍然优先放在 `hah.Query(...)` / `reqx.Query(...)` 或绑定后的显式校验里。
 
 ### body DTO 绑定
 
@@ -228,8 +229,8 @@ func validateCreateAccountBody(r *http.Request, body *CreateAccountBody) error {
 	if body.Name == "" {
 		return hah.InvalidRequest(hah.Violation{
 			Field: "name",
-			In:    hah.ViolationInBody,
-			Code:  hah.ViolationCodeRequired,
+			In:    hah.InBody,
+			Code:  hah.CodeRequired,
 		})
 	}
 	return nil
@@ -314,8 +315,8 @@ actor := strings.TrimSpace(r.Header.Get("X-Actor"))
 if actor == "" {
 	return hah.InvalidRequest(hah.Violation{
 		Field: "X-Actor",
-		In:    hah.ViolationInHeader,
-		Code:  hah.ViolationCodeRequired,
+		In:    hah.InHeader,
+		Code:  hah.CodeRequired,
 	})
 }
 ```
