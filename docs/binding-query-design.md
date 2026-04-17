@@ -1,8 +1,8 @@
 # hah BindQuery 设计方案
 
 - 状态：Locked
-- 版本：v6
-- 锁定日期：2026-04-17
+- 版本：v7
+- 锁定日期：2026-04-18
 - 适用范围：
   - `hah.BindQuery(...)`
   - `reqx.BindQuery(...)`
@@ -76,22 +76,23 @@
 
 ### 2.2 `struct` target 的 tag 规则
 
-`struct` 目标只认三种 `query` tag：
+`struct` 目标对参与规划的导出字段只认三种 `query` tag：
 
 - `query:"name"`
 - `query:"-"`
 - `query:",inline"`
 
-其他 tag 形式一律是普通 usage error。
+导出字段上的其他 tag 形式一律是普通 usage error。
 
 规则固定为：
 
 - 未标注字段一律忽略
+- 未导出字段一律忽略；即使带 `query` tag，也不参与 tag 校验、绑定、冲突检测或字段类型校验
 - `query:"-"` 一律显式忽略；不参与绑定、冲突检测或字段类型校验
 - `query:"name"` 中的 `name` 必须非空，且不得包含前后空白
 - `query:"name"` 的 key 按 tag 字面值原样参与匹配；不做 trim、大小写归一化或额外解码
-- `query:"name"` 字段必须导出、可设置、且字段形状受支持
-- `query:",inline"` 只能用于导出且可设置的 `struct` / `*struct`
+- 只有导出且可设置、且字段形状受支持的字段，才会因 `query:"name"` 参与绑定
+- `query:",inline"` 只对导出且可设置的 `struct` / `*struct` 生效
 - `inline` 展开后若没有任何可绑定子字段，属于普通 usage error
 - 多个可绑定字段映射到同一个 query key 时，属于普通 usage error
 - 冲突检测必须发生在任何字段写入之前
@@ -185,16 +186,6 @@
 - 写入阶段任意客户端输入错误都必须保持 target 调用前状态
 - 缺失字段不会继承 target 旧值
 
-### 2.8 字段执行顺序
-
-写入阶段顺序固定为：
-
-- 先按当前 `struct` 的字段声明顺序遍历
-- 遇到 `inline` 字段时，立刻按其子字段声明顺序深度优先展开
-- 遇到第一个客户端输入错误后立即停止
-
-“第一个错误”必须由上述顺序决定，而不是由 map 遍历顺序或反射内部顺序决定。
-
 ## 3. 错误边界
 
 ### 3.1 usage error
@@ -235,7 +226,13 @@
 - 顶层错误模型来自 `errx`；对外如何写成 Problem JSON 由 `resp` 决定。
 - 若未来需要严格模式，只能作为独立 opt-in 契约引入，不能直接改变本文档的默认行为。
 
-## 5. 测试基线
+## 5. 当前实现说明（非公开契约）
+
+当前实现通常按字段声明顺序与 `inline` 深度优先遍历字段，并在首个客户端输入错误后停止本次写入。
+
+这些顺序只作为实现说明，不构成稳定公开契约；除非未来公开暴露可观察的错误顺序，否则测试不应直接锁定它们。
+
+## 6. 测试基线
 
 后续实现或重构至少应锁住：
 
@@ -258,12 +255,12 @@
 - `query:",inline"`
 - `query:"-"` 与未标注字段一样始终忽略
 - `query:"-"` 不参与冲突检测或字段类型校验
+- 未导出字段即使带 `query` tag 也始终忽略，不参与 tag 校验、冲突检测或字段类型校验
 - inline 子字段计划为空时返回 usage error
 - 非法 `query` tag 形式
 - `query:""` 返回 usage error
 - 带前后空白的 `query:"name"` key 返回 usage error
 - `query:"name"` 的 key 与解析后的 query key 精确匹配，不做 trim、大小写归一化或额外解码
-- tagged 但不可设置字段返回 usage error
 - 不支持字段类型在规划阶段返回 usage error
 - 命名标量类型、`uuid.UUID`、`time.Time`、`time.Duration` 及其一级指针的代表性成功 / 失败路径
 - `time.Duration` 固定按 `time.ParseDuration` 解析，而不是按其底层 `int64` 标量规则解析
@@ -281,8 +278,6 @@
 - inline `*struct` 仅在首个子字段即将成功写入时按需分配
 - inline `*struct` 在 `nil` 状态下首个命中子字段失败时保持 `nil`
 - `*struct` target 写入先进入零值临时对象，成功后一次性提交
-- 字段执行顺序按声明顺序加 inline 深度优先
-- 第一个客户端输入错误具有确定性
 - `string` / `bool` / `int` / `uint` / `float` 的代表性成功 / 失败路径
 - `uuid.UUID` / `time.Time` / `time.Duration` 的代表性成功 / 失败路径
 - 受支持字段类型解码失败收敛为 `400 bad_request`
