@@ -1,7 +1,7 @@
 # hah BindBody 设计方案
 
 - 状态：Locked
-- 版本：v3
+- 版本：v4
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.BindBody(...)`
@@ -36,7 +36,7 @@
 - 业务规则校验
 - 基于旧 target 做默认值推导
 - 非 JSON 媒体类型
-- 复杂字段与自定义 decoder 扩展
+- 无限动态 JSON 模型与任意自定义 decoder 扩展
 
 ## 2. 稳定公开契约
 
@@ -83,20 +83,23 @@ JSON 文档边界固定为：
 - UTF-8 BOM 不做剥离，带 BOM 的 body 视为非法 JSON
 - 对公开支持的 `*struct` target，顶层 JSON 必须是 object
 - 顶层 `null`、array、string、number、boolean 都是非法 JSON
-- 未知字段默认拒绝；该规则只作用于顶层 target struct 的直接字段匹配
+- 未知字段默认递归拒绝；该规则对所有公开支持的 `struct` 层级都生效，而不只顶层 target struct 的直接字段匹配
 
 ### 2.3 支持字段类型表
 
-`BindBody(...)` 对 `*struct` target 的字段支持只锁下表中的“参与 JSON binding 的简单字段类型家族”。
+`BindBody(...)` 对 `*struct` target 的字段支持只锁下表中的“受控递归字段类型家族”。
+支持范围是一个闭合但受限的 family：终端类型、`time.Time`、`struct`、`[]T` 与一级指针。
 除表内字段类型家族外，其他参与 JSON binding 的字段类型一律不支持，并应返回 usage error。
 
 这张表锁的是“字段类型家族”，不展开 `encoding/json` 的全部内部派发细节。
-表内类型的字段发现与赋值仍跟随 Go `1.25.9` 的 `encoding/json`；重复 object key 不在该跟随范围内。
+除重复 object key 与未知字段拒绝外，表内类型的字段发现、`null` 处理与赋值语义仍跟随 Go `1.25.9` 的 `encoding/json`。
 
 补充规则：
 
 - 这里的“参与 JSON binding 的字段”指按 Go `1.25.9` `encoding/json` 规则会参与字段发现与解码的字段
 - 被 `encoding/json` 忽略的字段不在本表约束内，也不因字段类型本身触发 usage error，例如未导出字段、`json:"-"` 字段
+- 对受支持的 `struct` 字段，递归后的所有参与 JSON binding 的子字段也必须继续落在本文支持范围内，否则属于 usage error
+- 支持范围是闭合递归家族，不因引入 `struct` / `[]T` 变成 `any` / 动态 `map` 模型
 
 | 字段类型家族                                                                 | 是否支持 | 公开语义                                                | 备注                       |
 | ---------------------------------------------------------------------------- | -------- | ------------------------------------------------------- | -------------------------- |
@@ -105,30 +108,34 @@ JSON 文档边界固定为：
 | 有符号整数类型：`int` / `int8` / `int16` / `int32` / `int64`                 | 是       | 按标准库数值规则解码                                    |                            |
 | 无符号整数类型：`uint` / `uint8` / `uint16` / `uint32` / `uint64` / `uintptr`| 是       | 按标准库数值规则解码                                    |                            |
 | 浮点类型：`float32` / `float64`                                              | 是       | 按标准库数值规则解码                                    |                            |
+| `time.Time`                                                                  | 是       | 按 Go `1.25.9` 标准库 `time.Time` JSON 语义解码         | 标准库特例                 |
 | 命名标量类型                                                                 | 是       | 前提是其底层类型属于上述内建标量家族，且不实现自定义 decoder | 例如命名 string / int 类型 |
-| `*T`，其中 `T` 属于表内支持类型                                              | 是       | 按标准库指针语义解码                                    | 仅支持一级指针             |
+| `struct`                                                                     | 是       | 递归按相同规则解码其参与 JSON binding 的字段            | 子字段继续受未知字段拒绝与重复 key 检查 |
+| `[]T`                                                                        | 是       | 按标准库 slice 语义解码                                 | `T` 只允许是表内支持的终端类型、`time.Time` 或 `struct` |
+| `*T`，其中 `T` 属于上述受支持的非指针字段类型                                | 是       | 按标准库指针语义解码                                    | 仅支持一级指针             |
 
 代表性不支持类型包括但不限于：
 
-- 字段级 `struct`
-- `[]T` / `[N]T`
+- `[N]T`
 - `map[K]V`
 - `interface{}` / `any`
 - `json.RawMessage`
-- 实现 `json.Unmarshaler` 的类型
-- 实现 `encoding.TextUnmarshaler` 的类型
+- 除 `time.Time` 外，实现 `json.Unmarshaler` 的类型
+- 除 `time.Time` 外，实现 `encoding.TextUnmarshaler` 的类型
 - `func`
 - `chan`
 - `complex64` / `complex128`
 - `unsafe.Pointer`
+- 多级指针
 - 不属于表内类型家族的其他字段类型
 
 ### 2.4 字段值语义与原子提交
 
 对于公开支持的 `*struct` target：
 
-- 同一 object 内出现重复 key 时，视为非法 JSON
-- 除重复 object key 外，字段发现与标量赋值语义，在表内类型范围内跟随 Go `1.25.9` 的 `encoding/json`
+- 任一 object 层级出现重复 key 时，视为非法 JSON
+- 对表内支持的 `struct` 层级，未知字段默认递归拒绝
+- 除重复 object key 与未知字段拒绝外，字段发现与赋值语义，在表内类型范围内跟随 Go `1.25.9` 的 `encoding/json`；这包括嵌套 `struct`、`slice`、`time.Time` 与一级指针
 - 解码必须先进入与 target 同构的零值临时对象
 - 只有全部成功后，才允许一次性提交到 target
 - 失败时，target 必须保持调用前状态
@@ -141,7 +148,7 @@ JSON 文档边界固定为：
 - usage error：
   - `nil request`
   - 非法 target
-  - DTO 含有参与 JSON binding 的表外字段类型
+  - DTO 含有参与 JSON binding 的表外字段类型，包括嵌套 `struct` / `slice` 元素中的表外类型
   - 返回普通 error
 - 稳定客户端输入错误：
   - 不支持的媒体类型：`415 unsupported_media_type`
@@ -213,11 +220,14 @@ JSON 文档边界固定为：
 - 顶层 `null`
 - 顶层 array
 - 顶层 string / number / boolean
-- 未知字段返回 `400 invalid_json`
+- 顶层与嵌套 `struct` 的未知字段都返回 `400 invalid_json`
 - 标准字段类型不匹配或数值溢出返回 `400 invalid_json`
-- 复杂字段类型与其他参与 JSON binding 的表外字段类型返回 usage error
+- 嵌套 `struct` / `*struct` 的代表性成功 / 失败路径
+- `[]T` 的代表性成功 / 失败路径
+- `time.Time` / `*time.Time` 的代表性成功 / 失败路径
+- 嵌套 `struct` / `slice` 元素中的表外字段类型返回 usage error
 - 未导出字段、`json:"-"` 字段等被 `encoding/json` 忽略的字段不会因表外类型触发 usage error
-- 重复 object key 返回 `400 invalid_json`
+- 任一 object 层级的重复 key 都返回 `400 invalid_json`
 - 缺失字段不会继承 target 旧值
 - 失败时 target 保持不变
 - `RequireBody(...)` 在零字节、空白 body、`null` 下的组合行为
