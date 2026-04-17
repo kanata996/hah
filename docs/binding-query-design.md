@@ -1,7 +1,7 @@
 # hah BindQuery 设计方案
 
 - 状态：Locked
-- 版本：v5
+- 版本：v6
 - 锁定日期：2026-04-17
 - 适用范围：
   - `hah.BindQuery(...)`
@@ -107,7 +107,7 @@
 | `int` / `int8` / `int16` / `int32` / `int64`                | 是       | 保持零值         | 按十进制 `strconv.ParseInt` 解析   |
 | `uint` / `uint8` / `uint16` / `uint32` / `uint64`           | 是       | 保持零值         | 按十进制 `strconv.ParseUint` 解析  |
 | `float32` / `float64`                                       | 是       | 保持零值         | 按 `strconv.ParseFloat` 解析       |
-| 命名标量类型                                                | 是       | 保持零值         | 按其底层标量家族规则解析后写入     |
+| 除 `time.Duration` 外的命名标量类型                         | 是       | 保持零值         | 按其底层标量家族规则解析后写入     |
 | `time.Duration`                                             | 是       | 保持零值         | 按 `time.ParseDuration` 解析       |
 | `time.Time`                                                 | 是       | 保持零值         | 按 RFC3339 解析                    |
 | `uuid.UUID`                                                 | 是       | 保持零值         | 按 `uuid.Parse` 解析               |
@@ -118,7 +118,7 @@
 
 解析规则固定为：
 
-- 命名标量类型：前提是其底层类型属于受支持的内建标量家族，且不实现自定义 decoder；按其底层标量家族的规则解析
+- 除 `time.Duration` 外的命名标量类型：前提是其底层类型属于受支持的内建标量家族，且不实现自定义 decoder；按其底层标量家族的规则解析
 - `time.Duration`：`time.ParseDuration`
 - `time.Time`：RFC3339，不额外归一化时区
 - `uuid.UUID`：`uuid.Parse`
@@ -266,6 +266,7 @@
 - tagged 但不可设置字段返回 usage error
 - 不支持字段类型在规划阶段返回 usage error
 - 命名标量类型、`uuid.UUID`、`time.Time`、`time.Duration` 及其一级指针的代表性成功 / 失败路径
+- `time.Duration` 固定按 `time.ParseDuration` 解析，而不是按其底层 `int64` 标量规则解析
 - 除 `time.Duration`、`time.Time`、`uuid.UUID` 外的表外命名类型、多级指针、自定义 decoder 类型返回 usage error
 - inline 非 `struct` / `*struct` 返回 usage error
 - 冲突 query key 在写入前返回 usage error
