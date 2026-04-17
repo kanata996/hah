@@ -12,6 +12,23 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
+type asHTTPError struct {
+	httpErr *errx.HTTPError
+}
+
+func (e asHTTPError) Error() string {
+	return "as http error"
+}
+
+func (e asHTTPError) As(target any) bool {
+	httpErrTarget, ok := target.(**errx.HTTPError)
+	if !ok {
+		return false
+	}
+	*httpErrTarget = e.httpErr
+	return true
+}
+
 // WriteError 会把 HTTPError 写成标准 problem JSON。
 func TestWriteErrorWritesEnvelope(t *testing.T) {
 	rr := httptest.NewRecorder()
@@ -96,6 +113,32 @@ func TestWriteErrorPreservesExplicitPublicFieldsFromWrappedHTTPError(t *testing.
 		"code":   "required",
 		"detail": "is required",
 	})
+}
+
+func TestWriteErrorWritesNotFoundProblem(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := WriteError(rr, errx.NotFound("", "")); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "not_found" {
+		t.Fatalf("code = %#v, want not_found", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusNotFound) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusNotFound))
+	}
+	if got := body["status"]; got != float64(http.StatusNotFound) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusNotFound)
+	}
 }
 
 // 多个 violation 对象应圆整进入 problem JSON 的 errors 数组。
@@ -318,6 +361,95 @@ func TestWriteErrorSkipsTypedNilHTTPErrorAndChoosesFirstNonNilCandidate(t *testi
 	}
 	if _, exists := body["errors"]; exists {
 		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
+	}
+}
+
+func TestWriteErrorUsesErrorsAsHTTPErrorCandidate(t *testing.T) {
+	input := errors.Join(
+		context.Canceled,
+		asHTTPError{
+			httpErr: errx.NewHTTPError(http.StatusForbidden, "forbidden", "access denied"),
+		},
+	)
+
+	rr := httptest.NewRecorder()
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != "forbidden" {
+		t.Fatalf("code = %#v, want forbidden", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusForbidden) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusForbidden))
+	}
+	if got := body["detail"]; got != "access denied" {
+		t.Fatalf("detail = %#v, want access denied", got)
+	}
+	if _, exists := body["errors"]; exists {
+		t.Fatalf("errors unexpectedly present: %#v", body["errors"])
+	}
+}
+
+func TestWriteErrorTypedNilHTTPErrorFallsBackToContextOrDefault(t *testing.T) {
+	var typedNil *errx.HTTPError
+
+	cases := []struct {
+		name       string
+		err        error
+		wantCode   string
+		wantTitle  string
+		wantStatus int
+	}{
+		{
+			name:       "context canceled",
+			err:        errors.Join(typedNil, context.Canceled),
+			wantStatus: 499,
+			wantCode:   "client_closed_request",
+			wantTitle:  "Client Closed Request",
+		},
+		{
+			name:       "default internal error",
+			err:        typedNil,
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "internal_error",
+			wantTitle:  http.StatusText(http.StatusInternalServerError),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			if err := WriteError(rr, tc.err); err != nil {
+				t.Fatalf("WriteError() error = %v", err)
+			}
+
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status = %d, want %d", rr.Code, tc.wantStatus)
+			}
+
+			body := decodePayload(t, rr.Body.Bytes())
+			if got := body["code"]; got != tc.wantCode {
+				t.Fatalf("code = %#v, want %q", got, tc.wantCode)
+			}
+			if got := body["title"]; got != tc.wantTitle {
+				t.Fatalf("title = %#v, want %q", got, tc.wantTitle)
+			}
+			if got := body["status"]; got != float64(tc.wantStatus) {
+				t.Fatalf("status = %#v, want %d", got, tc.wantStatus)
+			}
+			if _, exists := body["detail"]; exists {
+				t.Fatalf("detail unexpectedly present: %#v", body["detail"])
+			}
+			if _, exists := body["errors"]; exists {
+				t.Fatalf("errors unexpectedly present: %#v", body["errors"])
+			}
+		})
 	}
 }
 

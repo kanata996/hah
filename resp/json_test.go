@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -29,6 +30,13 @@ func TestJSONWritersWriteExpectedResponses(t *testing.T) {
 			wantStatus:      http.StatusOK,
 			wantContentType: "application/json",
 			wantBody:        "null\n",
+		},
+		{
+			name:            "JSON writes created response",
+			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusCreated, map[string]any{"id": "u_1"}) },
+			wantStatus:      http.StatusCreated,
+			wantContentType: "application/json",
+			wantBody:        "{\"id\":\"u_1\"}\n",
 		},
 		{
 			name:            "JSON writes array as array",
@@ -231,6 +239,9 @@ func TestJSONBodyWritersReturnWrappedWriteError(t *testing.T) {
 	}
 	if !errors.Is(err, cause) {
 		t.Fatalf("errors.Is(err, cause) = false, want true")
+	}
+	if got := err.Error(); !strings.Contains(got, cause.Error()) {
+		t.Fatalf("error = %q, want to contain cause %q", got, cause.Error())
 	}
 	if w.status != http.StatusAccepted {
 		t.Fatalf("status = %d, want %d", w.status, http.StatusAccepted)

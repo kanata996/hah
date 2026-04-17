@@ -95,14 +95,14 @@ var standardHTTPErrorConstructors = []standardHTTPErrorConstructorCase{
 
 var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
 	{
-		name:       "explicit code and detail are trimmed",
+		name:       "explicit code and detail are trimmed only",
 		status:     http.StatusBadRequest,
-		code:       " invalid_json ",
-		detail:     " invalid payload ",
+		code:       " Mixed_Code  V1 ",
+		detail:     " Mixed  Detail ",
 		wantStatus: http.StatusBadRequest,
-		wantCode:   "invalid_json",
+		wantCode:   "Mixed_Code  V1",
 		wantTitle:  http.StatusText(http.StatusBadRequest),
-		wantDetail: "invalid payload",
+		wantDetail: "Mixed  Detail",
 	},
 	{
 		name:       "gateway timeout uses timeout code",
@@ -336,7 +336,8 @@ func TestHTTPErrorWithViolationsClonesInputAndReturnedSlices(t *testing.T) {
 // WithViolations 应返回携带独立 violations 的新错误对象，不能污染模板对象或兄弟结果。
 func TestHTTPErrorWithViolationsDoesNotMutateReceiverOrSiblingResults(t *testing.T) {
 	cause := errors.New("db timeout")
-	base := NewHTTPErrorWithCause(http.StatusConflict, " account_conflict ", " account already exists ", cause)
+	baseWant := []Violation{{Field: "base", In: InHeader, Code: CodeUnknown, Detail: "is duplicated"}}
+	base := NewHTTPErrorWithCause(http.StatusConflict, " account_conflict ", " account already exists ", cause).WithViolations(baseWant)
 
 	firstWant := []Violation{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}}
 	secondWant := []Violation{{Field: "email", In: InQuery, Code: CodeInvalid, Detail: "is invalid"}}
@@ -353,7 +354,7 @@ func TestHTTPErrorWithViolationsDoesNotMutateReceiverOrSiblingResults(t *testing
 		"account already exists",
 	)
 	assertHTTPErrorPreservesCause(t, base, "account already exists", cause)
-	assertHTTPErrorErrors(t, base)
+	assertHTTPErrorErrors(t, base, baseWant...)
 
 	assertHTTPErrorErrors(t, first, firstWant...)
 	assertHTTPErrorPreservesCause(t, first, "account already exists", cause)
@@ -453,17 +454,29 @@ func TestHTTPErrorErrorsReturnsNilWhenNoErrors(t *testing.T) {
 	}
 }
 
-// 显式传入空切片时，也应收敛为无 violations 的稳定 nil 表示。
-func TestHTTPErrorWithViolationsEmptySliceNormalizesToNil(t *testing.T) {
-	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request").WithViolations([]Violation{})
+// nil 与空切片输入都应收敛为无 violations 的稳定 nil 表示。
+func TestHTTPErrorWithViolationsNilAndEmptySliceNormalizeToNil(t *testing.T) {
+	testCases := []struct {
+		name       string
+		violations []Violation
+	}{
+		{name: "nil input", violations: nil},
+		{name: "empty input", violations: []Violation{}},
+	}
 
-	if got := err.Errors(); got != nil {
-		t.Fatalf("Errors() = %#v, want nil", got)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request").WithViolations(tc.violations)
+
+			if got := err.Errors(); got != nil {
+				t.Fatalf("Errors() = %#v, want nil", got)
+			}
+		})
 	}
 }
 
-// 默认 code 表与共享 violation 常量都属于锁版公开契约。
-func TestHTTPErrorDefaultCodeTableAndSharedConstants(t *testing.T) {
+// 默认 code 表属于锁版公开契约。
+func TestHTTPErrorDefaultCodeTable(t *testing.T) {
 	testCases := []struct {
 		status   int
 		wantCode string
@@ -491,19 +504,47 @@ func TestHTTPErrorDefaultCodeTableAndSharedConstants(t *testing.T) {
 			}
 		})
 	}
+}
 
-	_ = []ViolationCode{
-		CodeInvalid,
-		CodeRequired,
-		CodeUnknown,
-		CodeType,
-		CodeMultiple,
+// 共享 violation 常量的 string 值属于公开可观察语义。
+func TestViolationSharedConstantsExposeStableValues(t *testing.T) {
+	codeCases := []struct {
+		name string
+		got  ViolationCode
+		want string
+	}{
+		{name: "invalid", got: CodeInvalid, want: "invalid"},
+		{name: "required", got: CodeRequired, want: "required"},
+		{name: "unknown", got: CodeUnknown, want: "unknown"},
+		{name: "type", got: CodeType, want: "type"},
+		{name: "multiple", got: CodeMultiple, want: "multiple"},
 	}
-	_ = []ViolationIn{
-		InBody,
-		InQuery,
-		InPath,
-		InHeader,
+
+	for _, tc := range codeCases {
+		t.Run("code/"+tc.name, func(t *testing.T) {
+			if got := string(tc.got); got != tc.want {
+				t.Fatalf("string(%s) = %q, want %q", tc.name, got, tc.want)
+			}
+		})
+	}
+
+	inCases := []struct {
+		name string
+		got  ViolationIn
+		want string
+	}{
+		{name: "body", got: InBody, want: "body"},
+		{name: "query", got: InQuery, want: "query"},
+		{name: "path", got: InPath, want: "path"},
+		{name: "header", got: InHeader, want: "header"},
+	}
+
+	for _, tc := range inCases {
+		t.Run("in/"+tc.name, func(t *testing.T) {
+			if got := string(tc.got); got != tc.want {
+				t.Fatalf("string(%s) = %q, want %q", tc.name, got, tc.want)
+			}
+		})
 	}
 }
 

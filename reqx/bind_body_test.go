@@ -193,3 +193,78 @@ func TestBindBody_Contracts(t *testing.T) {
 		}
 	})
 }
+
+func TestBindBody_UsageAndBoundaryContracts(t *testing.T) {
+	t.Run("rejects invalid request and target shapes", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		assertNotHTTPError(t, BindBody(nil, &request{}))
+		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), nil))
+		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), request{}))
+
+		var typedNil *request
+		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), typedNil))
+
+		var unsupported map[string]string
+		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &unsupported))
+	})
+
+	t.Run("accepts application json with charset parameter", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+
+		var dst request
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst.Name != "kanata" {
+			t.Fatalf("dst = %#v, want bound body", dst)
+		}
+	})
+
+	t.Run("too large body returns request too large and preserves target", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		payload := `{"name":"` + strings.Repeat("a", int(defaultMaxBodyBytes)) + `"}`
+		req := newJSONRequest(http.MethodPost, "/", payload)
+		dst := request{Name: "existing"}
+
+		err := BindBody(req, &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusRequestEntityTooLarge, CodeRequestTooLarge)
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("malformed content type returns unsupported media type", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
+		req.Header.Set("Content-Type", `application/json; charset="utf-8`)
+
+		err := BindBody(req, &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType)
+	})
+
+	t.Run("top level null and trailing data are invalid json", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		err := BindBody(newJSONRequest(http.MethodPost, "/", `null`), &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+
+		err = BindBody(newJSONRequest(http.MethodPost, "/", `{"name":"kanata"} true`), &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+	})
+}

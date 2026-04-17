@@ -151,3 +151,86 @@ func TestBindQuery_Contracts(t *testing.T) {
 		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?value=x", nil), &unsupportedTextDecoder{}))
 	})
 }
+
+func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
+	t.Run("rejects invalid request and target shapes", func(t *testing.T) {
+		type request struct {
+			Name string `query:"name"`
+		}
+
+		assertNotHTTPError(t, BindQuery(nil, &request{}))
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), nil))
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), request{}))
+
+		var typedNil *request
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), typedNil))
+
+		var unsupported []string
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), &unsupported))
+	})
+
+	t.Run("nil url acts like empty query source", func(t *testing.T) {
+		type request struct {
+			Name string `query:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.URL = nil
+		dst := request{Name: "stale"}
+
+		if err := BindQuery(req, &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst != (request{}) {
+			t.Fatalf("dst = %#v, want zero value struct", dst)
+		}
+	})
+
+	t.Run("invalid tags and empty inline plans are usage errors", func(t *testing.T) {
+		type emptyTag struct {
+			Name string `query:""`
+		}
+		type spacedTag struct {
+			Name string `query:" name "`
+		}
+		type inlineEmpty struct {
+			Inline struct{} `query:",inline"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
+
+		assertNotHTTPError(t, BindQuery(req, &emptyTag{}))
+		assertNotHTTPError(t, BindQuery(req, &spacedTag{}))
+		assertNotHTTPError(t, BindQuery(req, &inlineEmpty{}))
+	})
+
+	t.Run("inline pointer allocates only when a child binds successfully", func(t *testing.T) {
+		type filters struct {
+			Page int `query:"page"`
+		}
+		type request struct {
+			Filters *filters `query:",inline"`
+		}
+
+		var dst request
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Filters != nil {
+			t.Fatalf("filters = %#v, want nil", dst.Filters)
+		}
+
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?page=bad", nil), &dst)
+		_ = assertBadRequest(t, err)
+		if dst.Filters != nil {
+			t.Fatalf("filters = %#v, want nil after failed bind", dst.Filters)
+		}
+
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?page=7", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Filters == nil || dst.Filters.Page != 7 {
+			t.Fatalf("filters = %#v, want page=7", dst.Filters)
+		}
+	})
+}
