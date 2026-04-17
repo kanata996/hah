@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 
@@ -103,4 +104,104 @@ func TestQueryBuilder_UsageContracts(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), " ").Int().Get()
 		assertNotHTTPError(t, err)
 	})
+}
+
+func TestQueryTimeParam_EqualBoundariesAreRejected(t *testing.T) {
+	boundary := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+
+	testCases := []struct {
+		name  string
+		raw   string
+		build func(*QueryParam) *TimeParam
+	}{
+		{
+			name: "rfc3339 time",
+			raw:  boundary.Format(time.RFC3339),
+			build: func(p *QueryParam) *TimeParam {
+				return p.Time()
+			},
+		},
+		{
+			name: "unix time",
+			raw:  strconv.FormatInt(boundary.Unix(), 10),
+			build: func(p *QueryParam) *TimeParam {
+				return p.UnixTime()
+			},
+		},
+		{
+			name: "unix milli time",
+			raw:  strconv.FormatInt(boundary.UnixMilli(), 10),
+			build: func(p *QueryParam) *TimeParam {
+				return p.UnixMilliTime()
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name+"/after", func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/items?at="+tc.raw, nil)
+
+			_, err := tc.build(Query(req, "at")).After(boundary).Get()
+			assertInvalidViolationAt(t, err, "at", errx.InQuery)
+		})
+
+		t.Run(tc.name+"/before", func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/items?at="+tc.raw, nil)
+
+			_, err := tc.build(Query(req, "at")).Before(boundary).Get()
+			assertInvalidViolationAt(t, err, "at", errx.InQuery)
+		})
+	}
+}
+
+func TestQueryTimeParam_EqualAfterBeforeIsUsageError(t *testing.T) {
+	boundary := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+
+	_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "at").Time().
+		After(boundary).
+		Before(boundary).
+		Get()
+	assertNotHTTPError(t, err)
+}
+
+func TestQueryValues_DefaultSnapshotsAndReturnsCopies(t *testing.T) {
+	defaults := []string{"a", "b"}
+	builder := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().Default(defaults)
+	defaults[0] = "mutated"
+
+	got, err := builder.Get()
+	if err != nil {
+		t.Fatalf("Values().Get() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, []string{"a", "b"}) {
+		t.Fatalf("values = %#v, want []string{\"a\", \"b\"}", got)
+	}
+
+	got[0] = "changed"
+
+	again, err := builder.Get()
+	if err != nil {
+		t.Fatalf("Values().Get() second error = %v", err)
+	}
+	if !reflect.DeepEqual(again, []string{"a", "b"}) {
+		t.Fatalf("values second = %#v, want []string{\"a\", \"b\"}", again)
+	}
+}
+
+func TestQueryValues_RequestResultIsDefensiveCopy(t *testing.T) {
+	builder := Query(httptest.NewRequest(http.MethodGet, "/items?tag=a&tag=b", nil), "tag").Values()
+
+	got, err := builder.Get()
+	if err != nil {
+		t.Fatalf("Values().Get() error = %v", err)
+	}
+	got[0] = "changed"
+
+	again, err := builder.Get()
+	if err != nil {
+		t.Fatalf("Values().Get() second error = %v", err)
+	}
+	if !reflect.DeepEqual(again, []string{"a", "b"}) {
+		t.Fatalf("values second = %#v, want []string{\"a\", \"b\"}", again)
+	}
 }

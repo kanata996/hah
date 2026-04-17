@@ -180,7 +180,7 @@ func (p *timeRangeParam) setAfter(value time.Time) {
 	p.after = &value
 	p.lastConstraint = rangeConstraintAfter
 	p.value.state.setNamedCheck("after", func(v time.Time) error {
-		if v.Before(value) {
+		if !v.After(value) {
 			return errInvalidParamValue
 		}
 		return nil
@@ -191,7 +191,7 @@ func (p *timeRangeParam) setBefore(value time.Time) {
 	p.before = &value
 	p.lastConstraint = rangeConstraintBefore
 	p.value.state.setNamedCheck("before", func(v time.Time) error {
-		if v.After(value) {
+		if !v.Before(value) {
 			return errInvalidParamValue
 		}
 		return nil
@@ -199,14 +199,14 @@ func (p *timeRangeParam) setBefore(value time.Time) {
 }
 
 func (p *timeRangeParam) constraintUsageErr() error {
-	if p.after == nil || p.before == nil || !p.after.After(*p.before) {
+	if p.after == nil || p.before == nil || p.after.Before(*p.before) {
 		return nil
 	}
 
 	if p.lastConstraint == rangeConstraintAfter {
-		return usageErrorf("after time must be less than or equal to before time")
+		return usageErrorf("after time must be earlier than before time")
 	}
-	return usageErrorf("before time must be greater than or equal to after time")
+	return usageErrorf("before time must be later than after time")
 }
 
 // ValueParam 读取并校验通用单值参数。
