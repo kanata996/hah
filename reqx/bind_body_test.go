@@ -244,6 +244,24 @@ func TestBindBody_UsageAndBoundaryContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("exactly one mib body still binds", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		const prefix = `{"name":"`
+		const suffix = `"}`
+		payload := prefix + strings.Repeat("a", int(defaultMaxBodyBytes)-len(prefix)-len(suffix)) + suffix
+
+		var dst request
+		if err := BindBody(newJSONRequest(http.MethodPost, "/", payload), &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if len(dst.Name) != int(defaultMaxBodyBytes)-len(prefix)-len(suffix) {
+			t.Fatalf("name len = %d, want %d", len(dst.Name), int(defaultMaxBodyBytes)-len(prefix)-len(suffix))
+		}
+	})
+
 	t.Run("malformed content type returns unsupported media type", func(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`
@@ -266,5 +284,33 @@ func TestBindBody_UsageAndBoundaryContracts(t *testing.T) {
 
 		err = BindBody(newJSONRequest(http.MethodPost, "/", `{"name":"kanata"} true`), &request{})
 		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+	})
+
+	t.Run("unexpected eof and bom are invalid json", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		err := BindBody(newJSONRequest(http.MethodPost, "/", `{"name":"kanata"`), &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+
+		err = BindBody(newJSONRequest(http.MethodPost, "/", "\ufeff{}"), &request{})
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
+	})
+
+	t.Run("ignored json fields do not trigger usage errors", func(t *testing.T) {
+		type request struct {
+			Name    string          `json:"name"`
+			Ignored json.RawMessage `json:"-"`
+			hidden  json.RawMessage
+		}
+
+		var dst request
+		if err := BindBody(newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`), &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst.Name != "kanata" || dst.hidden != nil {
+			t.Fatalf("dst = %#v, want ignored fields skipped", dst)
+		}
 	})
 }

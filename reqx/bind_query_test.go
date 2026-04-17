@@ -68,7 +68,7 @@ func TestBindQuery_Contracts(t *testing.T) {
 
 		dst := request{Page: 9}
 		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?page=1&page=2", nil), &dst)
-		_ = assertBadRequest(t, err)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
 		if dst != (request{Page: 9}) {
 			t.Fatalf("dst = %#v, want unchanged", dst)
 		}
@@ -80,7 +80,7 @@ func TestBindQuery_Contracts(t *testing.T) {
 		}
 
 		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?extra=1&extra=2", nil), &request{})
-		_ = assertBadRequest(t, err)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
 	})
 
 	t.Run("empty string only string family accepts", func(t *testing.T) {
@@ -98,7 +98,7 @@ func TestBindQuery_Contracts(t *testing.T) {
 		}
 
 		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?enabled=", nil), &dst)
-		_ = assertBadRequest(t, err)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
 	})
 
 	t.Run("map string string target becomes single value snapshot", func(t *testing.T) {
@@ -133,7 +133,7 @@ func TestBindQuery_Contracts(t *testing.T) {
 		dst := request{Name: "existing"}
 
 		err := BindQuery(req, &dst)
-		_ = assertBadRequest(t, err)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
 		if dst != (request{Name: "existing"}) {
 			t.Fatalf("dst = %#v, want unchanged", dst)
 		}
@@ -221,7 +221,7 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		}
 
 		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?page=bad", nil), &dst)
-		_ = assertBadRequest(t, err)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
 		if dst.Filters != nil {
 			t.Fatalf("filters = %#v, want nil after failed bind", dst.Filters)
 		}
@@ -231,6 +231,53 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		}
 		if dst.Filters == nil || dst.Filters.Page != 7 {
 			t.Fatalf("filters = %#v, want page=7", dst.Filters)
+		}
+	})
+
+	t.Run("query dash fields are ignored before type validation", func(t *testing.T) {
+		type request struct {
+			Name    string              `query:"name"`
+			Ignored bindQueryNamedSlice `query:"-"`
+		}
+
+		var dst request
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Name != "kanata" || dst.Ignored != nil {
+			t.Fatalf("dst = %#v, want ignored field skipped", dst)
+		}
+	})
+
+	t.Run("query keys match parsed names exactly", func(t *testing.T) {
+		type request struct {
+			Upper string `query:"Name"`
+			Lower string `query:"name"`
+			Plus  string `query:"x+y"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?Name=upper&name=lower&x+y=space&x%2By=plus", nil)
+
+		var dst request
+		if err := BindQuery(req, &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst.Upper != "upper" || dst.Lower != "lower" || dst.Plus != "plus" {
+			t.Fatalf("dst = %#v, want exact parsed-key matches only", dst)
+		}
+	})
+
+	t.Run("duplicate planned fields fail before any write", func(t *testing.T) {
+		type request struct {
+			Name  string `query:"name"`
+			Alias string `query:"name"`
+		}
+
+		dst := request{Name: "existing", Alias: "keep"}
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?name=kanata", nil), &dst)
+		assertNotHTTPError(t, err)
+		if dst != (request{Name: "existing", Alias: "keep"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
 		}
 	})
 }

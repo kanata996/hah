@@ -118,12 +118,6 @@ func assertNotHTTPError(t *testing.T, err error) {
 	}
 }
 
-func assertBadRequest(t *testing.T, err error) *errx.HTTPError {
-	t.Helper()
-
-	return assertHTTPError(t, err, http.StatusBadRequest, "bad_request", "Bad Request")
-}
-
 func assertViolations(t *testing.T, err error) []errx.Violation {
 	t.Helper()
 
