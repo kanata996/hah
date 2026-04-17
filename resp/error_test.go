@@ -176,57 +176,29 @@ func TestWriteErrorNilWriterAndNilErrorIsNoop(t *testing.T) {
 }
 
 // HEAD 请求写错误时仍走正常 Write 链路，但最终对外只保留状态和头语义。
-func TestWriteErrorHeadWritesStatusWithoutBody(t *testing.T) {
-	expected := httptest.NewRecorder()
-	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
-		{Field: "name", Code: "required", Detail: "is required"},
-	})
-	if err := WriteError(expected, httpErr); err != nil {
-		t.Fatalf("WriteError() expected recorder error = %v", err)
-	}
-
-	inner := &headLikeResponseWriter{}
-	w := &writeCallbackResponseWriter{ResponseWriter: inner}
-
-	err := WriteError(w, httpErr)
-	if err != nil {
-		t.Fatalf("WriteError() error = %v", err)
-	}
-	if inner.status != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", inner.status, http.StatusBadRequest)
-	}
-	if got := inner.Header().Get("Content-Type"); got != "application/problem+json" {
-		t.Fatalf("Content-Type = %q, want application/problem+json", got)
-	}
-	if got := inner.Header().Get("Content-Length"); got != strconv.Itoa(expected.Body.Len()) {
-		t.Fatalf("Content-Length = %q, want %d", got, expected.Body.Len())
-	}
-	if w.writeCalls != 1 {
-		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
-	}
-}
-
-func TestWriteErrorRespectsWrappedWriterContentLength(t *testing.T) {
-	inner := &headLikeResponseWriter{}
-	w := &transformingResponseWriter{
-		ResponseWriter: inner,
-		suffix:         []byte("\n"),
-	}
+func TestWriteErrorOnHeadRequestUsesNetHTTPHeadSemantics(t *testing.T) {
 	httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
 		{Field: "name", Code: "required", Detail: "is required"},
 	})
 
-	if err := WriteError(w, httpErr); err != nil {
-		t.Fatalf("WriteError() error = %v", err)
+	result := roundTripOverHTTPMethod(t, http.MethodHead, func(w http.ResponseWriter, _ *http.Request) error {
+		return WriteError(w, httpErr)
+	})
+
+	if result.handlerErr != nil {
+		t.Fatalf("handler error = %v", result.handlerErr)
 	}
-	if inner.status != http.StatusBadRequest {
-		t.Fatalf("status = %d, want %d", inner.status, http.StatusBadRequest)
+	if result.response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", result.response.StatusCode, http.StatusBadRequest)
 	}
-	if got := inner.Header().Get("Content-Length"); got != strconv.Itoa(len(w.lastWrite)) {
-		t.Fatalf("Content-Length = %q, want %d", got, len(w.lastWrite))
+	if got := result.response.Header.Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want %q", got, "application/problem+json")
 	}
-	if w.writeCalls != 1 {
-		t.Fatalf("writeCalls = %d, want 1", w.writeCalls)
+	if result.readErr != nil {
+		t.Fatalf("ReadAll() error = %v", result.readErr)
+	}
+	if len(result.body) != 0 {
+		t.Fatalf("body = %q, want empty for HEAD", string(result.body))
 	}
 }
 

@@ -189,7 +189,8 @@ func TestQueryValues_DefaultSnapshotsAndReturnsCopies(t *testing.T) {
 }
 
 func TestQueryValues_RequestResultIsDefensiveCopy(t *testing.T) {
-	builder := Query(httptest.NewRequest(http.MethodGet, "/items?tag=a&tag=b", nil), "tag").Values()
+	req := httptest.NewRequest(http.MethodGet, "/items?tag=a&tag=b", nil)
+	builder := Query(req, "tag").Values()
 
 	got, err := builder.Get()
 	if err != nil {
@@ -197,11 +198,13 @@ func TestQueryValues_RequestResultIsDefensiveCopy(t *testing.T) {
 	}
 	got[0] = "changed"
 
+	req.URL.RawQuery = "tag=c&tag=d"
+
 	again, err := builder.Get()
 	if err != nil {
 		t.Fatalf("Values().Get() second error = %v", err)
 	}
-	if !reflect.DeepEqual(again, []string{"a", "b"}) {
-		t.Fatalf("values second = %#v, want []string{\"a\", \"b\"}", again)
+	if !reflect.DeepEqual(again, []string{"c", "d"}) {
+		t.Fatalf("values second = %#v, want []string{\"c\", \"d\"}", again)
 	}
 }

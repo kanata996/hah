@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"testing"
 )
 
@@ -24,22 +23,6 @@ type failingWriter struct {
 	status int
 	writes int
 	cause  error
-}
-type headLikeResponseWriter struct {
-	header           http.Header
-	writeHeaderCalls int
-	writeCalls       int
-	status           int
-}
-type writeCallbackResponseWriter struct {
-	http.ResponseWriter
-	writeCalls int
-}
-type transformingResponseWriter struct {
-	http.ResponseWriter
-	suffix     []byte
-	writeCalls int
-	lastWrite  []byte
 }
 
 func (w *failingWriter) Header() http.Header {
@@ -59,41 +42,6 @@ func (w *failingWriter) Write(_ []byte) (int, error) {
 		return 0, w.cause
 	}
 	return 0, errors.New("socket closed")
-}
-
-func (w *headLikeResponseWriter) Header() http.Header {
-	if w.header == nil {
-		w.header = make(http.Header)
-	}
-	return w.header
-}
-
-func (w *headLikeResponseWriter) WriteHeader(status int) {
-	w.writeHeaderCalls++
-	w.status = status
-}
-
-func (w *headLikeResponseWriter) Write(p []byte) (int, error) {
-	if w.status == 0 {
-		w.WriteHeader(http.StatusOK)
-	}
-	w.writeCalls++
-	if w.Header().Get("Content-Length") == "" {
-		w.Header().Set("Content-Length", strconv.Itoa(len(p)))
-	}
-	return len(p), nil
-}
-
-func (w *writeCallbackResponseWriter) Write(p []byte) (int, error) {
-	w.writeCalls++
-	return w.ResponseWriter.Write(p)
-}
-
-func (w *transformingResponseWriter) Write(p []byte) (int, error) {
-	w.writeCalls++
-	out := append(append([]byte(nil), p...), w.suffix...)
-	w.lastWrite = append([]byte(nil), out...)
-	return w.ResponseWriter.Write(out)
 }
 
 func decodePayload(t *testing.T, body []byte) payloadMap {
@@ -154,11 +102,13 @@ func assertPublicErrorObject(t *testing.T, got any, want map[string]any) {
 	}
 }
 
-func stringLen(body []byte) string {
-	return strconv.Itoa(len(body))
+func roundTripOverHTTP(t *testing.T, handler func(http.ResponseWriter, *http.Request) error) realHTTPRoundTrip {
+	t.Helper()
+
+	return roundTripOverHTTPMethod(t, http.MethodGet, handler)
 }
 
-func roundTripOverHTTP(t *testing.T, handler func(http.ResponseWriter, *http.Request) error) realHTTPRoundTrip {
+func roundTripOverHTTPMethod(t *testing.T, method string, handler func(http.ResponseWriter, *http.Request) error) realHTTPRoundTrip {
 	t.Helper()
 
 	errCh := make(chan error, 1)
@@ -167,9 +117,13 @@ func roundTripOverHTTP(t *testing.T, handler func(http.ResponseWriter, *http.Req
 	}))
 	defer srv.Close()
 
-	res, err := http.Get(srv.URL)
+	req, err := http.NewRequest(method, srv.URL, nil)
 	if err != nil {
-		t.Fatalf("http.Get() error = %v", err)
+		t.Fatalf("http.NewRequest() error = %v", err)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
 	}
 
 	body, readErr := io.ReadAll(res.Body)

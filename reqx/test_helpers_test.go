@@ -82,6 +82,19 @@ func assertHTTPError(t *testing.T, err error, wantStatus int, wantCode, wantDeta
 	return httpErr
 }
 
+func assertHTTPStatusCode(t *testing.T, err error, wantStatus int, wantCode string) *errx.HTTPError {
+	t.Helper()
+
+	httpErr := assertHTTPErrorLike(t, err)
+	if got := httpErr.Status(); got != wantStatus {
+		t.Fatalf("status = %d, want %d", got, wantStatus)
+	}
+	if got := httpErr.Code(); got != wantCode {
+		t.Fatalf("code = %q, want %q", got, wantCode)
+	}
+	return httpErr
+}
+
 func assertHTTPErrorLike(t *testing.T, err error) *errx.HTTPError {
 	t.Helper()
 
@@ -94,6 +107,10 @@ func assertHTTPErrorLike(t *testing.T, err error) *errx.HTTPError {
 
 func assertNotHTTPError(t *testing.T, err error) {
 	t.Helper()
+
+	if err == nil {
+		t.Fatal("error = nil, want ordinary non-HTTP error")
+	}
 
 	var httpErr *errx.HTTPError
 	if errors.As(err, &httpErr) && httpErr != nil {

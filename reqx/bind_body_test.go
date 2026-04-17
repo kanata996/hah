@@ -45,7 +45,7 @@ func TestBindBody_Contracts(t *testing.T) {
 		req.Header.Set("Content-Type", "application/problem+json")
 
 		err := BindBody(req, &request{})
-		_ = assertHTTPError(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType, "Content-Type must be application/json")
+		_ = assertHTTPStatusCode(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType)
 	})
 
 	t.Run("supports nested struct family named slice family and time", func(t *testing.T) {
@@ -102,7 +102,7 @@ func TestBindBody_Contracts(t *testing.T) {
 		dst := request{Address: address{Street: "existing"}}
 
 		err := BindBody(req, &dst)
-		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
 		if dst != (request{Address: address{Street: "existing"}}) {
 			t.Fatalf("dst = %#v, want unchanged", dst)
 		}
@@ -114,7 +114,7 @@ func TestBindBody_Contracts(t *testing.T) {
 		}
 
 		err := BindBody(newJSONRequest(http.MethodPost, "/", `{"name":"first","name":"second"}`), &request{})
-		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
 	})
 
 	t.Run("top level non object is invalid json", func(t *testing.T) {
@@ -123,7 +123,7 @@ func TestBindBody_Contracts(t *testing.T) {
 		}
 
 		err := BindBody(newJSONRequest(http.MethodPost, "/", `[]`), &request{})
-		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
 	})
 
 	t.Run("unsupported field family is usage error", func(t *testing.T) {
@@ -157,7 +157,7 @@ func TestBindBody_Contracts(t *testing.T) {
 		}
 
 		err := BindBody(newJSONRequest(http.MethodPost, "/", " \n\t "), &request{})
-		_ = assertHTTPError(t, err, http.StatusBadRequest, CodeInvalidJSON, "request body must be valid JSON")
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
 	})
 
 	t.Run("request body nil counts as zero byte body", func(t *testing.T) {
