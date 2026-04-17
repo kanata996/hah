@@ -13,6 +13,13 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.6.1] - 2026-04-18
+
+### Documentation
+
+- Refreshed `README.md` around the root `hah` package's default usage path, package boundaries, public API summary, and boundary responsibilities.
+- Updated `REQUESTS.md` to align the request-input guide with the root facade, including the current `hah.InBody` / `hah.InHeader` and `hah.CodeRequired` examples.
+
 ## [v0.6.0] - 2026-04-17
 
 ### Fixed
