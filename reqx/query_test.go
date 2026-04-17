@@ -415,11 +415,36 @@ func TestQueryTimeParam_EqualBoundariesAreRejected(t *testing.T) {
 func TestQueryTimeParam_EqualAfterBeforeIsUsageError(t *testing.T) {
 	boundary := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
 
-	_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "at").Time().
-		After(boundary).
-		Before(boundary).
-		Get()
-	assertNotHTTPError(t, err)
+	testCases := []struct {
+		name  string
+		build func(*TimeParam) *TimeParam
+		want  string
+	}{
+		{
+			name: "after configured last",
+			build: func(p *TimeParam) *TimeParam {
+				return p.Before(boundary).After(boundary)
+			},
+			want: "reqx: after time must be earlier than before time",
+		},
+		{
+			name: "before configured last",
+			build: func(p *TimeParam) *TimeParam {
+				return p.After(boundary).Before(boundary)
+			},
+			want: "reqx: before time must be later than after time",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.build(Query(httptest.NewRequest(http.MethodGet, "/items", nil), "at").Time()).Get()
+			assertNotHTTPError(t, err)
+			if got := err.Error(); got != tc.want {
+				t.Fatalf("error = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestQueryValues_DefaultSnapshotsAndReturnsCopies(t *testing.T) {
