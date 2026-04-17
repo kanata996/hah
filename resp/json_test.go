@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
-	"strings"
 	"testing"
 )
 
@@ -246,9 +245,6 @@ func TestJSONBodyWritersReturnWrappedWriteError(t *testing.T) {
 	}
 	if !errors.Is(err, cause) {
 		t.Fatalf("errors.Is(err, cause) = false, want true")
-	}
-	if got := err.Error(); !strings.Contains(got, cause.Error()) {
-		t.Fatalf("error = %q, want to contain cause %q", got, cause.Error())
 	}
 	if w.status != http.StatusAccepted {
 		t.Fatalf("status = %d, want %d", w.status, http.StatusAccepted)

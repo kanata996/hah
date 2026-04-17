@@ -77,22 +77,23 @@ func pathHasWildcard(pattern, name string) bool {
 		return false
 	}
 
-	path, ok := serveMuxPatternPath(pattern)
+	pattern, ok := pathPatternPart(pattern)
 	if !ok {
 		return false
 	}
 
+	matched := false
 	seen := make(map[string]struct{})
-	segments := strings.Split(path, "/")
+	segments := strings.Split(pattern, "/")
 	for i, segment := range segments {
-		if segment == "" || segment == "{$}" {
+		if segment == "" {
 			continue
 		}
 		if !strings.ContainsAny(segment, "{}") {
 			continue
 		}
 
-		wildcard, catchAll, ok := parseServeMuxWildcard(segment)
+		wildcard, catchAll, ok := parsePathWildcard(segment)
 		if !ok {
 			return false
 		}
@@ -104,25 +105,38 @@ func pathHasWildcard(pattern, name string) bool {
 		}
 		seen[wildcard] = struct{}{}
 		if wildcard == name {
-			return true
+			matched = true
 		}
 	}
 
-	return false
+	return matched
 }
 
-func serveMuxPatternPath(pattern string) (string, bool) {
-	slash := strings.IndexByte(pattern, '/')
-	if slash < 0 {
+func pathPatternPart(pattern string) (string, bool) {
+	if pattern == "" {
 		return "", false
 	}
-	if strings.ContainsAny(pattern[:slash], "{}") {
+	if pattern[0] == '/' {
+		return pattern, !strings.ContainsAny(pattern, " \t")
+	}
+
+	split := strings.IndexAny(pattern, " \t")
+	if split < 0 {
 		return "", false
 	}
-	return pattern[slash:], true
+	method := pattern[:split]
+	if !isValidPathPatternMethod(method) {
+		return "", false
+	}
+
+	pattern = strings.TrimLeft(pattern[split+1:], " \t")
+	if pattern == "" || pattern[0] != '/' || strings.ContainsAny(pattern, " \t") {
+		return "", false
+	}
+	return pattern, true
 }
 
-func parseServeMuxWildcard(segment string) (name string, catchAll bool, ok bool) {
+func parsePathWildcard(segment string) (name string, catchAll bool, ok bool) {
 	if len(segment) < 3 || segment[0] != '{' || segment[len(segment)-1] != '}' {
 		return "", false, false
 	}
@@ -135,14 +149,14 @@ func parseServeMuxWildcard(segment string) (name string, catchAll bool, ok bool)
 		catchAll = true
 		token = strings.TrimSuffix(token, "...")
 	}
-	if !isValidServeMuxWildcardName(token) {
+	if !isValidPathWildcardName(token) {
 		return "", false, false
 	}
 
 	return token, catchAll, true
 }
 
-func isValidServeMuxWildcardName(name string) bool {
+func isValidPathWildcardName(name string) bool {
 	for i, r := range name {
 		if i == 0 {
 			if r != '_' && !unicode.IsLetter(r) {
@@ -155,4 +169,35 @@ func isValidServeMuxWildcardName(name string) bool {
 		}
 	}
 	return true
+}
+
+func isValidPathPatternMethod(method string) bool {
+	if method == "" {
+		return false
+	}
+	for i := 0; i < len(method); i++ {
+		if !isPathPatternMethodByte(method[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isPathPatternMethodByte(b byte) bool {
+	if '0' <= b && b <= '9' {
+		return true
+	}
+	if 'A' <= b && b <= 'Z' {
+		return true
+	}
+	if 'a' <= b && b <= 'z' {
+		return true
+	}
+
+	switch b {
+	case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+		return true
+	default:
+		return false
+	}
 }

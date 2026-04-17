@@ -3,9 +3,11 @@ package resp
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +25,12 @@ type failingWriter struct {
 	status int
 	writes int
 	cause  error
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func (w *failingWriter) Header() http.Header {
@@ -112,7 +120,14 @@ func roundTripOverHTTPMethod(t *testing.T, method string, handler func(http.Resp
 	t.Helper()
 
 	errCh := make(chan error, 1)
+	doneCh := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer close(doneCh)
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				errCh <- fmt.Errorf("resp test handler panicked: %v", recovered)
+			}
+		}()
 		errCh <- handler(w, r)
 	}))
 	defer srv.Close()
@@ -121,7 +136,7 @@ func roundTripOverHTTPMethod(t *testing.T, method string, handler func(http.Resp
 	if err != nil {
 		t.Fatalf("http.NewRequest() error = %v", err)
 	}
-	res, err := http.DefaultClient.Do(req)
+	res, err := srv.Client().Do(req)
 	if err != nil {
 		t.Fatalf("Do() error = %v", err)
 	}
@@ -131,10 +146,61 @@ func roundTripOverHTTPMethod(t *testing.T, method string, handler func(http.Resp
 		t.Fatalf("Body.Close() error = %v", err)
 	}
 
+	<-doneCh
+	handlerErr := errors.New("resp test handler did not report result")
+	select {
+	case handlerErr = <-errCh:
+	default:
+	}
+
 	return realHTTPRoundTrip{
 		response:   res,
 		body:       body,
 		readErr:    readErr,
-		handlerErr: <-errCh,
+		handlerErr: handlerErr,
+	}
+}
+
+func TestRoundTripOverHTTPMethodConvertsHandlerPanicToError(t *testing.T) {
+	result := roundTripOverHTTPMethod(t, http.MethodGet, func(http.ResponseWriter, *http.Request) error {
+		panic("boom")
+	})
+
+	if result.handlerErr == nil {
+		t.Fatal("expected handler error, got nil")
+	}
+	if got := result.handlerErr.Error(); !strings.Contains(got, "resp test handler panicked: boom") {
+		t.Fatalf("handler error = %q, want to contain panic detail", got)
+	}
+}
+
+func TestRoundTripOverHTTPMethodUsesServerClient(t *testing.T) {
+	original := http.DefaultClient
+	t.Cleanup(func() {
+		http.DefaultClient = original
+	})
+
+	http.DefaultClient = &http.Client{
+		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("poisoned default client")
+		}),
+	}
+
+	result := roundTripOverHTTPMethod(t, http.MethodGet, func(w http.ResponseWriter, _ *http.Request) error {
+		w.WriteHeader(http.StatusNoContent)
+		return nil
+	})
+
+	if result.handlerErr != nil {
+		t.Fatalf("handler error = %v", result.handlerErr)
+	}
+	if result.response.StatusCode != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", result.response.StatusCode, http.StatusNoContent)
+	}
+	if result.readErr != nil {
+		t.Fatalf("ReadAll() error = %v", result.readErr)
+	}
+	if len(result.body) != 0 {
+		t.Fatalf("body = %q, want empty", string(result.body))
 	}
 }

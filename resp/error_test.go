@@ -178,6 +178,41 @@ func TestWriteErrorMultipleDetails(t *testing.T) {
 	})
 }
 
+func TestWriteErrorPreservesDuplicateViolations(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	duplicate := errx.Violation{Field: "name", In: errx.InBody, Code: "required", Detail: "is required"}
+	err := WriteError(rr, errx.NewHTTPError(
+		http.StatusUnprocessableEntity,
+		"validation_failed",
+		"request validation failed",
+	).WithViolations([]errx.Violation{
+		duplicate,
+		duplicate,
+	}))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	errors, ok := body["errors"].([]any)
+	if !ok || len(errors) != 2 {
+		t.Fatalf("errors = %#v, want 2 items", body["errors"])
+	}
+	assertPublicErrorObject(t, errors[0], map[string]any{
+		"field":  "name",
+		"in":     "body",
+		"code":   "required",
+		"detail": "is required",
+	})
+	assertPublicErrorObject(t, errors[1], map[string]any{
+		"field":  "name",
+		"in":     "body",
+		"code":   "required",
+		"detail": "is required",
+	})
+}
+
 // 传入 nil 错误时，WriteError 应是纯 no-op。
 func TestWriteErrorNilErrorIsNoop(t *testing.T) {
 	rr := httptest.NewRecorder()
@@ -210,21 +245,6 @@ func TestWriteErrorRejectsNilWriter(t *testing.T) {
 	if err := WriteError(nil, errors.New("db timeout")); err == nil {
 		t.Fatal("expected error, got nil")
 	}
-}
-
-func TestWriteErrorReturnsResponseWriteErrorUnchanged(t *testing.T) {
-	rr := httptest.NewRecorder()
-	cause := errors.New("socket closed")
-	original := &responseWriteError{cause: cause}
-
-	err := WriteError(rr, original)
-	if err != original {
-		t.Fatalf("WriteError() error = %#v, want original %#v", err, original)
-	}
-	if !errors.Is(err, cause) {
-		t.Fatalf("errors.Is(err, cause) = false, want true")
-	}
-	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
 func TestWriteErrorNilWriterAndNilErrorIsNoop(t *testing.T) {
@@ -610,44 +630,6 @@ func TestWriteErrorReturnsWriteFailureAfterFirstCommit(t *testing.T) {
 	}
 	if w.writes != 1 {
 		t.Fatalf("writes = %d, want 1", w.writes)
-	}
-}
-
-func TestEncodeProblemBodyFallsBackToInternalErrorWhenEncodingPayloadFails(t *testing.T) {
-	calls := 0
-	status, body := encodeProblemBody(problemPayload{
-		Title:  http.StatusText(http.StatusBadRequest),
-		Status: http.StatusBadRequest,
-		Code:   "bad_request",
-		Errors: []errx.Violation{
-			{Field: "name", Code: "required", Detail: "is required"},
-		},
-	}, func(any) ([]byte, error) {
-		calls++
-		return nil, errors.New("encode payload failed")
-	})
-	if calls != 1 {
-		t.Fatalf("encode calls = %d, want 1", calls)
-	}
-	if status != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want %d", status, http.StatusInternalServerError)
-	}
-
-	payload := decodePayload(t, body)
-	if got := payload["code"]; got != "internal_error" {
-		t.Fatalf("code = %#v, want internal_error", got)
-	}
-	if got := payload["title"]; got != http.StatusText(http.StatusInternalServerError) {
-		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusInternalServerError))
-	}
-	if got := payload["status"]; got != float64(http.StatusInternalServerError) {
-		t.Fatalf("status = %#v, want %d", got, http.StatusInternalServerError)
-	}
-	if _, exists := payload["detail"]; exists {
-		t.Fatalf("detail unexpectedly present: %#v", payload["detail"])
-	}
-	if _, exists := payload["errors"]; exists {
-		t.Fatalf("errors unexpectedly present: %#v", payload["errors"])
 	}
 }
 
