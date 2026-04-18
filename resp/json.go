@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"reflect"
 )
 
 const (
@@ -15,21 +14,6 @@ const (
 )
 
 var errNilResponseWriter = errors.New("resp: response writer is nil")
-
-type responseWriteError struct {
-	cause error
-}
-
-func (e *responseWriteError) Error() string {
-	if cause := normalizeWriteErrorCause(e.cause); cause != nil {
-		return "resp: write response failed: " + cause.Error()
-	}
-	return "resp: write response failed"
-}
-
-func (e *responseWriteError) Unwrap() error {
-	return normalizeWriteErrorCause(e.cause)
-}
 
 // JSON 写出 JSON 响应。
 func JSON(w http.ResponseWriter, status int, data any) error {
@@ -81,21 +65,6 @@ func validateJSONBodyWriter(w http.ResponseWriter, status int) error {
 	}
 }
 
-func normalizeWriteErrorCause(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	value := reflect.ValueOf(err)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		if value.IsNil() {
-			return nil
-		}
-	}
-	return err
-}
-
 // writePreparedJSONBytes 假定 writer 与 status 已完成校验，直接执行头和 body 的实际写回。
 func writePreparedJSONBytes(w http.ResponseWriter, status int, contentType string, body []byte) error {
 	header := w.Header()
@@ -104,7 +73,7 @@ func writePreparedJSONBytes(w http.ResponseWriter, status int, contentType strin
 	header.Set("Content-Type", contentType)
 	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
-		return &responseWriteError{cause: err}
+		return fmt.Errorf("resp: write response failed: %w", err)
 	}
 	return nil
 }

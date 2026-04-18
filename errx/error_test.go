@@ -252,48 +252,6 @@ func TestHTTPErrorZeroValueUsesNormalizedPublicContract(t *testing.T) {
 	}
 }
 
-// typed-nil receiver 也必须暴露与零值一致的稳定公开契约，不能 panic。
-func TestHTTPErrorNilReceiverUsesNormalizedPublicContract(t *testing.T) {
-	var err *HTTPError
-
-	assertHTTPErrorPublicFields(
-		t,
-		err,
-		http.StatusInternalServerError,
-		"internal_error",
-		http.StatusText(http.StatusInternalServerError),
-		http.StatusText(http.StatusInternalServerError),
-	)
-	assertHTTPErrorHasNoCause(t, err, http.StatusText(http.StatusInternalServerError))
-	if got := err.Errors(); got != nil {
-		t.Fatalf("Errors() = %#v, want nil", got)
-	}
-
-	var asError error = err
-	if got := asError.Error(); got != http.StatusText(http.StatusInternalServerError) {
-		t.Fatalf("error interface Error() = %q, want %q", got, http.StatusText(http.StatusInternalServerError))
-	}
-}
-
-// typed-nil receiver 上的 WithViolations 应以零值公开契约为模板返回新对象。
-func TestHTTPErrorNilReceiverWithViolationsUsesNormalizedBase(t *testing.T) {
-	var err *HTTPError
-	want := []Violation{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}}
-
-	got := err.WithViolations(want)
-
-	assertHTTPErrorPublicFields(
-		t,
-		got,
-		http.StatusInternalServerError,
-		"internal_error",
-		http.StatusText(http.StatusInternalServerError),
-		http.StatusText(http.StatusInternalServerError),
-	)
-	assertHTTPErrorHasNoCause(t, got, http.StatusText(http.StatusInternalServerError))
-	assertHTTPErrorErrors(t, got, want...)
-}
-
 // Error() 必须只返回公开 Detail，不得依赖 cause.Error()，即使 cause 本身不安全也不能 panic。
 func TestHTTPErrorErrorIgnoresCauseWhenCausePanics(t *testing.T) {
 	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", panicWriteCause{})

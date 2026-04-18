@@ -33,18 +33,6 @@ func newMultiParam[T any](spec paramSpec, parse func([]string) []T) *MultiParam[
 	}
 }
 
-type requiredSetter interface {
-	setRequired()
-}
-
-type defaultSetter[T any] interface {
-	setDefault(T)
-}
-
-type resolver[T any] interface {
-	resolve() (T, error)
-}
-
 func ensureBuilder[P any](p *P) *P {
 	if p == nil {
 		return new(P)
@@ -52,30 +40,10 @@ func ensureBuilder[P any](p *P) *P {
 	return p
 }
 
-func requireParam[P any](p *P, value requiredSetter) *P {
-	value.setRequired()
-	return p
-}
-
-func defaultParam[P any, T any](p *P, value defaultSetter[T], defaultValue T) *P {
-	value.setDefault(defaultValue)
-	return p
-}
-
-func checkParam[P any, T any](p *P, addCheck func(func(T) error), check func(T) error) *P {
-	addCheck(check)
-	return p
-}
-
-func getParam[T any](value resolver[T]) (T, error) {
-	return value.resolve()
-}
-
 type rangeConstraint int
 
 const (
-	rangeConstraintNone rangeConstraint = iota
-	rangeConstraintMin
+	rangeConstraintMin rangeConstraint = iota + 1
 	rangeConstraintMax
 	rangeConstraintAfter
 	rangeConstraintBefore
@@ -246,32 +214,37 @@ type MultiParam[T any] struct {
 
 func (p *ValueParam[T]) Required() *ValueParam[T] {
 	p = ensureBuilder(p)
-	return requireParam(p, &p.value)
+	p.value.setRequired()
+	return p
 }
 
 func (p *ValueParam[T]) Default(value T) *ValueParam[T] {
 	p = ensureBuilder(p)
-	return defaultParam(p, &p.value, value)
+	p.value.setDefault(value)
+	return p
 }
 
 func (p *ValueParam[T]) Check(check func(T) error) *ValueParam[T] {
 	p = ensureBuilder(p)
-	return checkParam(p, p.value.addCheck, check)
+	p.value.addCheck(check)
+	return p
 }
 
 func (p *ValueParam[T]) Get() (T, error) {
 	p = ensureBuilder(p)
-	return getParam(&p.value)
+	return p.value.resolve()
 }
 
 func (p *OrderedParam[T]) Required() *OrderedParam[T] {
 	p = ensureBuilder(p)
-	return requireParam(p, &p.value)
+	p.value.setRequired()
+	return p
 }
 
 func (p *OrderedParam[T]) Default(value T) *OrderedParam[T] {
 	p = ensureBuilder(p)
-	return defaultParam(p, &p.value, value)
+	p.value.setDefault(value)
+	return p
 }
 
 func (p *OrderedParam[T]) Min(value T) *OrderedParam[T] {
@@ -288,22 +261,25 @@ func (p *OrderedParam[T]) Max(value T) *OrderedParam[T] {
 
 func (p *OrderedParam[T]) Check(check func(T) error) *OrderedParam[T] {
 	p = ensureBuilder(p)
-	return checkParam(p, p.value.addCheck, check)
+	p.value.addCheck(check)
+	return p
 }
 
 func (p *OrderedParam[T]) Get() (T, error) {
 	p = ensureBuilder(p)
-	return getParam(&p.value)
+	return p.value.resolve()
 }
 
 func (p *StringParam) Required() *StringParam {
 	p = ensureBuilder(p)
-	return requireParam(p, &p.value)
+	p.value.setRequired()
+	return p
 }
 
 func (p *StringParam) Default(value string) *StringParam {
 	p = ensureBuilder(p)
-	return defaultParam(p, &p.value, value)
+	p.value.setDefault(value)
+	return p
 }
 
 func (p *StringParam) MinLen(n int) *StringParam {
@@ -376,7 +352,8 @@ func (p *StringParam) Match(pattern *regexp.Regexp) *StringParam {
 
 func (p *StringParam) Check(check func(string) error) *StringParam {
 	p = ensureBuilder(p)
-	return checkParam(p, p.value.addCheck, check)
+	p.value.addCheck(check)
+	return p
 }
 
 func (p *StringParam) Get() (string, error) {
@@ -387,7 +364,7 @@ func (p *StringParam) Get() (string, error) {
 	if err := p.constraintUsageErr(); err != nil {
 		return "", err
 	}
-	return getParam(&p.value)
+	return p.value.resolve()
 }
 
 func (p *StringParam) constraintUsageErr() error {
@@ -403,12 +380,14 @@ func (p *StringParam) constraintUsageErr() error {
 
 func (p *TimeParam) Required() *TimeParam {
 	p = ensureBuilder(p)
-	return requireParam(p, &p.value)
+	p.value.setRequired()
+	return p
 }
 
 func (p *TimeParam) Default(value time.Time) *TimeParam {
 	p = ensureBuilder(p)
-	return defaultParam(p, &p.value, value)
+	p.value.setDefault(value)
+	return p
 }
 
 func (p *TimeParam) After(value time.Time) *TimeParam {
@@ -425,32 +404,36 @@ func (p *TimeParam) Before(value time.Time) *TimeParam {
 
 func (p *TimeParam) Check(check func(time.Time) error) *TimeParam {
 	p = ensureBuilder(p)
-	return checkParam(p, p.value.addCheck, check)
+	p.value.addCheck(check)
+	return p
 }
 
 func (p *TimeParam) Get() (time.Time, error) {
 	p = ensureBuilder(p)
-	return getParam(&p.value)
+	return p.value.resolve()
 }
 
 func (p *MultiParam[T]) Required() *MultiParam[T] {
 	p = ensureBuilder(p)
-	return requireParam(p, &p.value)
+	p.value.setRequired()
+	return p
 }
 
 func (p *MultiParam[T]) Default(value []T) *MultiParam[T] {
 	p = ensureBuilder(p)
-	return defaultParam(p, &p.value, value)
+	p.value.setDefault(value)
+	return p
 }
 
 func (p *MultiParam[T]) Check(check func([]T) error) *MultiParam[T] {
 	p = ensureBuilder(p)
-	return checkParam(p, p.value.addCheck, check)
+	p.value.addCheck(check)
+	return p
 }
 
 func (p *MultiParam[T]) Get() ([]T, error) {
 	p = ensureBuilder(p)
-	return getParam(&p.value)
+	return p.value.resolve()
 }
 
 func parseStringValue(value string) (string, error) {

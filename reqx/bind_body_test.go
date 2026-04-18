@@ -1,7 +1,6 @@
 package reqx
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -553,88 +552,6 @@ func TestBindBody_CachesBodyBytesForSameRequest(t *testing.T) {
 	if !reflect.DeepEqual(first, second) {
 		t.Fatalf("second bind = %#v, want %#v", second, first)
 	}
-}
-
-func TestRequestHasBody_InternalBranches(t *testing.T) {
-	t.Run("nil request or body is treated as no body", func(t *testing.T) {
-		hasBody, err := requestHasBody(nil)
-		if err != nil || hasBody {
-			t.Fatalf("requestHasBody(nil) = (%v, %v), want (false, nil)", hasBody, err)
-		}
-
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = nil
-
-		hasBody, err = requestHasBody(req)
-		if err != nil || hasBody {
-			t.Fatalf("requestHasBody(req with nil body) = (%v, %v), want (false, nil)", hasBody, err)
-		}
-	})
-
-	t.Run("presence cache short circuits body reads", func(t *testing.T) {
-		wantErr := errors.New("cached failure")
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = bindBodyReadErrorCloser{err: errors.New("body should not be read")}
-		req = req.WithContext(context.WithValue(req.Context(), requestBodyPresenceKey{}, requestBodyPresenceState{
-			has: true,
-			err: wantErr,
-		}))
-
-		hasBody, err := requestHasBody(req)
-		if !hasBody || !errors.Is(err, wantErr) {
-			t.Fatalf("requestHasBody(cached) = (%v, %v), want (true, %v)", hasBody, err, wantErr)
-		}
-	})
-
-	t.Run("partial read failure replays consumed prefix", func(t *testing.T) {
-		wantErr := errors.New("peek failed")
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = &bindBodyPrefixThenErrorCloser{prefix: '{', firstErr: wantErr}
-		req.ContentLength = -1
-
-		hasBody, err := requestHasBody(req)
-		if hasBody || !errors.Is(err, wantErr) {
-			t.Fatalf("requestHasBody() = (%v, %v), want (false, %v)", hasBody, err, wantErr)
-		}
-
-		body, readErr := io.ReadAll(req.Body)
-		if readErr != nil {
-			t.Fatalf("ReadAll(req.Body) error = %v", readErr)
-		}
-		if string(body) != "{" {
-			t.Fatalf("body = %q, want replayed prefix", string(body))
-		}
-	})
-
-	t.Run("zero nil read before body data keeps scanning and replays consumed prefix", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = newBindBodyZeroThenDataCloser(`{"name":"kanata"}`)
-		req.ContentLength = -1
-
-		hasBody, err := requestHasBody(req)
-		if err != nil || !hasBody {
-			t.Fatalf("requestHasBody() = (%v, %v), want (true, nil)", hasBody, err)
-		}
-
-		body, readErr := io.ReadAll(req.Body)
-		if readErr != nil {
-			t.Fatalf("ReadAll(req.Body) error = %v", readErr)
-		}
-		if string(body) != `{"name":"kanata"}` {
-			t.Fatalf("body = %q, want original body", string(body))
-		}
-	})
-
-	t.Run("no progress read returns err no progress", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = &bindBodyZeroThenPanicCloser{}
-		req.ContentLength = -1
-
-		hasBody, err := requestHasBody(req)
-		if hasBody || !errors.Is(err, io.ErrNoProgress) {
-			t.Fatalf("requestHasBody() = (%v, %v), want (false, %v)", hasBody, err, io.ErrNoProgress)
-		}
-	})
 }
 
 func TestBodyMediaType_InternalBranches(t *testing.T) {

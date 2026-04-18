@@ -27,16 +27,13 @@ const mimeApplicationJSON = "application/json"
 
 type requestBodyCacheKey struct{}
 
-type requestBodyCache struct {
-	body []byte
-	err  error
-}
-
-type requestBodyPresenceKey struct{}
-
-type requestBodyPresenceState struct {
-	has bool
-	err error
+type requestBodyState struct {
+	probed   bool
+	hasBody  bool
+	probeErr error
+	cached   bool
+	body     []byte
+	bodyErr  error
 }
 
 type replayReadCloser struct {
@@ -105,8 +102,9 @@ func validateBindBodyTarget(targetType reflect.Type) error {
 }
 
 func requestBodyBytes(r *http.Request) ([]byte, error) {
-	if cached, ok := r.Context().Value(requestBodyCacheKey{}).(requestBodyCache); ok {
-		return bytes.Clone(cached.body), cached.err
+	state := requestBodyStateFromRequest(r)
+	if state.cached {
+		return bytes.Clone(state.body), state.bodyErr
 	}
 
 	var (
@@ -117,26 +115,30 @@ func requestBodyBytes(r *http.Request) ([]byte, error) {
 		body, err = readBody(r.Body)
 	}
 
-	cache := requestBodyCache{
-		body: bytes.Clone(body),
-		err:  err,
-	}
+	cachedBody := bytes.Clone(body)
+	state.probed = true
+	state.hasBody = len(cachedBody) > 0
+	state.cached = true
+	state.body = cachedBody
+	state.bodyErr = err
 	if err == nil && r.Body != nil {
-		r.Body = io.NopCloser(bytes.NewReader(cache.body))
+		r.Body = io.NopCloser(bytes.NewReader(cachedBody))
 	}
-	*r = *r.WithContext(context.WithValue(r.Context(), requestBodyCacheKey{}, cache))
-	return bytes.Clone(cache.body), cache.err
+	setRequestBodyState(r, state)
+	return bytes.Clone(cachedBody), err
 }
 
 func requestHasBody(r *http.Request) (bool, error) {
 	if r == nil || r.Body == nil {
 		return false, nil
 	}
-	if cached, ok := r.Context().Value(requestBodyCacheKey{}).(requestBodyCache); ok {
-		return len(cached.body) > 0, cached.err
+
+	state := requestBodyStateFromRequest(r)
+	if state.cached {
+		return len(state.body) > 0, state.bodyErr
 	}
-	if cached, ok := r.Context().Value(requestBodyPresenceKey{}).(requestBodyPresenceState); ok {
-		return cached.has, cached.err
+	if state.probed {
+		return state.hasBody, state.probeErr
 	}
 
 	body := r.Body
@@ -149,15 +151,18 @@ func requestHasBody(r *http.Request) (bool, error) {
 				Closer: body,
 			}
 		}
-		*r = *r.WithContext(context.WithValue(r.Context(), requestBodyPresenceKey{}, requestBodyPresenceState{
-			has: false,
-			err: err,
-		}))
+		state.probed = true
+		state.hasBody = false
+		state.probeErr = err
+		setRequestBodyState(r, state)
 		return false, err
 	}
 
 	if n == 0 {
-		*r = *r.WithContext(context.WithValue(r.Context(), requestBodyPresenceKey{}, requestBodyPresenceState{}))
+		state.probed = true
+		state.hasBody = false
+		state.probeErr = nil
+		setRequestBodyState(r, state)
 		return false, nil
 	}
 
@@ -165,10 +170,25 @@ func requestHasBody(r *http.Request) (bool, error) {
 		Reader: io.MultiReader(bytes.NewReader(prefix[:n]), body),
 		Closer: body,
 	}
-	*r = *r.WithContext(context.WithValue(r.Context(), requestBodyPresenceKey{}, requestBodyPresenceState{
-		has: true,
-	}))
+	state.probed = true
+	state.hasBody = true
+	state.probeErr = nil
+	setRequestBodyState(r, state)
 	return true, nil
+}
+
+func requestBodyStateFromRequest(r *http.Request) requestBodyState {
+	if r == nil {
+		return requestBodyState{}
+	}
+	if state, ok := r.Context().Value(requestBodyCacheKey{}).(requestBodyState); ok {
+		return state
+	}
+	return requestBodyState{}
+}
+
+func setRequestBodyState(r *http.Request, state requestBodyState) {
+	*r = *r.WithContext(context.WithValue(r.Context(), requestBodyCacheKey{}, state))
 }
 
 func looksLikeJSONObject(body []byte) bool {

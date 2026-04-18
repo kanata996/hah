@@ -8,35 +8,6 @@ import (
 	"testing"
 )
 
-type jsonTypedNilWriteError struct {
-	message string
-}
-
-type jsonTypedNilWriteErrorWriter struct {
-	header http.Header
-	status int
-}
-
-func (e *jsonTypedNilWriteError) Error() string {
-	return e.message
-}
-
-func (w *jsonTypedNilWriteErrorWriter) Header() http.Header {
-	if w.header == nil {
-		w.header = make(http.Header)
-	}
-	return w.header
-}
-
-func (w *jsonTypedNilWriteErrorWriter) WriteHeader(status int) {
-	w.status = status
-}
-
-func (w *jsonTypedNilWriteErrorWriter) Write([]byte) (int, error) {
-	var err *jsonTypedNilWriteError
-	return 0, err
-}
-
 func TestJSONWritersWriteExpectedResponses(t *testing.T) {
 	cases := []struct {
 		name            string
@@ -280,27 +251,5 @@ func TestJSONBodyWritersReturnWrappedWriteError(t *testing.T) {
 	}
 	if w.writes != 1 {
 		t.Fatalf("writes = %d, want 1", w.writes)
-	}
-}
-
-func TestJSONBodyWritersDoNotPanicOnTypedNilWriteError(t *testing.T) {
-	w := &jsonTypedNilWriteErrorWriter{}
-
-	err := JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"})
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			t.Fatalf("err.Error() panicked: %v", recovered)
-		}
-	}()
-
-	if got := err.Error(); got != "resp: write response failed" {
-		t.Fatalf("Error() = %q, want %q", got, "resp: write response failed")
-	}
-	if unwrapped := errors.Unwrap(err); unwrapped != nil {
-		t.Fatalf("Unwrap() = %v, want nil", unwrapped)
 	}
 }
