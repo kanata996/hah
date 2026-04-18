@@ -13,6 +13,20 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.6.4] - 2026-04-19
+
+### Changed
+
+- Relaxed `resp.JSON(...)` / `hah.JSON(...)` status handling so callers may write JSON for any valid HTTP status that can carry a response body, instead of being limited to `200` / `201` / `202`. The public contract still rejects `1xx`, `204 No Content`, `205 Reset Content`, `304 Not Modified`, and invalid status codes before committing the response.
+
+### Documentation
+
+- Refreshed `README.md`, `REQUESTS.md`, package docs, and the request/response design docs to clarify the root-package fallback guidance, the zero-byte body `Content-Type` contract, the struct-target scope of ignored unknown query keys, and the broadened `JSON(...)` response-status semantics.
+
+### Testing
+
+- Expanded regression coverage across `reqx` and `resp`, including request-body peek replay on read failure, additional query-builder usage/constraint guardrails, and `JSON(...)` status acceptance for body-bearing `2xx` / `3xx` / `4xx` / `5xx` responses.
+
 ## [v0.6.3] - 2026-04-19
 
 ### Fixed
