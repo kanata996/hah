@@ -140,7 +140,16 @@ func requestHasBody(r *http.Request) (bool, error) {
 
 	body := r.Body
 	var prefix [1]byte
-	n, err := body.Read(prefix[:])
+	var (
+		n   int
+		err error
+	)
+	for {
+		n, err = body.Read(prefix[:])
+		if n != 0 || err != nil {
+			break
+		}
+	}
 	if err != nil && err != io.EOF {
 		if n > 0 {
 			r.Body = &replayReadCloser{
@@ -176,7 +185,15 @@ func looksLikeJSONObject(body []byte) bool {
 }
 
 func bodyMediaType(r *http.Request) (string, error) {
-	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
+	contentTypes := r.Header.Values("Content-Type")
+	if len(contentTypes) > 1 {
+		return "", errDuplicateContentType
+	}
+
+	contentType := ""
+	if len(contentTypes) == 1 {
+		contentType = strings.TrimSpace(contentTypes[0])
+	}
 	if contentType == "" {
 		return "", nil
 	}
@@ -214,6 +231,7 @@ func invalidJSONError(cause error) error {
 }
 
 var errRequestTooLarge = errors.New("reqx: request body too large")
+var errDuplicateContentType = errors.New("reqx: multiple Content-Type values")
 
 func readBody(body io.ReadCloser) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(body, defaultMaxBodyBytes+1))

@@ -13,6 +13,11 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+### Fixed
+
+- Hardened `reqx.BindBody(...)` / `hah.BindBody(...)` body-presence probing so a transient `Body.Read(...) == (0, nil)` no longer makes a non-empty request body silently look empty.
+- Hardened `reqx.BindBody(...)` / `hah.BindBody(...)` media-type validation so duplicate `Content-Type` values are rejected as `415 unsupported_media_type` instead of silently trusting the first value.
+
 ## [v0.6.2] - 2026-04-19
 
 ### Breaking

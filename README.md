@@ -174,6 +174,7 @@ DTO binding 与显式规则：
 - malformed raw query 返回稳定 `400 bad_request` 且不修改 target；DTO 或 tag 形状非法时，先返回普通错误且不修改 target
 - `hah.BindBody(...)` 公开只支持非 `nil` 的 `*struct` DTO target
 - `hah.BindBody(...)` 在同一个 request 上会缓存 body 字节，因此可和 `hah.RequireBody(...)` 按任意顺序组合
+- 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，未知字段默认拒绝
 - struct 字段解码直接跟随标准库 `encoding/json`；像 `json.RawMessage`、自定义 `UnmarshalJSON` / `UnmarshalText` 类型默认允许
 - 绑定先解到临时值，成功后才一次性提交，因此失败不会污染 target
