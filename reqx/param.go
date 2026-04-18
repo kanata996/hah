@@ -38,33 +38,52 @@ func (s paramSpec) values() ([]string, bool, error) {
 	return values, exists, nil
 }
 
-type paramState[T any] struct {
-	clone        func(T) T
-	required     bool
-	hasDefault   bool
-	defaultValue T
-	checks       []paramCheck[T]
-	usageErr     error
+type paramValue[T any] struct {
+	spec          paramSpec
+	parse         func([]string) (T, error)
+	clone         func(T) T
+	allowMultiple bool
+	required      bool
+	hasDefault    bool
+	defaultValue  T
+	checks        []paramCheck[T]
+	usageErr      error
 }
 
-func newParamState[T any](clone func(T) T) paramState[T] {
-	return paramState[T]{clone: clone}
+func newParamValue[T any](spec paramSpec, parse func(string) (T, error)) paramValue[T] {
+	return paramValue[T]{
+		spec: spec,
+		parse: func(values []string) (T, error) {
+			return parse(values[0])
+		},
+	}
 }
 
-func (p *paramState[T]) cloneValue(value T) T {
+func newMultiParamValue[T any](spec paramSpec, parse func([]string) T, clone func(T) T) paramValue[T] {
+	return paramValue[T]{
+		spec:          spec,
+		clone:         clone,
+		allowMultiple: true,
+		parse: func(values []string) (T, error) {
+			return parse(values), nil
+		},
+	}
+}
+
+func (p *paramValue[T]) cloneValue(value T) T {
 	if p.clone == nil {
 		return value
 	}
 	return p.clone(value)
 }
 
-func (p *paramState[T]) setUsageErr(err error) {
+func (p *paramValue[T]) setUsageErr(err error) {
 	if p.usageErr == nil {
 		p.usageErr = err
 	}
 }
 
-func (p *paramState[T]) setRequired() {
+func (p *paramValue[T]) setRequired() {
 	if p.hasDefault {
 		p.setUsageErr(usageErrorf("required and default are mutually exclusive"))
 		return
@@ -72,7 +91,7 @@ func (p *paramState[T]) setRequired() {
 	p.required = true
 }
 
-func (p *paramState[T]) setDefault(value T) {
+func (p *paramValue[T]) setDefault(value T) {
 	if p.required {
 		p.setUsageErr(usageErrorf("required and default are mutually exclusive"))
 		return
@@ -81,7 +100,7 @@ func (p *paramState[T]) setDefault(value T) {
 	p.defaultValue = p.cloneValue(value)
 }
 
-func (p *paramState[T]) addCheck(check func(T) error) {
+func (p *paramValue[T]) addCheck(check func(T) error) {
 	if check == nil {
 		p.setUsageErr(usageErrorf("check must not be nil"))
 		return
@@ -89,7 +108,7 @@ func (p *paramState[T]) addCheck(check func(T) error) {
 	p.checks = append(p.checks, paramCheck[T]{fn: check})
 }
 
-func (p *paramState[T]) setNamedCheck(name string, check func(T) error) {
+func (p *paramValue[T]) setNamedCheck(name string, check func(T) error) {
 	filtered := p.checks[:0]
 	for _, existing := range p.checks {
 		if existing.name == name {
@@ -97,15 +116,13 @@ func (p *paramState[T]) setNamedCheck(name string, check func(T) error) {
 		}
 		filtered = append(filtered, existing)
 	}
-	p.checks = filtered
-
-	p.checks = append(p.checks, paramCheck[T]{
+	p.checks = append(filtered, paramCheck[T]{
 		name: name,
 		fn:   check,
 	})
 }
 
-func (p *paramState[T]) resolveMissing(spec paramSpec) (T, error) {
+func (p *paramValue[T]) resolveMissing() (T, error) {
 	var zero T
 	switch {
 	case p.hasDefault:
@@ -115,13 +132,13 @@ func (p *paramState[T]) resolveMissing(spec paramSpec) (T, error) {
 		}
 		return value, nil
 	case p.required:
-		return zero, InvalidRequest(newViolation(spec.name, spec.input, errx.CodeRequired, ""))
+		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeRequired, ""))
 	default:
 		return zero, nil
 	}
 }
 
-func (p *paramState[T]) runDefaultChecks(value T) error {
+func (p *paramValue[T]) runDefaultChecks(value T) error {
 	for _, check := range p.checks {
 		if err := check.fn(value); err != nil {
 			return usageErrorf("default value failed validation")
@@ -130,49 +147,19 @@ func (p *paramState[T]) runDefaultChecks(value T) error {
 	return nil
 }
 
-func (p *paramState[T]) runRequestChecks(spec paramSpec, value T) (T, error) {
+func (p *paramValue[T]) runRequestChecks(value T) (T, error) {
 	for _, check := range p.checks {
 		if err := check.fn(value); err != nil {
-			return value, InvalidRequest(newViolation(spec.name, spec.input, errx.CodeInvalid, ""))
+			return value, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
 		}
 	}
 	return value, nil
 }
 
-type paramValue[T any] struct {
-	spec  paramSpec
-	parse func(string) (T, error)
-	state paramState[T]
-}
-
-func newParamValue[T any](spec paramSpec, parse func(string) (T, error)) paramValue[T] {
-	return paramValue[T]{
-		spec:  spec,
-		parse: parse,
-		state: newParamState[T](nil),
-	}
-}
-
-func (p *paramValue[T]) setUsageErr(err error) {
-	p.state.setUsageErr(err)
-}
-
-func (p *paramValue[T]) setRequired() {
-	p.state.setRequired()
-}
-
-func (p *paramValue[T]) setDefault(value T) {
-	p.state.setDefault(value)
-}
-
-func (p *paramValue[T]) addCheck(check func(T) error) {
-	p.state.addCheck(check)
-}
-
 func (p *paramValue[T]) resolve() (T, error) {
 	var zero T
-	if p.state.usageErr != nil {
-		return zero, p.state.usageErr
+	if p.usageErr != nil {
+		return zero, p.usageErr
 	}
 
 	values, exists, err := p.spec.values()
@@ -180,60 +167,16 @@ func (p *paramValue[T]) resolve() (T, error) {
 		return zero, err
 	}
 	if !exists || len(values) == 0 {
-		return p.state.resolveMissing(p.spec)
+		return p.resolveMissing()
 	}
-	if len(values) > 1 {
+	if !p.allowMultiple && len(values) > 1 {
 		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeMultiple, ""))
 	}
 
-	value, err := p.parse(values[0])
+	value, err := p.parse(values)
 	if err != nil {
 		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
 	}
 
-	return p.state.runRequestChecks(p.spec, value)
-}
-
-type multiParamValue[T any] struct {
-	spec  paramSpec
-	parse func([]string) T
-	state paramState[T]
-}
-
-func newMultiParamValue[T any](spec paramSpec, parse func([]string) T, clone func(T) T) multiParamValue[T] {
-	return multiParamValue[T]{
-		spec:  spec,
-		parse: parse,
-		state: newParamState(clone),
-	}
-}
-
-func (p *multiParamValue[T]) setRequired() {
-	p.state.setRequired()
-}
-
-func (p *multiParamValue[T]) setDefault(value T) {
-	p.state.setDefault(value)
-}
-
-func (p *multiParamValue[T]) addCheck(check func(T) error) {
-	p.state.addCheck(check)
-}
-
-func (p *multiParamValue[T]) resolve() (T, error) {
-	var zero T
-	if p.state.usageErr != nil {
-		return zero, p.state.usageErr
-	}
-
-	values, exists, err := p.spec.values()
-	if err != nil {
-		return zero, err
-	}
-	if !exists || len(values) == 0 {
-		return p.state.resolveMissing(p.spec)
-	}
-
-	value := p.parse(values)
-	return p.state.runRequestChecks(p.spec, value)
+	return p.runRequestChecks(value)
 }
