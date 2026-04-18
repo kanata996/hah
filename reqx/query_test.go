@@ -528,6 +528,14 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 		assertNotHTTPError(t, err)
 	})
 
+	t.Run("default then required is also a usage error", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "enabled").Bool().
+			Default(true).
+			Required().
+			Get()
+		assertNotHTTPError(t, err)
+	})
+
 	t.Run("string and numeric constraints cover failure and conflict", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?mode=go", nil), "mode").String().
 			MinLen(3).
@@ -545,9 +553,33 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 			Get()
 		assertInvalidViolationAt(t, err, "page", errx.InQuery)
 
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?page=4", nil), "page").Int().
+			Max(3).
+			Get()
+		assertInvalidViolationAt(t, err, "page", errx.InQuery)
+
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
 			Min(4).
 			Max(3).
+			Get()
+		assertNotHTTPError(t, err)
+
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
+			Max(3).
+			Min(4).
+			Get()
+		assertNotHTTPError(t, err)
+
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "mode").String().
+			MaxLen(2).
+			MinLen(3).
+			Get()
+		assertNotHTTPError(t, err)
+	})
+
+	t.Run("time invalid builder configuration is usage error", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "at").Time().
+			Check(nil).
 			Get()
 		assertNotHTTPError(t, err)
 	})
@@ -622,6 +654,26 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?enabled=", nil), "enabled").Bool().Get()
 		assertInvalidViolationAt(t, err, "enabled", errx.InQuery)
+	})
+
+	t.Run("time before accepts earlier values and default then required stays usage error", func(t *testing.T) {
+		boundary := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?at=2026-04-13T09:30:00Z", nil), "at").Time().
+			Before(boundary).
+			Get()
+		if err != nil {
+			t.Fatalf("Time().Before().Get() error = %v", err)
+		}
+		if got.UTC().Format(time.RFC3339) != "2026-04-13T09:30:00Z" {
+			t.Fatalf("time = %q, want 2026-04-13T09:30:00Z", got.UTC().Format(time.RFC3339))
+		}
+
+		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "at").Time().
+			Default(boundary).
+			Required().
+			Get()
+		assertNotHTTPError(t, err)
 	})
 
 	t.Run("missing optional skips built in constraints and match uses regexp semantics", func(t *testing.T) {

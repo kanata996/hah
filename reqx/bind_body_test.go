@@ -576,6 +576,38 @@ func TestBindBody_CachesBodyBytesForSameRequest(t *testing.T) {
 	}
 }
 
+func TestRequestHasBody_ReplaysPeekedPrefixOnReadError(t *testing.T) {
+	wantErr := errors.New("peek failed")
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Body = &bindBodyPrefixThenErrorCloser{
+		prefix:   '{',
+		firstErr: wantErr,
+	}
+	req.ContentLength = -1
+
+	hasBody, err := requestHasBody(req)
+	if hasBody {
+		t.Fatal("requestHasBody() reported body present on read error, want false")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("requestHasBody() error = %v, want %v", err, wantErr)
+	}
+
+	body, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("ReadAll(req.Body) error = %v", readErr)
+	}
+	if string(body) != "{" {
+		t.Fatalf("body = %q, want replayed peeked prefix", string(body))
+	}
+}
+
+func TestRequestBodyStateFromRequest_NilRequest(t *testing.T) {
+	if state := requestBodyStateFromRequest(nil); state.loaded || state.body != nil || state.err != nil {
+		t.Fatalf("requestBodyStateFromRequest(nil) = %#v, want zero state", state)
+	}
+}
+
 func TestBodyMediaType_InternalBranches(t *testing.T) {
 	t.Run("empty content type is allowed", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
