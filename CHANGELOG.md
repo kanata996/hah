@@ -13,6 +13,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.6.3] - 2026-04-19
+
 ### Fixed
 
 - Hardened `reqx.BindBody(...)` / `hah.BindBody(...)` body-presence probing so a transient `Body.Read(...) == (0, nil)` no longer makes a non-empty request body silently look empty.
