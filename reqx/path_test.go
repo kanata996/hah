@@ -78,6 +78,29 @@ func TestPathBuilder_BaselineContracts(t *testing.T) {
 		assertNotHTTPError(t, err)
 	})
 
+	t.Run("typed nil builders are usage errors", func(t *testing.T) {
+		t.Run("PathParam entrypoints", func(t *testing.T) {
+			testCases := []struct {
+				name string
+				run  func(*PathParam) error
+			}{
+				{name: "String", run: func(p *PathParam) error { _, err := p.String().Get(); return err }},
+				{name: "Int", run: func(p *PathParam) error { _, err := p.Int().Min(1).Get(); return err }},
+				{name: "Int64", run: func(p *PathParam) error { _, err := p.Int64().Max(1).Get(); return err }},
+				{name: "Uint", run: func(p *PathParam) error { _, err := p.Uint().Min(1).Get(); return err }},
+				{name: "Uint64", run: func(p *PathParam) error { _, err := p.Uint64().Max(1).Get(); return err }},
+				{name: "UUID", run: func(p *PathParam) error { _, err := p.UUID().Required().Get(); return err }},
+			}
+
+			for _, tc := range testCases {
+				t.Run(tc.name, func(t *testing.T) {
+					var builder *PathParam
+					assertNotHTTPError(t, tc.run(builder))
+				})
+			}
+		})
+	})
+
 	t.Run("optional missing returns zero and required is idempotent", func(t *testing.T) {
 		got, err := Path(requestWithPathParams(nil), "count").Int().Get()
 		if err != nil {

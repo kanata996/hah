@@ -153,6 +153,76 @@ func TestQueryBuilder_BaselineContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("typed nil builders are usage errors", func(t *testing.T) {
+		t.Run("QueryParam entrypoints", func(t *testing.T) {
+			testCases := []struct {
+				name string
+				run  func(*QueryParam) error
+			}{
+				{name: "String", run: func(p *QueryParam) error { _, err := p.String().Get(); return err }},
+				{name: "Int", run: func(p *QueryParam) error { _, err := p.Int().Min(1).Get(); return err }},
+				{name: "Bool", run: func(p *QueryParam) error { _, err := p.Bool().Required().Get(); return err }},
+				{name: "Float64", run: func(p *QueryParam) error { _, err := p.Float64().Max(1).Get(); return err }},
+				{name: "Duration", run: func(p *QueryParam) error { _, err := p.Duration().Min(time.Second).Get(); return err }},
+				{name: "UUID", run: func(p *QueryParam) error { _, err := p.UUID().Required().Get(); return err }},
+				{name: "Time", run: func(p *QueryParam) error { _, err := p.Time().After(time.Time{}).Get(); return err }},
+				{name: "UnixTime", run: func(p *QueryParam) error { _, err := p.UnixTime().Before(time.Now()).Get(); return err }},
+				{name: "Values", run: func(p *QueryParam) error { _, err := p.Values().Required().Get(); return err }},
+			}
+
+			for _, tc := range testCases {
+				t.Run(tc.name, func(t *testing.T) {
+					var builder *QueryParam
+					assertNotHTTPError(t, tc.run(builder))
+				})
+			}
+		})
+
+		t.Run("typed builder families", func(t *testing.T) {
+			testCases := []struct {
+				name string
+				run  func() error
+			}{
+				{name: "StringParam direct Get", run: func() error {
+					var p *StringParam
+					_, err := p.Get()
+					return err
+				}},
+				{name: "StringParam chained methods", run: func() error {
+					var p *StringParam
+					_, err := p.Required().MinLen(1).MaxLen(3).Match(regexp.MustCompile(".")).Get()
+					return err
+				}},
+				{name: "ValueParam chain", run: func() error {
+					var p *ValueParam[bool]
+					_, err := p.Required().Check(func(bool) error { return nil }).Get()
+					return err
+				}},
+				{name: "OrderedParam chain", run: func() error {
+					var p *OrderedParam[int]
+					_, err := p.Min(1).Max(3).Check(func(int) error { return nil }).Get()
+					return err
+				}},
+				{name: "TimeParam chain", run: func() error {
+					var p *TimeParam
+					_, err := p.After(time.Time{}).Before(time.Now()).Check(func(time.Time) error { return nil }).Get()
+					return err
+				}},
+				{name: "MultiParam chain", run: func() error {
+					var p *MultiParam[string]
+					_, err := p.Required().Check(func([]string) error { return nil }).Get()
+					return err
+				}},
+			}
+
+			for _, tc := range testCases {
+				t.Run(tc.name, func(t *testing.T) {
+					assertNotHTTPError(t, tc.run())
+				})
+			}
+		})
+	})
+
 	t.Run("required is idempotent and later default wins", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
 			Required().
