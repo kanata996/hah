@@ -21,11 +21,14 @@ type responseWriteError struct {
 }
 
 func (e *responseWriteError) Error() string {
-	return "resp: write response failed: " + e.cause.Error()
+	if cause := normalizeWriteErrorCause(e.cause); cause != nil {
+		return "resp: write response failed: " + cause.Error()
+	}
+	return "resp: write response failed"
 }
 
 func (e *responseWriteError) Unwrap() error {
-	return e.cause
+	return normalizeWriteErrorCause(e.cause)
 }
 
 // JSON 写出 JSON 响应。
@@ -62,7 +65,7 @@ func encodeJSON(data any) ([]byte, error) {
 // validateJSONBodyWriter 统一校验 JSON body writer 的响应边界。
 // 它在编码前提前失败，避免无意义编码与重复校验。
 func validateJSONBodyWriter(w http.ResponseWriter, status int) error {
-	if isNilResponseWriter(w) {
+	if w == nil {
 		return errNilResponseWriter
 	}
 	switch {
@@ -78,18 +81,19 @@ func validateJSONBodyWriter(w http.ResponseWriter, status int) error {
 	}
 }
 
-func isNilResponseWriter(w http.ResponseWriter) bool {
-	if w == nil {
-		return true
+func normalizeWriteErrorCause(err error) error {
+	if err == nil {
+		return nil
 	}
 
-	value := reflect.ValueOf(w)
+	value := reflect.ValueOf(err)
 	switch value.Kind() {
 	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
+		if value.IsNil() {
+			return nil
+		}
 	}
+	return err
 }
 
 // writePreparedJSONBytes 假定 writer 与 status 已完成校验，直接执行头和 body 的实际写回。

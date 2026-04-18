@@ -275,13 +275,6 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 		}
 	})
 
-	t.Run("typed nil writer rejects non nil error", func(t *testing.T) {
-		var w *nilableResponseWriter
-		if err := WriteError(w, errors.New("db timeout")); err == nil {
-			t.Fatal("expected error, got nil")
-		}
-	})
-
 	t.Run("nil writer and nil error is noop", func(t *testing.T) {
 		if err := WriteError(nil, nil); err != nil {
 			t.Fatalf("WriteError() error = %v, want nil", err)

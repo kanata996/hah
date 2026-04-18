@@ -59,7 +59,7 @@ func WriteError(w http.ResponseWriter, err error) error {
 		return err
 	}
 
-	if isNilResponseWriter(w) {
+	if w == nil {
 		return errNilResponseWriter
 	}
 

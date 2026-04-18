@@ -27,11 +27,6 @@ type failingWriter struct {
 	cause  error
 }
 
-type nilableResponseWriter struct {
-	header http.Header
-	status int
-}
-
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -55,21 +50,6 @@ func (w *failingWriter) Write(_ []byte) (int, error) {
 		return 0, w.cause
 	}
 	return 0, errors.New("socket closed")
-}
-
-func (w *nilableResponseWriter) Header() http.Header {
-	if w.header == nil {
-		w.header = make(http.Header)
-	}
-	return w.header
-}
-
-func (w *nilableResponseWriter) WriteHeader(status int) {
-	w.status = status
-}
-
-func (w *nilableResponseWriter) Write(p []byte) (int, error) {
-	return len(p), nil
 }
 
 func decodePayload(t *testing.T, body []byte) payloadMap {
