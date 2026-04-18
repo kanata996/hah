@@ -59,18 +59,13 @@ func WriteError(w http.ResponseWriter, err error) error {
 	}
 
 	payload := normalizeProblemPayload(err)
-	status, body := encodeProblemBody(payload, problemBodyEncoder)
-	return writePreparedJSONBytes(w, status, problemJSONContentType, body)
-}
-
-// encodeProblemBody 负责把公开错误 payload 编码成响应体。
-// 若主 payload 意外编码失败，则回退到最小 500 problem JSON，避免对外暴露内部细节。
-func encodeProblemBody(payload problemPayload, encode func(any) ([]byte, error)) (status int, body []byte) {
-	body, err := encode(payload)
-	if err == nil {
-		return payload.Status, body
+	status := payload.Status
+	body, encodeErr := problemBodyEncoder(payload)
+	if encodeErr != nil {
+		status = http.StatusInternalServerError
+		body = internalProblemBody
 	}
-	return http.StatusInternalServerError, internalProblemBody
+	return writePreparedJSONBytes(w, status, problemJSONContentType, body)
 }
 
 func normalizeProblemPayload(err error) problemPayload {

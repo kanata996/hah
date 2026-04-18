@@ -3,7 +3,6 @@ package errx
 import (
 	"net/http"
 	"reflect"
-	"slices"
 	"strings"
 )
 
@@ -69,43 +68,31 @@ func (e *HTTPError) Unwrap() error {
 // Status 返回可公开返回的 HTTP 错误状态码。
 // 即使内部字段被错误写入，也会再次收敛到安全范围。
 func (e *HTTPError) Status() int {
-	if e == nil || e.status == 0 {
-		return http.StatusInternalServerError
-	}
-	return e.status
+	return e.normalizedStatus()
 }
 
 // Code 返回机器可读错误码。
 // 若构造时未显式提供，或内部字段被写成空白值，会按最终状态码补齐默认值。
 func (e *HTTPError) Code() string {
-	if e == nil {
-		return normalizeErrorCode(http.StatusInternalServerError, "")
-	}
-	if e.code != "" {
+	if e != nil && e.code != "" {
 		return e.code
 	}
-	return normalizeErrorCode(e.Status(), "")
+	return defaultErrorCode(e.normalizedStatus())
 }
 
 // Title 返回公开错误标题。
 // 这里不读取 detail/cause，只取“状态码对应的稳定标题”。
 func (e *HTTPError) Title() string {
-	if e == nil {
-		return normalizeErrorTitle(http.StatusInternalServerError)
-	}
-	return normalizeErrorTitle(e.Status())
+	return defaultErrorTitle(e.normalizedStatus())
 }
 
 // Detail 返回公开错误详情。
 // 若 detail 为空白，则回退到与 Title 对齐的稳定默认文案。
 func (e *HTTPError) Detail() string {
-	if e == nil {
-		return normalizeErrorDetail(http.StatusInternalServerError, "")
-	}
-	if e.detail != "" {
+	if e != nil && e.detail != "" {
 		return e.detail
 	}
-	return normalizeErrorDetail(e.Status(), "")
+	return defaultErrorTitle(e.normalizedStatus())
 }
 
 // Errors 返回公开结构化错误详情列表的防御性浅拷贝。
@@ -162,7 +149,14 @@ func cloneViolations(violations []Violation) []Violation {
 	if len(violations) == 0 {
 		return nil
 	}
-	return slices.Clone(violations)
+	return append([]Violation(nil), violations...)
+}
+
+func (e *HTTPError) normalizedStatus() int {
+	if e == nil || e.status == 0 {
+		return http.StatusInternalServerError
+	}
+	return e.status
 }
 
 // normalizeErrorCause 把 typed-nil error 收敛为真正的 nil，避免污染 Error/Unwrap 链语义。
@@ -195,8 +189,10 @@ func normalizeErrorCode(status int, code string) string {
 	if trimmed := strings.TrimSpace(code); trimmed != "" {
 		return trimmed
 	}
-	status = normalizeErrorStatus(status)
+	return defaultErrorCode(status)
+}
 
+func defaultErrorCode(status int) string {
 	switch status {
 	case 499:
 		return "client_closed_request"
@@ -230,10 +226,7 @@ func normalizeErrorCode(status int, code string) string {
 	}
 }
 
-// normalizeErrorTitle 根据状态码生成公开错误标题。
-// 对标准状态优先使用 net/http 的状态文本；对 499 等非标准状态做显式补齐。
-func normalizeErrorTitle(status int) string {
-	status = normalizeErrorStatus(status)
+func defaultErrorTitle(status int) string {
 	switch status {
 	case 499:
 		return "Client Closed Request"
@@ -253,5 +246,5 @@ func normalizeErrorDetail(status int, detail string) string {
 	if trimmed := strings.TrimSpace(detail); trimmed != "" {
 		return trimmed
 	}
-	return normalizeErrorTitle(status)
+	return defaultErrorTitle(status)
 }

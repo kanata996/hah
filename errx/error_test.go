@@ -404,6 +404,23 @@ func TestHTTPErrorWithViolationsNilAndEmptyInputReplaceExistingViolations(t *tes
 	}
 }
 
+func TestNilHTTPErrorWithViolationsUsesDefaultContract(t *testing.T) {
+	var base *HTTPError
+
+	err := base.WithViolations([]Violation{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}})
+
+	assertHTTPErrorPublicFields(
+		t,
+		err,
+		http.StatusInternalServerError,
+		"internal_error",
+		http.StatusText(http.StatusInternalServerError),
+		http.StatusText(http.StatusInternalServerError),
+	)
+	assertHTTPErrorHasNoCause(t, err, http.StatusText(http.StatusInternalServerError))
+	assertHTTPErrorErrors(t, err, Violation{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"})
+}
+
 // 即使 detail 为空，Error 也应与公开 Detail 保持一致，不返回空串。
 func TestHTTPErrorErrorFallsBackToNormalizedDetail(t *testing.T) {
 	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", nil)
