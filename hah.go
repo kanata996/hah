@@ -54,7 +54,7 @@ func Query(r *http.Request, name string) *reqx.QueryParam {
 
 // RequireBody 按默认 binder 契约要求请求必须显式提交 body。
 //
-// 它和 BindBody 共享同一个非破坏性 body 探测，因此可按调用方需要在绑定前后调用。
+// 它可按调用方需要在 BindBody 前后组合使用。
 func RequireBody(r *http.Request) error {
 	return reqx.RequireBody(r)
 }
