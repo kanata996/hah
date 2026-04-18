@@ -1,6 +1,7 @@
 package reqx
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/kanata996/hah/errx"
@@ -19,18 +20,21 @@ func InvalidRequest(violations ...errx.Violation) error {
 
 // RequireBody 按 body 绑定契约要求请求必须显式提交 body。
 //
-// 在当前实现里，实际读取到零字节 body 会被视为“没有 body”，与 BindBody 的
-// empty-body no-op 语义保持一致。它可按调用方需要在 BindBody 前后组合使用。
+// 在当前实现里，它与 BindBody 共享同一个 request 上已经读取过的 body 字节，
+// 因此可按调用方需要在同一个 request 上前后组合使用。
 func RequireBody(r *http.Request) error {
 	if r == nil {
 		return usageErrorf("request must not be nil")
 	}
 
-	hasBody, err := hasRequestBody(r)
+	body, err := requestBodyBytes(r)
 	if err != nil {
+		if errors.Is(err, errRequestTooLarge) {
+			return requestTooLargeError()
+		}
 		return err
 	}
-	if hasBody {
+	if len(body) > 0 {
 		return nil
 	}
 

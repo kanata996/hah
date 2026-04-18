@@ -1,7 +1,6 @@
 package reqx
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,12 +15,11 @@ type benchmarkBodyRequest struct {
 func BenchmarkBindBody_SmallJSON(b *testing.B) {
 	b.ReportAllocs()
 
-	req := httptest.NewRequest(http.MethodPost, "/", http.NoBody)
-	req.Header.Set("Content-Type", "application/json")
 	const payload = `{"name":"kanata","age":17}`
 
 	for b.Loop() {
-		req.Body = io.NopCloser(strings.NewReader(payload))
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
 
 		var dst benchmarkBodyRequest
 		if err := BindBody(req, &dst); err != nil {

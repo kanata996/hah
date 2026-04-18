@@ -150,15 +150,16 @@ if err := hah.BindBody(r, &body); err != nil {
 
 - 实际读取到零字节 body 时视为 no-op
 - 公开只支持非 `nil` 的 `*struct` DTO target
-- 顶层 target 若通过 `json.Unmarshaler` / `encoding.TextUnmarshaler` 整体解码（例如 `*time.Time`），属于 usage error
+- `BindBody(...)` / `RequireBody(...)` 会在同一个 request 上共享已读取的 body 字节，因此可以按任意顺序组合
 - 这个 no-op 发生在 `Content-Type` 检查之前
 - 非空 body 只接受 `application/json`
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，只允许前后空白
 - 默认使用标准库 `encoding/json`
 - 不接受 `application/*+json`
-- struct 字段支持范围按公开表闭集处理；超出表格的字段类型直接返回 usage error
+- struct 字段解码直接跟随标准库 `encoding/json`；像 `json.RawMessage`、命名类型、自定义 `UnmarshalJSON` / `UnmarshalText` 类型默认允许
 - 默认拒绝未知字段
-- 顶层 `null`、array、string、number、boolean 返回 `invalid_json`；任一 object 层级的重复 key 都返回 `invalid_json`
+- 顶层 `null`、array、string、number、boolean 返回 `invalid_json`
+- 同名 JSON object key 跟随标准库 `encoding/json` 语义，后值覆盖前值
 - 截断 JSON / `unexpected EOF` 返回 `invalid_json`
 - 非 JSON 语义的 body read failure 返回普通 error，不收敛成 `HTTPError`
 - 绑定先解码到临时值；成功后才一次性提交，因此 JSON 里缺失的字段不会继承 DTO 旧值
@@ -171,6 +172,7 @@ if err := hah.BindBody(r, &body); err != nil {
 - 零字节 body 对 `BindBody(...)` 是 no-op，对 `RequireBody(...)` 视为缺失
 - 仅空白字符 body 对 `RequireBody(...)` 视为存在，但对 `BindBody(...)` 返回 `invalid_json`
 - 顶层 `null` 对 `RequireBody(...)` 视为存在，但对 `BindBody(...)` 返回 `invalid_json`
+- clone / sibling request 不属于默认组合契约；如果要复用同一份 body，请在同一个 request 上组合调用
 
 如果 body 非法，会返回稳定的公开错误，例如：
 
@@ -180,30 +182,15 @@ if err := hah.BindBody(r, &body); err != nil {
 
 如果失败来自非 JSON 语义的 body read 过程，例如 wrapped `Body.Read` error、transport I/O 或 `context` cancellation，则返回普通 error，而不是 `*errx.HTTPError`。
 
-### 字段类型范围
+### 字段解码范围
 
-当前默认 query binder 只支持封闭白名单中的常见字段类型：
+当前 `BindBody(...)` 不再维护额外的字段家族白名单。公开语义直接跟随标准库 `encoding/json`：
 
-- `string`
-- `bool`
-- `int`、`int8`、`int16`、`int32`、`int64`
-- `uint`、`uint8`、`uint16`、`uint32`、`uint64`
-- `float32`、`float64`
-- 底层为上述标量家族的命名类型
-- `time.Time`
-- `time.Duration`
-- `uuid.UUID`
-- 上述受支持叶子类型的一级指针 `*T`
-- `query:",inline"` 的 `struct` / `*struct`
+- 未知字段继续默认拒绝
+- 字段发现、嵌入字段遮蔽、命名类型、自定义 decoder、`json.RawMessage`、slice / map / 指针 等行为按标准库处理
+- 如果某个字段类型对当前 JSON 输入不可解码，返回 `invalid_json`
 
-当前默认 query binder 不支持：
-
-- `encoding.TextUnmarshaler`
-- 未标记 `inline` 的 `struct` / `*struct`
-- slice、array、map、interface
-- 多级指针
-
-如果你需要 query binder 默认不支持的自定义 decoder、复杂集合或其他扩展语义，优先先绑定为 `string`，再在绑定后显式解析。
+如果你需要更克制、更稳定的 DTO 面，建议由调用方自己收窄 DTO 形状，而不是依赖 binder 内建白名单。
 
 ## 绑定后的显式校验
 
