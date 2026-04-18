@@ -484,14 +484,6 @@ func parseUnixTime(value string) (time.Time, error) {
 	return time.Unix(seconds, 0).UTC(), nil
 }
 
-func parseUnixMilliTime(value string) (time.Time, error) {
-	millis, err := parseFixedWidthTimestamp(value, 13)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return time.UnixMilli(millis).UTC(), nil
-}
-
 func parseFixedWidthTimestamp(value string, digits int) (int64, error) {
 	if len(value) != digits {
 		return 0, errors.New("timestamp has invalid width")

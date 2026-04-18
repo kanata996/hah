@@ -1,8 +1,8 @@
 # hah Path 设计方案
 
 - 状态：Locked
-- 版本：v5
-- 锁定日期：2026-04-18
+- 版本：v6
+- 锁定日期：2026-04-19
 - 适用范围：
   - `hah.Path(...)`
   - `reqx.Path(...)`
@@ -17,29 +17,44 @@
   - `docs/errx-design.md`
 - 变更规则：任何公开行为变化，必须先改本文档并补黑盒测试。
 
-## 1. 设计定位
+## 1. 设计目标
 
 `Path(...)` 是请求侧单字段 path helper。
-它只处理“一个 path 参数名 + 一个显式类型入口 + 零个或多个链式约束”。
+它的目标是提供一条直接、克制的 path 参数读取路径：
 
-`Path(...)` 负责：
+1. 读取一个命名 path value
+2. 按调用方显式选择的类型入口解析
+3. 执行简单值约束
+4. 把客户端输入错误收敛为稳定公开错误
 
-- 读取一个 path 参数
-- 按调用方显式选择的类型入口解析该值
-- 执行简单值约束
-- 把客户端输入错误收敛为稳定公开错误
+它只消费已经路由完成后的 `request.PathValue(name)`。
+它不解析 router pattern，也不承担 router 兼容层职责。
 
-`Path(...)` 不负责：
+## 2. 心智模型
 
-- DTO 投影
-- 多字段组合校验
-- router-specific pattern 兼容
-- 多值 path 参数模型
-- 业务规则解释
+### 2.1 数据来源
 
-## 2. 稳定公开契约
+`Path(...)` 只从 `request.PathValue(name)` 读取值。
 
-### 2.1 Source 与 builder 创建
+这意味着：
+
+- path 参数是否存在，由上游 router / bridge 决定
+- `Path(...)` 不解析 `request.Pattern`
+- `Path(...)` 不推导空 wildcard 是否算“存在”
+- 如果上游希望空字符串也算已绑定值，应在进入 `Path(...)` 前先做自己的 bridge 处理
+
+### 2.2 存在性
+
+`Path(...)` 对存在性的规则固定为：
+
+- `request.PathValue(name) != ""`：参数存在
+- `request.PathValue(name) == ""`：参数缺失
+
+因此，空字符串不再是特殊 path 值语义；它统一落在“缺失”分支上。
+
+## 3. 公开契约
+
+### 3.1 builder 创建
 
 `Path(r, name)` 的公开行为固定为：
 
@@ -47,33 +62,19 @@
 - `r == nil` 不是构造期 panic，而是在 `Get()` 时返回普通 usage error
 - `name` 为空字符串时，在 `Get()` 时返回普通 usage error
 - 零值 builder 不是合法公开入口，`Get()` 时返回普通 usage error
-- 数据只从 `request.PathValue(name)` 读取
 
-### 2.2 存在性判定
+### 3.2 支持类型表
 
-`Path(...)` 对“参数是否存在”的规则固定为：
+`PathParam` 只支持以下类型入口：
 
-- 当 `request.PathValue(name) != ""` 时，参数视为存在
-- 当 `request.PathValue(name) == ""` 时，若 `request.Pattern` 是纯 path pattern，或标准库 `net/http` `ServeMux` 的 method-qualified pattern，且其中声明了同名命名 wildcard，该参数才视为存在
-- 只认 path segment 级别的 `{name}` 与 `{name...}`
-- method-qualified pattern 只在 `<METHOD><space-or-tab> + pure path pattern` 这一默认契约内支持
-- host-qualified、`{$}`、malformed pattern、adapter-specific pattern（例如 `{id:[0-9]+}`）都不在默认契约内
-- `Path(...)` 不负责完整解析或校验通用 `ServeMux` pattern，只在默认契约内做最小 presence 判定
-- bridge 若手工写入 `PathValue`，必须先自行完成解码、归一化和 pattern 对齐；`Path(...)` 不做二次 unescape 或额外归一化
-
-### 2.3 支持类型表
-
-`PathParam` 只支持下表中的类型入口。
-除表内类型入口外，不支持其他公开类型。
-
-| 入口       | Go 类型     | 是否支持 | 缺失参数时    | 空字符串存在时 |
-| ---------- | ----------- | -------- | ------------- | -------------- |
-| `String()` | `string`    | 是       | 返回 `""`     | 返回 `""`      |
-| `Int()`    | `int`       | 是       | 返回 `0`      | 解析失败       |
-| `Int64()`  | `int64`     | 是       | 返回 `0`      | 解析失败       |
-| `Uint()`   | `uint`      | 是       | 返回 `0`      | 解析失败       |
-| `Uint64()` | `uint64`    | 是       | 返回 `0`      | 解析失败       |
-| `UUID()`   | `uuid.UUID` | 是       | 返回零值 UUID | 解析失败       |
+| 入口       | Go 类型     | 是否支持 | 缺失参数时    |
+| ---------- | ----------- | -------- | ------------- |
+| `String()` | `string`    | 是       | 返回 `""`     |
+| `Int()`    | `int`       | 是       | 返回 `0`      |
+| `Int64()`  | `int64`     | 是       | 返回 `0`      |
+| `Uint()`   | `uint`      | 是       | 返回 `0`      |
+| `Uint64()` | `uint64`    | 是       | 返回 `0`      |
+| `UUID()`   | `uuid.UUID` | 是       | 返回零值 UUID |
 
 解析规则固定为：
 
@@ -81,10 +82,9 @@
 - `Uint` / `Uint64`：`strconv.ParseUint(..., 10, bits)`
 - `UUID`：`uuid.Parse`
 
-`Path(...)` 只支持单值模型，不支持 `Values()`。
-表外类型入口一律不支持。
+`Path(...)` 只支持单值模型，不支持多值读取。
 
-### 2.4 通用 builder 规则
+### 3.3 通用 builder 规则
 
 通用规则固定为：
 
@@ -93,65 +93,32 @@
 - `Required()` 与 `Default(...)` 互斥
 - 重复 `Required()` 幂等
 - 未声明 `Required()` 时，重复 `Default(...)` 以后一次为准
-- 未声明 `Required()` 且参数缺失时，若未配置 `Default(...)`，直接返回类型零值，不执行类型解析、built-in constraint 或 `Check(...)`
+- 未声明 `Required()` 且参数缺失时，若未配置 `Default(...)`，直接返回类型零值
 - 参数缺失且命中 `Default(v)` 时，以默认值进入后续约束与 `Check(...)`
 - 默认值仍然要经过后续全部约束与 `Check(...)`
-- 若 `Default(v)` 未通过后续约束或 `Check(...)`，`Get()` 返回普通 usage error
 - `Check(nil)` 返回普通 usage error
-- 自定义 `Check(...)` 返回非 `nil` error 时，整体视为校验失败
-- `Check(...)` 的 error 文本不是默认公开 detail 契约
 - builder 一旦记录 usage error，后续链式调用不会清除该状态
 - `Get()` 返回首次记录的 usage error
 
-### 2.5 约束执行顺序
-
-- 所有值约束按最终声明顺序执行
-- 遇到第一个失败约束即短路返回
-- `OneOf(...)`、`Match(...)`、`Check(...)` 每调用一次都会追加一条独立约束
-- `Min` / `Max`、`MinLen` / `MaxLen` 属于 named 约束；重复声明时以后一次为准，并按最后一次声明的位置参与执行
-
-### 2.6 `Get()` 执行顺序
-
-`Path(...)` 的 `Get()` 执行顺序固定为：
-
-1. 若 builder 已记录 usage error，立即返回首次记录的 usage error
-2. 先按本文档 2.2 的规则判定该 path 参数是“缺失”还是“存在”
-3. 若为缺失：
-   - 声明了 `Required()`：返回 `required` violation
-   - 未声明 `Required()` 且声明了 `Default(v)`：以 `v` 作为候选值继续后续约束与 `Check(...)`
-   - 未声明 `Required()` 且未声明 `Default(v)`：直接返回类型零值，不进入类型解析、built-in constraint 或 `Check(...)`
-4. 若为存在：先按类型入口完成解析；解析失败立即返回客户端输入错误
-5. 对进入约束阶段的候选值，按本文档 2.5 的顺序执行 built-in constraint 与 `Check(...)`
-6. 若候选值来自请求输入，则约束失败返回客户端输入错误；若候选值来自 `Default(v)`，则约束失败返回 usage error
-7. 全部成功后返回最终值
-
-### 2.7 类型专属约束
+### 3.4 类型专属约束
 
 `String()` 额外支持：
 
-- `MinLen(n)` / `MaxLen(n)`：按 UTF-8 rune 数比较
+- `MinLen(n)` / `MaxLen(n)`
 - `OneOf(values...)`
-- `Match(re)`：直接按 `regexp.Regexp.MatchString` 判断；若要求整串匹配，由调用方自行加锚点
+- `Match(re)`
 
 `Int` / `Int64` / `Uint` / `Uint64` 额外支持：
 
-- `Min(v)` / `Max(v)`，且边界包含
+- `Min(v)` / `Max(v)`
 
 `UUID()` 支持：
 
 - `Check(...)`
 
-以下配置属于普通 usage error：
+## 4. 错误模型
 
-- `OneOf()` 为空
-- `Match(nil)`
-- `Check(nil)`
-- `MinLen` / `MaxLen` 为负数
-- `Min` / `Max`、`MinLen` / `MaxLen` 的最终配置自相矛盾
-
-## 3. 错误边界
-
-### 3.1 usage error
+### 4.1 usage error
 
 以下场景返回普通 error，而不是 `*errx.HTTPError`：
 
@@ -161,15 +128,7 @@
 - 非法约束配置
 - 配置的 `Default(...)` 未通过后续约束或 `Check(...)`
 
-稳定契约只有：
-
-- `err != nil`
-- `err` 不是 `*errx.HTTPError`
-- `errors.As(err, *errx.HTTPError)` 必须失败
-
-usage error 的具体 type、wrapping 和文本不属于公开契约。
-
-### 3.2 客户端输入错误
+### 4.2 客户端输入错误
 
 以下场景返回稳定 `*errx.HTTPError`：
 
@@ -186,17 +145,17 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 - `Errors()` 只包含一个 violation
 - violation `Field` 等于裁剪后的参数名
 - violation `In == errx.InPath`
-- 缺失 required 参数时，violation `Code == errx.CodeRequired`，`Detail == "is required"`
-- 解析失败或校验失败时，violation `Code == errx.CodeInvalid`，`Detail == "is invalid"`
+- 缺失 required 参数时，violation `Code == errx.CodeRequired`
+- 解析失败或校验失败时，violation `Code == errx.CodeInvalid`
 
-## 4. 与其他文档的关系
+## 5. 与其他文档的关系
 
-- `Path(...)` 与 `Query(...)` 共享显式类型入口、链式约束和 request-side violation 模型。
-- `Path(...)` 故意比 `Query(...)` 更窄：只支持 path 常见的单值类型，不支持多值读取。
-- `errx` 提供统一错误模型；`resp` 决定这些错误如何写回。
-- router-specific bridge 不是默认契约的一部分，必须在进入 `Path(...)` 前完成归一化。
+- `Path(...)` 与 `Query(...)` 共享显式类型入口、链式约束和 request-side violation 模型
+- `Path(...)` 故意比 `Query(...)` 更窄：只支持 path 常见的单值类型
+- `errx` 提供统一错误模型；`resp` 决定这些错误如何写回
+- router-specific bridge 不是默认契约的一部分，必须在进入 `Path(...)` 前完成
 
-## 5. 测试基线
+## 6. 测试基线
 
 后续实现或重构至少应锁住：
 
@@ -204,17 +163,10 @@ usage error 的具体 type、wrapping 和文本不属于公开契约。
 - `nil request`
 - 空参数名
 - 零值 builder 与零值 typed builder 直接使用
-- usage error 只要求 `err != nil` 且不是 `*errx.HTTPError`
-- 与 `Query(...)` 共享的 typed-builder 通用契约，沿用 `docs/query-design.md` 已锁定的最小黑盒基线；`Path(...)` 只需额外锁住 path source / presence 差异与代表性类型入口
 - 缺失 optional 返回各类型零值
 - `UUID()` 的代表性成功 / 失败路径
-- 声明过的空 wildcard 会被视为存在
-- 纯 path `Pattern` 与标准 method-qualified `Pattern` 中的 `{name}` / `{name...}` 会参与空字符串存在性判定
-- blank pattern、无 wildcard、不同 wildcard 名、host-qualified、`{id:[0-9]+}`、`{$}`、malformed pattern 都不会把空字符串视为存在
-- 标准库 `ServeMux` 命中的请求里，typed builder 看到的值与 `request.PathValue(name)` 一致
-- 标准库 `ServeMux` method-qualified 路由命中的请求里，空 wildcard 的存在性判定与 `request.Pattern` 保持一致
+- `request.PathValue(name)` 非空时被原样消费
+- `request.PathValue(name)` 为空字符串时按缺失处理
 - bridge 手工填充的 `PathValue` 会被原样消费，不会再做二次 unescape 或额外归一化
-- 空字符串只有 `String()` 接受，其他类型按解析失败处理
 - 客户端输入错误返回稳定 `422 invalid_request`
-- path violation 会稳定标记 `Field`、`In=InPath`、`Code=required/invalid` 与默认 `Detail`
-- `Check(...)` 失败时公开 detail 仍保持稳定 `is invalid`
+- path violation 会稳定标记 `Field`、`In=InPath`、`Code=required/invalid`

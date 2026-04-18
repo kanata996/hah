@@ -78,46 +78,9 @@ func encodeProblemBody(payload problemPayload, encode func(any) ([]byte, error))
 	return http.StatusInternalServerError, internalProblemBody
 }
 
-func selectedHTTPError(err error) *errx.HTTPError {
-	return firstHTTPErrorCandidate(err)
-}
-
-func firstHTTPErrorCandidate(err error) *errx.HTTPError {
-	if err == nil {
-		return nil
-	}
-
-	if httpErr, ok := err.(*errx.HTTPError); ok {
-		if httpErr == nil {
-			return nil
-		}
-		return httpErr
-	} else if asErr, ok := err.(interface{ As(any) bool }); ok {
-		var httpErr *errx.HTTPError
-		if asErr.As(&httpErr) && httpErr != nil {
-			return httpErr
-		}
-	}
-
-	type unwrapOne interface{ Unwrap() error }
-	type unwrapMany interface{ Unwrap() []error }
-
-	switch e := err.(type) {
-	case unwrapMany:
-		for _, child := range e.Unwrap() {
-			if httpErr := firstHTTPErrorCandidate(child); httpErr != nil {
-				return httpErr
-			}
-		}
-	case unwrapOne:
-		return firstHTTPErrorCandidate(e.Unwrap())
-	}
-
-	return nil
-}
-
 func normalizeProblemPayload(err error) problemPayload {
-	if httpErr := selectedHTTPError(err); httpErr != nil {
+	var httpErr *errx.HTTPError
+	if errors.As(err, &httpErr) && httpErr != nil {
 		return problemPayload{
 			Title:  httpErr.Title(),
 			Status: httpErr.Status(),

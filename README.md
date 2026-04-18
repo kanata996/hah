@@ -143,7 +143,7 @@ func main() {
 请求输入：
 
 - `hah.Path(...)` 面向 path segment 中的资源标识，只保留 `String()`、`UUID()`、`Int()`、`Int64()`、`Uint()`、`Uint64()`
-- `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`、`UnixMilliTime()`
+- `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`
 - `hah.Query(...).String()` / `Int()` / `UUID()` 等单值 helper 在重复 query key 上会返回稳定 `invalid_request`
 - `hah.Query(...).Values()` 可直接读取同名 query 参数的全部解析后值；如果你需要批量结构化解码，优先用 `hah.BindQuery(...)`
 

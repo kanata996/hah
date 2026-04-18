@@ -81,11 +81,6 @@ func (p *QueryParam) UnixTime() *TimeParam {
 	return newTimeParam(p.spec, parseUnixTime)
 }
 
-// UnixMilliTime 按 13 位毫秒级 Unix 时间戳读取 time.Time 参数。
-func (p *QueryParam) UnixMilliTime() *TimeParam {
-	return newTimeParam(p.spec, parseUnixMilliTime)
-}
-
 // Values 读取 query 参数的全部解析后值。
 func (p *QueryParam) Values() *MultiParam[string] {
 	return newMultiParam(p.spec, cloneSlice[string])

@@ -33,6 +33,5 @@ func TestPublicBuilderFamilies(t *testing.T) {
 	assertPublicType(Query(req, "token").UUID(), (*ValueParam[uuid.UUID])(nil))
 	assertPublicType(Query(req, "when").Time(), (*TimeParam)(nil))
 	assertPublicType(Query(req, "when").UnixTime(), (*TimeParam)(nil))
-	assertPublicType(Query(req, "when").UnixMilliTime(), (*TimeParam)(nil))
 	assertPublicType(Query(req, "tag").Values(), (*MultiParam[string])(nil))
 }
