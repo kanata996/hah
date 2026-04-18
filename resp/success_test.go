@@ -73,6 +73,18 @@ func TestSuccessWritersRejectNilWriter(t *testing.T) {
 		{name: "Created", write: func() error { return Created(nil, map[string]any{"id": "u_1"}) }},
 		{name: "OK", write: func() error { return OK(nil, map[string]any{"id": "u_1"}) }},
 		{name: "NoContent", write: func() error { return NoContent(nil) }},
+		{name: "Created typed nil", write: func() error {
+			var w *nilableResponseWriter
+			return Created(w, map[string]any{"id": "u_1"})
+		}},
+		{name: "OK typed nil", write: func() error {
+			var w *nilableResponseWriter
+			return OK(w, map[string]any{"id": "u_1"})
+		}},
+		{name: "NoContent typed nil", write: func() error {
+			var w *nilableResponseWriter
+			return NoContent(w)
+		}},
 	}
 
 	for _, tc := range cases {

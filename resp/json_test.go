@@ -126,6 +126,14 @@ func TestJSONBodyWritersRejectNilWriter(t *testing.T) {
 	}
 }
 
+func TestJSONBodyWritersRejectTypedNilWriter(t *testing.T) {
+	var w *nilableResponseWriter
+
+	if err := JSON(w, http.StatusOK, map[string]any{"id": "u_1"}); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
 func TestJSONBodyWritersRejectUnsupportedStatusesBeforeCommit(t *testing.T) {
 	cases := []struct {
 		name  string

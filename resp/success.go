@@ -14,7 +14,7 @@ func Created(w http.ResponseWriter, data any) error {
 
 // NoContent 写出 204 响应且不包含响应体。
 func NoContent(w http.ResponseWriter) error {
-	if w == nil {
+	if isNilResponseWriter(w) {
 		return errNilResponseWriter
 	}
 	header := w.Header()

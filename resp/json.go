@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 )
 
 const (
@@ -61,7 +62,7 @@ func encodeJSON(data any) ([]byte, error) {
 // validateJSONBodyWriter 统一校验 JSON body writer 的响应边界。
 // 它在编码前提前失败，避免无意义编码与重复校验。
 func validateJSONBodyWriter(w http.ResponseWriter, status int) error {
-	if w == nil {
+	if isNilResponseWriter(w) {
 		return errNilResponseWriter
 	}
 	switch {
@@ -74,6 +75,20 @@ func validateJSONBodyWriter(w http.ResponseWriter, status int) error {
 		return nil
 	default:
 		return fmt.Errorf("resp: JSON only supports status 200, 201, or 202")
+	}
+}
+
+func isNilResponseWriter(w http.ResponseWriter) bool {
+	if w == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(w)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 )
 
 const defaultMaxBodyBytes int64 = 1 << 20
+const maxConsecutiveEmptyBodyReads = 100
 
 const (
 	CodeInvalidJSON          = "invalid_json"
@@ -140,16 +141,7 @@ func requestHasBody(r *http.Request) (bool, error) {
 
 	body := r.Body
 	var prefix [1]byte
-	var (
-		n   int
-		err error
-	)
-	for {
-		n, err = body.Read(prefix[:])
-		if n != 0 || err != nil {
-			break
-		}
-	}
+	n, err := readWithProgress(body, prefix[:])
 	if err != nil && err != io.EOF {
 		if n > 0 {
 			r.Body = &replayReadCloser{
@@ -234,7 +226,7 @@ var errRequestTooLarge = errors.New("reqx: request body too large")
 var errDuplicateContentType = errors.New("reqx: multiple Content-Type values")
 
 func readBody(body io.ReadCloser) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(body, defaultMaxBodyBytes+1))
+	data, err := io.ReadAll(io.LimitReader(newProgressReader(body), defaultMaxBodyBytes+1))
 	if err != nil {
 		return nil, err
 	}
@@ -242,4 +234,37 @@ func readBody(body io.ReadCloser) ([]byte, error) {
 		return nil, errRequestTooLarge
 	}
 	return data, nil
+}
+
+func readWithProgress(r io.Reader, p []byte) (int, error) {
+	progressReader := newProgressReader(r)
+	for {
+		n, err := progressReader.Read(p)
+		if n != 0 || err != nil {
+			return n, err
+		}
+	}
+}
+
+type progressReader struct {
+	reader     io.Reader
+	emptyReads int
+}
+
+func newProgressReader(r io.Reader) *progressReader {
+	return &progressReader{reader: r}
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n != 0 || err != nil {
+		r.emptyReads = 0
+		return n, err
+	}
+
+	r.emptyReads++
+	if r.emptyReads >= maxConsecutiveEmptyBodyReads {
+		return 0, io.ErrNoProgress
+	}
+	return 0, nil
 }

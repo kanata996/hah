@@ -67,6 +67,46 @@ func (r *bindBodyZeroThenDataCloser) Close() error {
 	return r.body.Close()
 }
 
+type bindBodyZeroThenPanicCloser struct {
+	zeroReads int
+}
+
+const bindBodyZeroReadPanicAfter = 128
+
+func (r *bindBodyZeroThenPanicCloser) Read([]byte) (int, error) {
+	if r.zeroReads >= bindBodyZeroReadPanicAfter {
+		panic("too many empty reads")
+	}
+	r.zeroReads++
+	return 0, nil
+}
+
+func (r *bindBodyZeroThenPanicCloser) Close() error { return nil }
+
+type bindBodyPrefixThenZeroThenPanicCloser struct {
+	prefix    byte
+	used      bool
+	zeroReads int
+}
+
+func (r *bindBodyPrefixThenZeroThenPanicCloser) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if !r.used {
+		r.used = true
+		p[0] = r.prefix
+		return 1, nil
+	}
+	if r.zeroReads >= bindBodyZeroReadPanicAfter {
+		panic("too many empty reads")
+	}
+	r.zeroReads++
+	return 0, nil
+}
+
+func (r *bindBodyPrefixThenZeroThenPanicCloser) Close() error { return nil }
+
 type bindBodyJSONValue struct {
 	Value string
 }
@@ -407,6 +447,46 @@ func TestBindBody_BoundariesAndUsageErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("body presence no progress returns ordinary error", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = &bindBodyZeroThenPanicCloser{}
+		req.ContentLength = -1
+
+		dst := request{Name: "existing"}
+		err := BindBody(req, &dst)
+		if !errors.Is(err, io.ErrNoProgress) {
+			t.Fatalf("BindBody() error = %v, want %v", err, io.ErrNoProgress)
+		}
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("body read no progress after prefix returns ordinary error", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = &bindBodyPrefixThenZeroThenPanicCloser{prefix: '{'}
+		req.ContentLength = -1
+
+		dst := request{Name: "existing"}
+		err := BindBody(req, &dst)
+		if !errors.Is(err, io.ErrNoProgress) {
+			t.Fatalf("BindBody() error = %v, want %v", err, io.ErrNoProgress)
+		}
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
 	t.Run("body read failure after body presence check is an ordinary error", func(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`
@@ -542,6 +622,17 @@ func TestRequestHasBody_InternalBranches(t *testing.T) {
 		}
 		if string(body) != `{"name":"kanata"}` {
 			t.Fatalf("body = %q, want original body", string(body))
+		}
+	})
+
+	t.Run("no progress read returns err no progress", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Body = &bindBodyZeroThenPanicCloser{}
+		req.ContentLength = -1
+
+		hasBody, err := requestHasBody(req)
+		if hasBody || !errors.Is(err, io.ErrNoProgress) {
+			t.Fatalf("requestHasBody() = (%v, %v), want (false, %v)", hasBody, err, io.ErrNoProgress)
 		}
 	})
 }
