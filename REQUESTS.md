@@ -152,7 +152,7 @@ if err := hah.BindBody(r, &body); err != nil {
 - 公开只支持非 `nil` 的 `*struct` DTO target
 - `BindBody(...)` / `RequireBody(...)` 会在同一个 request 上共享已读取的 body 字节，因此可以按任意顺序组合
 - 这个 no-op 发生在 `Content-Type` 检查之前
-- 非空 body 只接受 `application/json`
+- 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，只允许前后空白
 - 默认使用标准库 `encoding/json`
 - 不接受 `application/*+json`

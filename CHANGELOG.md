@@ -13,6 +13,15 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.6.3] - 2026-04-19
+
+### Fixed
+
+- Hardened `reqx.BindBody(...)` / `hah.BindBody(...)` body-presence probing so a transient `Body.Read(...) == (0, nil)` no longer makes a non-empty request body silently look empty.
+- Hardened `reqx.BindBody(...)` / `hah.BindBody(...)` media-type validation so duplicate `Content-Type` values are rejected as `415 unsupported_media_type` instead of silently trusting the first value.
+- Hardened `reqx.BindBody(...)` / `hah.BindBody(...)` and `reqx.RequireBody(...)` against no-progress body readers so wrapped request bodies that repeatedly return `(0, nil)` now fail with ordinary errors instead of hanging.
+- Hardened `resp` write-failure wrapping so typed-nil errors returned by custom `http.ResponseWriter.Write(...)` implementations no longer make the returned error panic when formatted or unwrapped.
+
 ## [v0.6.2] - 2026-04-19
 
 ### Breaking

@@ -33,18 +33,6 @@ func newMultiParam[T any](spec paramSpec, parse func([]string) []T) *MultiParam[
 	}
 }
 
-type requiredSetter interface {
-	setRequired()
-}
-
-type defaultSetter[T any] interface {
-	setDefault(T)
-}
-
-type resolver[T any] interface {
-	resolve() (T, error)
-}
-
 func ensureBuilder[P any](p *P) *P {
 	if p == nil {
 		return new(P)
@@ -52,30 +40,10 @@ func ensureBuilder[P any](p *P) *P {
 	return p
 }
 
-func requireParam[P any](p *P, value requiredSetter) *P {
-	value.setRequired()
-	return p
-}
-
-func defaultParam[P any, T any](p *P, value defaultSetter[T], defaultValue T) *P {
-	value.setDefault(defaultValue)
-	return p
-}
-
-func checkParam[P any, T any](p *P, addCheck func(func(T) error), check func(T) error) *P {
-	addCheck(check)
-	return p
-}
-
-func getParam[T any](value resolver[T]) (T, error) {
-	return value.resolve()
-}
-
 type rangeConstraint int
 
 const (
-	rangeConstraintNone rangeConstraint = iota
-	rangeConstraintMin
+	rangeConstraintMin rangeConstraint = iota + 1
 	rangeConstraintMax
 	rangeConstraintAfter
 	rangeConstraintBefore
@@ -108,8 +76,8 @@ func (p *orderedRangeParam[T]) addCheck(check func(T) error) {
 
 func (p *orderedRangeParam[T]) resolve() (T, error) {
 	var zero T
-	if p.value.state.usageErr != nil {
-		return zero, p.value.state.usageErr
+	if p.value.usageErr != nil {
+		return zero, p.value.usageErr
 	}
 	if err := p.constraintUsageErr(); err != nil {
 		return zero, err
@@ -120,7 +88,7 @@ func (p *orderedRangeParam[T]) resolve() (T, error) {
 func (p *orderedRangeParam[T]) setMin(value T) {
 	p.min = &value
 	p.lastConstraint = rangeConstraintMin
-	p.value.state.setNamedCheck("min", func(v T) error {
+	p.value.setNamedCheck("min", func(v T) error {
 		if v < value {
 			return errInvalidParamValue
 		}
@@ -131,7 +99,7 @@ func (p *orderedRangeParam[T]) setMin(value T) {
 func (p *orderedRangeParam[T]) setMax(value T) {
 	p.max = &value
 	p.lastConstraint = rangeConstraintMax
-	p.value.state.setNamedCheck("max", func(v T) error {
+	p.value.setNamedCheck("max", func(v T) error {
 		if v > value {
 			return errInvalidParamValue
 		}
@@ -174,8 +142,8 @@ func (p *timeRangeParam) addCheck(check func(time.Time) error) {
 }
 
 func (p *timeRangeParam) resolve() (time.Time, error) {
-	if p.value.state.usageErr != nil {
-		return time.Time{}, p.value.state.usageErr
+	if p.value.usageErr != nil {
+		return time.Time{}, p.value.usageErr
 	}
 	if err := p.constraintUsageErr(); err != nil {
 		return time.Time{}, err
@@ -186,7 +154,7 @@ func (p *timeRangeParam) resolve() (time.Time, error) {
 func (p *timeRangeParam) setAfter(value time.Time) {
 	p.after = &value
 	p.lastConstraint = rangeConstraintAfter
-	p.value.state.setNamedCheck("after", func(v time.Time) error {
+	p.value.setNamedCheck("after", func(v time.Time) error {
 		if !v.After(value) {
 			return errInvalidParamValue
 		}
@@ -197,7 +165,7 @@ func (p *timeRangeParam) setAfter(value time.Time) {
 func (p *timeRangeParam) setBefore(value time.Time) {
 	p.before = &value
 	p.lastConstraint = rangeConstraintBefore
-	p.value.state.setNamedCheck("before", func(v time.Time) error {
+	p.value.setNamedCheck("before", func(v time.Time) error {
 		if !v.Before(value) {
 			return errInvalidParamValue
 		}
@@ -241,37 +209,42 @@ type TimeParam struct {
 
 // MultiParam 读取并校验多值参数。
 type MultiParam[T any] struct {
-	value multiParamValue[[]T]
+	value paramValue[[]T]
 }
 
 func (p *ValueParam[T]) Required() *ValueParam[T] {
 	p = ensureBuilder(p)
-	return requireParam(p, &p.value)
+	p.value.setRequired()
+	return p
 }
 
 func (p *ValueParam[T]) Default(value T) *ValueParam[T] {
 	p = ensureBuilder(p)
-	return defaultParam(p, &p.value, value)
+	p.value.setDefault(value)
+	return p
 }
 
 func (p *ValueParam[T]) Check(check func(T) error) *ValueParam[T] {
 	p = ensureBuilder(p)
-	return checkParam(p, p.value.addCheck, check)
+	p.value.addCheck(check)
+	return p
 }
 
 func (p *ValueParam[T]) Get() (T, error) {
 	p = ensureBuilder(p)
-	return getParam(&p.value)
+	return p.value.resolve()
 }
 
 func (p *OrderedParam[T]) Required() *OrderedParam[T] {
 	p = ensureBuilder(p)
-	return requireParam(p, &p.value)
+	p.value.setRequired()
+	return p
 }
 
 func (p *OrderedParam[T]) Default(value T) *OrderedParam[T] {
 	p = ensureBuilder(p)
-	return defaultParam(p, &p.value, value)
+	p.value.setDefault(value)
+	return p
 }
 
 func (p *OrderedParam[T]) Min(value T) *OrderedParam[T] {
@@ -288,22 +261,25 @@ func (p *OrderedParam[T]) Max(value T) *OrderedParam[T] {
 
 func (p *OrderedParam[T]) Check(check func(T) error) *OrderedParam[T] {
 	p = ensureBuilder(p)
-	return checkParam(p, p.value.addCheck, check)
+	p.value.addCheck(check)
+	return p
 }
 
 func (p *OrderedParam[T]) Get() (T, error) {
 	p = ensureBuilder(p)
-	return getParam(&p.value)
+	return p.value.resolve()
 }
 
 func (p *StringParam) Required() *StringParam {
 	p = ensureBuilder(p)
-	return requireParam(p, &p.value)
+	p.value.setRequired()
+	return p
 }
 
 func (p *StringParam) Default(value string) *StringParam {
 	p = ensureBuilder(p)
-	return defaultParam(p, &p.value, value)
+	p.value.setDefault(value)
+	return p
 }
 
 func (p *StringParam) MinLen(n int) *StringParam {
@@ -314,7 +290,7 @@ func (p *StringParam) MinLen(n int) *StringParam {
 	}
 	p.minLen = &n
 	p.lastConstraint = rangeConstraintMinLen
-	p.value.state.setNamedCheck("min_length", func(value string) error {
+	p.value.setNamedCheck("min_length", func(value string) error {
 		if utf8.RuneCountInString(value) < n {
 			return errInvalidParamValue
 		}
@@ -331,7 +307,7 @@ func (p *StringParam) MaxLen(n int) *StringParam {
 	}
 	p.maxLen = &n
 	p.lastConstraint = rangeConstraintMaxLen
-	p.value.state.setNamedCheck("max_length", func(value string) error {
+	p.value.setNamedCheck("max_length", func(value string) error {
 		if utf8.RuneCountInString(value) > n {
 			return errInvalidParamValue
 		}
@@ -376,18 +352,19 @@ func (p *StringParam) Match(pattern *regexp.Regexp) *StringParam {
 
 func (p *StringParam) Check(check func(string) error) *StringParam {
 	p = ensureBuilder(p)
-	return checkParam(p, p.value.addCheck, check)
+	p.value.addCheck(check)
+	return p
 }
 
 func (p *StringParam) Get() (string, error) {
 	p = ensureBuilder(p)
-	if p.value.state.usageErr != nil {
-		return "", p.value.state.usageErr
+	if p.value.usageErr != nil {
+		return "", p.value.usageErr
 	}
 	if err := p.constraintUsageErr(); err != nil {
 		return "", err
 	}
-	return getParam(&p.value)
+	return p.value.resolve()
 }
 
 func (p *StringParam) constraintUsageErr() error {
@@ -403,12 +380,14 @@ func (p *StringParam) constraintUsageErr() error {
 
 func (p *TimeParam) Required() *TimeParam {
 	p = ensureBuilder(p)
-	return requireParam(p, &p.value)
+	p.value.setRequired()
+	return p
 }
 
 func (p *TimeParam) Default(value time.Time) *TimeParam {
 	p = ensureBuilder(p)
-	return defaultParam(p, &p.value, value)
+	p.value.setDefault(value)
+	return p
 }
 
 func (p *TimeParam) After(value time.Time) *TimeParam {
@@ -425,32 +404,36 @@ func (p *TimeParam) Before(value time.Time) *TimeParam {
 
 func (p *TimeParam) Check(check func(time.Time) error) *TimeParam {
 	p = ensureBuilder(p)
-	return checkParam(p, p.value.addCheck, check)
+	p.value.addCheck(check)
+	return p
 }
 
 func (p *TimeParam) Get() (time.Time, error) {
 	p = ensureBuilder(p)
-	return getParam(&p.value)
+	return p.value.resolve()
 }
 
 func (p *MultiParam[T]) Required() *MultiParam[T] {
 	p = ensureBuilder(p)
-	return requireParam(p, &p.value)
+	p.value.setRequired()
+	return p
 }
 
 func (p *MultiParam[T]) Default(value []T) *MultiParam[T] {
 	p = ensureBuilder(p)
-	return defaultParam(p, &p.value, value)
+	p.value.setDefault(value)
+	return p
 }
 
 func (p *MultiParam[T]) Check(check func([]T) error) *MultiParam[T] {
 	p = ensureBuilder(p)
-	return checkParam(p, p.value.addCheck, check)
+	p.value.addCheck(check)
+	return p
 }
 
 func (p *MultiParam[T]) Get() ([]T, error) {
 	p = ensureBuilder(p)
-	return getParam(&p.value)
+	return p.value.resolve()
 }
 
 func parseStringValue(value string) (string, error) {

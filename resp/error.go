@@ -54,72 +54,23 @@ func WriteError(w http.ResponseWriter, err error) error {
 		return nil
 	}
 
-	var responseWriteErr *responseWriteError
-	if errors.As(err, &responseWriteErr) {
-		return err
-	}
-
 	if w == nil {
 		return errNilResponseWriter
 	}
 
 	payload := normalizeProblemPayload(err)
-	status, body := encodeProblemBody(payload, problemBodyEncoder)
+	status := payload.Status
+	body, encodeErr := problemBodyEncoder(payload)
+	if encodeErr != nil {
+		status = http.StatusInternalServerError
+		body = internalProblemBody
+	}
 	return writePreparedJSONBytes(w, status, problemJSONContentType, body)
 }
 
-// encodeProblemBody 负责把公开错误 payload 编码成响应体。
-// 若主 payload 意外编码失败，则回退到最小 500 problem JSON，避免对外暴露内部细节。
-func encodeProblemBody(payload problemPayload, encode func(any) ([]byte, error)) (status int, body []byte) {
-	body, err := encode(payload)
-	if err == nil {
-		return payload.Status, body
-	}
-	return http.StatusInternalServerError, internalProblemBody
-}
-
-func selectedHTTPError(err error) *errx.HTTPError {
-	return firstHTTPErrorCandidate(err)
-}
-
-func firstHTTPErrorCandidate(err error) *errx.HTTPError {
-	if err == nil {
-		return nil
-	}
-
-	if httpErr, ok := err.(*errx.HTTPError); ok {
-		if httpErr == nil {
-			return nil
-		}
-		return httpErr
-	}
-
-	if asErr, ok := err.(interface{ As(any) bool }); ok {
-		var httpErr *errx.HTTPError
-		if asErr.As(&httpErr) && httpErr != nil {
-			return httpErr
-		}
-	}
-
-	type unwrapOne interface{ Unwrap() error }
-	type unwrapMany interface{ Unwrap() []error }
-
-	switch e := err.(type) {
-	case unwrapMany:
-		for _, child := range e.Unwrap() {
-			if httpErr := firstHTTPErrorCandidate(child); httpErr != nil {
-				return httpErr
-			}
-		}
-	case unwrapOne:
-		return firstHTTPErrorCandidate(e.Unwrap())
-	}
-
-	return nil
-}
-
 func normalizeProblemPayload(err error) problemPayload {
-	if httpErr := selectedHTTPError(err); httpErr != nil {
+	var httpErr *errx.HTTPError
+	if errors.As(err, &httpErr) && httpErr != nil {
 		return problemPayload{
 			Title:  httpErr.Title(),
 			Status: httpErr.Status(),

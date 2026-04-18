@@ -15,6 +15,7 @@ import (
 )
 
 const defaultMaxBodyBytes int64 = 1 << 20
+const maxConsecutiveEmptyBodyReads = 100
 
 const (
 	CodeInvalidJSON          = "invalid_json"
@@ -26,16 +27,10 @@ const mimeApplicationJSON = "application/json"
 
 type requestBodyCacheKey struct{}
 
-type requestBodyCache struct {
-	body []byte
-	err  error
-}
-
-type requestBodyPresenceKey struct{}
-
-type requestBodyPresenceState struct {
-	has bool
-	err error
+type requestBodyState struct {
+	loaded bool
+	body   []byte
+	err    error
 }
 
 type replayReadCloser struct {
@@ -104,70 +99,76 @@ func validateBindBodyTarget(targetType reflect.Type) error {
 }
 
 func requestBodyBytes(r *http.Request) ([]byte, error) {
-	if cached, ok := r.Context().Value(requestBodyCacheKey{}).(requestBodyCache); ok {
-		return bytes.Clone(cached.body), cached.err
+	state := requestBodyStateFromRequest(r)
+	if state.loaded {
+		return bytes.Clone(state.body), state.err
 	}
 
-	var (
-		body []byte
-		err  error
-	)
-	if r.Body != nil {
-		body, err = readBody(r.Body)
-	}
+	body, err := readRequestBody(r)
 
-	cache := requestBodyCache{
-		body: bytes.Clone(body),
-		err:  err,
-	}
+	cachedBody := bytes.Clone(body)
+	state.loaded = true
+	state.body = cachedBody
+	state.err = err
 	if err == nil && r.Body != nil {
-		r.Body = io.NopCloser(bytes.NewReader(cache.body))
+		r.Body = io.NopCloser(bytes.NewReader(cachedBody))
 	}
-	*r = *r.WithContext(context.WithValue(r.Context(), requestBodyCacheKey{}, cache))
-	return bytes.Clone(cache.body), cache.err
+	setRequestBodyState(r, state)
+	return bytes.Clone(cachedBody), err
 }
 
 func requestHasBody(r *http.Request) (bool, error) {
 	if r == nil || r.Body == nil {
 		return false, nil
 	}
-	if cached, ok := r.Context().Value(requestBodyCacheKey{}).(requestBodyCache); ok {
-		return len(cached.body) > 0, cached.err
-	}
-	if cached, ok := r.Context().Value(requestBodyPresenceKey{}).(requestBodyPresenceState); ok {
-		return cached.has, cached.err
+
+	state := requestBodyStateFromRequest(r)
+	if state.loaded {
+		return len(state.body) > 0, state.err
 	}
 
-	body := r.Body
 	var prefix [1]byte
-	n, err := body.Read(prefix[:])
+	n, err := readWithProgress(r.Body, prefix[:])
 	if err != nil && err != io.EOF {
 		if n > 0 {
 			r.Body = &replayReadCloser{
-				Reader: io.MultiReader(bytes.NewReader(prefix[:n]), body),
-				Closer: body,
+				Reader: io.MultiReader(bytes.NewReader(prefix[:n]), r.Body),
+				Closer: r.Body,
 			}
 		}
-		*r = *r.WithContext(context.WithValue(r.Context(), requestBodyPresenceKey{}, requestBodyPresenceState{
-			has: false,
-			err: err,
-		}))
 		return false, err
 	}
 
 	if n == 0 {
-		*r = *r.WithContext(context.WithValue(r.Context(), requestBodyPresenceKey{}, requestBodyPresenceState{}))
 		return false, nil
 	}
 
 	r.Body = &replayReadCloser{
-		Reader: io.MultiReader(bytes.NewReader(prefix[:n]), body),
-		Closer: body,
+		Reader: io.MultiReader(bytes.NewReader(prefix[:n]), r.Body),
+		Closer: r.Body,
 	}
-	*r = *r.WithContext(context.WithValue(r.Context(), requestBodyPresenceKey{}, requestBodyPresenceState{
-		has: true,
-	}))
 	return true, nil
+}
+
+func requestBodyStateFromRequest(r *http.Request) requestBodyState {
+	if r == nil {
+		return requestBodyState{}
+	}
+	if state, ok := r.Context().Value(requestBodyCacheKey{}).(requestBodyState); ok {
+		return state
+	}
+	return requestBodyState{}
+}
+
+func setRequestBodyState(r *http.Request, state requestBodyState) {
+	*r = *r.WithContext(context.WithValue(r.Context(), requestBodyCacheKey{}, state))
+}
+
+func readRequestBody(r *http.Request) ([]byte, error) {
+	if r == nil || r.Body == nil {
+		return nil, nil
+	}
+	return readBody(r.Body)
 }
 
 func looksLikeJSONObject(body []byte) bool {
@@ -176,7 +177,15 @@ func looksLikeJSONObject(body []byte) bool {
 }
 
 func bodyMediaType(r *http.Request) (string, error) {
-	contentType := strings.TrimSpace(r.Header.Get("Content-Type"))
+	contentTypes := r.Header.Values("Content-Type")
+	if len(contentTypes) > 1 {
+		return "", errDuplicateContentType
+	}
+
+	contentType := ""
+	if len(contentTypes) == 1 {
+		contentType = strings.TrimSpace(contentTypes[0])
+	}
 	if contentType == "" {
 		return "", nil
 	}
@@ -214,9 +223,10 @@ func invalidJSONError(cause error) error {
 }
 
 var errRequestTooLarge = errors.New("reqx: request body too large")
+var errDuplicateContentType = errors.New("reqx: multiple Content-Type values")
 
 func readBody(body io.ReadCloser) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(body, defaultMaxBodyBytes+1))
+	data, err := io.ReadAll(io.LimitReader(newProgressReader(body), defaultMaxBodyBytes+1))
 	if err != nil {
 		return nil, err
 	}
@@ -224,4 +234,37 @@ func readBody(body io.ReadCloser) ([]byte, error) {
 		return nil, errRequestTooLarge
 	}
 	return data, nil
+}
+
+func readWithProgress(r io.Reader, p []byte) (int, error) {
+	progressReader := newProgressReader(r)
+	for {
+		n, err := progressReader.Read(p)
+		if n != 0 || err != nil {
+			return n, err
+		}
+	}
+}
+
+type progressReader struct {
+	reader     io.Reader
+	emptyReads int
+}
+
+func newProgressReader(r io.Reader) *progressReader {
+	return &progressReader{reader: r}
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n != 0 || err != nil {
+		r.emptyReads = 0
+		return n, err
+	}
+
+	r.emptyReads++
+	if r.emptyReads >= maxConsecutiveEmptyBodyReads {
+		return 0, io.ErrNoProgress
+	}
+	return 0, nil
 }

@@ -2,6 +2,7 @@ package reqx
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -115,6 +116,16 @@ func TestRequireBodyReadError(t *testing.T) {
 
 	if err := RequireBody(req); !errors.Is(err, wantErr) {
 		t.Fatalf("RequireBody(read error) = %v, want %v", err, wantErr)
+	}
+}
+
+func TestRequireBodyReadNoProgress(t *testing.T) {
+	req := newJSONRequest(http.MethodPost, "/", "")
+	req.Body = &bindBodyZeroThenPanicCloser{}
+	req.ContentLength = -1
+
+	if err := RequireBody(req); !errors.Is(err, io.ErrNoProgress) {
+		t.Fatalf("RequireBody(no progress) = %v, want %v", err, io.ErrNoProgress)
 	}
 }
 

@@ -1,7 +1,6 @@
 package reqx
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -40,6 +39,72 @@ func (r *bindBodyPrefixThenErrorCloser) Read(p []byte) (int, error) {
 }
 
 func (r *bindBodyPrefixThenErrorCloser) Close() error { return nil }
+
+type bindBodyZeroThenDataCloser struct {
+	zeroReadDone bool
+	body         io.ReadCloser
+}
+
+func newBindBodyZeroThenDataCloser(body string) *bindBodyZeroThenDataCloser {
+	return &bindBodyZeroThenDataCloser{
+		body: io.NopCloser(strings.NewReader(body)),
+	}
+}
+
+func (r *bindBodyZeroThenDataCloser) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if !r.zeroReadDone {
+		r.zeroReadDone = true
+		return 0, nil
+	}
+	return r.body.Read(p)
+}
+
+func (r *bindBodyZeroThenDataCloser) Close() error {
+	return r.body.Close()
+}
+
+type bindBodyZeroThenPanicCloser struct {
+	zeroReads int
+}
+
+const bindBodyZeroReadPanicAfter = 128
+
+func (r *bindBodyZeroThenPanicCloser) Read([]byte) (int, error) {
+	if r.zeroReads >= bindBodyZeroReadPanicAfter {
+		panic("too many empty reads")
+	}
+	r.zeroReads++
+	return 0, nil
+}
+
+func (r *bindBodyZeroThenPanicCloser) Close() error { return nil }
+
+type bindBodyPrefixThenZeroThenPanicCloser struct {
+	prefix    byte
+	used      bool
+	zeroReads int
+}
+
+func (r *bindBodyPrefixThenZeroThenPanicCloser) Read(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if !r.used {
+		r.used = true
+		p[0] = r.prefix
+		return 1, nil
+	}
+	if r.zeroReads >= bindBodyZeroReadPanicAfter {
+		panic("too many empty reads")
+	}
+	r.zeroReads++
+	return 0, nil
+}
+
+func (r *bindBodyPrefixThenZeroThenPanicCloser) Close() error { return nil }
 
 type bindBodyJSONValue struct {
 	Value string
@@ -105,6 +170,25 @@ func TestBindBody_BasicContracts(t *testing.T) {
 			t.Fatalf("dst = %#v, want bound body", dst)
 		}
 	})
+
+	t.Run("zero nil read before body data still binds", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = newBindBodyZeroThenDataCloser(`{"name":"kanata"}`)
+		req.ContentLength = -1
+
+		var dst request
+		if err := BindBody(req, &dst); err != nil {
+			t.Fatalf("BindBody() error = %v", err)
+		}
+		if dst != (request{Name: "kanata"}) {
+			t.Fatalf("dst = %#v, want bound body", dst)
+		}
+	})
 }
 
 func TestBindBody_ComposesWithRequireBodyOnSameRequest(t *testing.T) {
@@ -142,6 +226,26 @@ func TestBindBody_ComposesWithRequireBodyOnSameRequest(t *testing.T) {
 			t.Fatalf("dst = %#v, want bound body", dst)
 		}
 	})
+}
+
+func TestBindBody_UnsupportedMediaTypeStillPreservesBodyForRequireBody(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
+	req.Header.Set("Content-Type", "text/plain")
+
+	dst := request{Name: "existing"}
+	err := BindBody(req, &dst)
+	_ = assertHTTPStatusCode(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType)
+	if dst != (request{Name: "existing"}) {
+		t.Fatalf("dst = %#v, want unchanged", dst)
+	}
+
+	if err := RequireBody(req); err != nil {
+		t.Fatalf("RequireBody() error = %v, want body to remain readable after media type check", err)
+	}
 }
 
 func TestBindBody_FollowsEncodingJSONFieldSemantics(t *testing.T) {
@@ -234,6 +338,8 @@ func TestBindBody_ClientErrorsPreserveTarget(t *testing.T) {
 		{name: "top level null", body: `null`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
 		{name: "top level array", body: `[]`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
 		{name: "top level string", body: `"x"`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
+		{name: "top level number", body: `123`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
+		{name: "top level boolean", body: `true`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
 		{name: "truncated json", body: `{"name":"kanata"`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
 		{name: "trailing data", body: `{"name":"kanata"} true`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
 		{name: "unknown field", body: `{"extra":1}`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
@@ -325,6 +431,22 @@ func TestBindBody_BoundariesAndUsageErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("duplicate content type values are rejected and preserve target", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
+		req.Header["Content-Type"] = []string{"application/json", "text/plain"}
+		dst := request{Name: "existing"}
+
+		err := BindBody(req, &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType)
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
 	t.Run("body read failures are ordinary errors", func(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`
@@ -340,6 +462,46 @@ func TestBindBody_BoundariesAndUsageErrors(t *testing.T) {
 		err := BindBody(req, &dst)
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+		}
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("body presence no progress returns ordinary error", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = &bindBodyZeroThenPanicCloser{}
+		req.ContentLength = -1
+
+		dst := request{Name: "existing"}
+		err := BindBody(req, &dst)
+		if !errors.Is(err, io.ErrNoProgress) {
+			t.Fatalf("BindBody() error = %v, want %v", err, io.ErrNoProgress)
+		}
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("body read no progress after prefix returns ordinary error", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = &bindBodyPrefixThenZeroThenPanicCloser{prefix: '{'}
+		req.ContentLength = -1
+
+		dst := request{Name: "existing"}
+		err := BindBody(req, &dst)
+		if !errors.Is(err, io.ErrNoProgress) {
+			t.Fatalf("BindBody() error = %v, want %v", err, io.ErrNoProgress)
 		}
 		if dst != (request{Name: "existing"}) {
 			t.Fatalf("dst = %#v, want unchanged", dst)
@@ -414,56 +576,36 @@ func TestBindBody_CachesBodyBytesForSameRequest(t *testing.T) {
 	}
 }
 
-func TestRequestHasBody_InternalBranches(t *testing.T) {
-	t.Run("nil request or body is treated as no body", func(t *testing.T) {
-		hasBody, err := requestHasBody(nil)
-		if err != nil || hasBody {
-			t.Fatalf("requestHasBody(nil) = (%v, %v), want (false, nil)", hasBody, err)
-		}
+func TestRequestHasBody_ReplaysPeekedPrefixOnReadError(t *testing.T) {
+	wantErr := errors.New("peek failed")
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Body = &bindBodyPrefixThenErrorCloser{
+		prefix:   '{',
+		firstErr: wantErr,
+	}
+	req.ContentLength = -1
 
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = nil
+	hasBody, err := requestHasBody(req)
+	if hasBody {
+		t.Fatal("requestHasBody() reported body present on read error, want false")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("requestHasBody() error = %v, want %v", err, wantErr)
+	}
 
-		hasBody, err = requestHasBody(req)
-		if err != nil || hasBody {
-			t.Fatalf("requestHasBody(req with nil body) = (%v, %v), want (false, nil)", hasBody, err)
-		}
-	})
+	body, readErr := io.ReadAll(req.Body)
+	if readErr != nil {
+		t.Fatalf("ReadAll(req.Body) error = %v", readErr)
+	}
+	if string(body) != "{" {
+		t.Fatalf("body = %q, want replayed peeked prefix", string(body))
+	}
+}
 
-	t.Run("presence cache short circuits body reads", func(t *testing.T) {
-		wantErr := errors.New("cached failure")
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = bindBodyReadErrorCloser{err: errors.New("body should not be read")}
-		req = req.WithContext(context.WithValue(req.Context(), requestBodyPresenceKey{}, requestBodyPresenceState{
-			has: true,
-			err: wantErr,
-		}))
-
-		hasBody, err := requestHasBody(req)
-		if !hasBody || !errors.Is(err, wantErr) {
-			t.Fatalf("requestHasBody(cached) = (%v, %v), want (true, %v)", hasBody, err, wantErr)
-		}
-	})
-
-	t.Run("partial read failure replays consumed prefix", func(t *testing.T) {
-		wantErr := errors.New("peek failed")
-		req := httptest.NewRequest(http.MethodPost, "/", nil)
-		req.Body = &bindBodyPrefixThenErrorCloser{prefix: '{', firstErr: wantErr}
-		req.ContentLength = -1
-
-		hasBody, err := requestHasBody(req)
-		if hasBody || !errors.Is(err, wantErr) {
-			t.Fatalf("requestHasBody() = (%v, %v), want (false, %v)", hasBody, err, wantErr)
-		}
-
-		body, readErr := io.ReadAll(req.Body)
-		if readErr != nil {
-			t.Fatalf("ReadAll(req.Body) error = %v", readErr)
-		}
-		if string(body) != "{" {
-			t.Fatalf("body = %q, want replayed prefix", string(body))
-		}
-	})
+func TestRequestBodyStateFromRequest_NilRequest(t *testing.T) {
+	if state := requestBodyStateFromRequest(nil); state.loaded || state.body != nil || state.err != nil {
+		t.Fatalf("requestBodyStateFromRequest(nil) = %#v, want zero state", state)
+	}
 }
 
 func TestBodyMediaType_InternalBranches(t *testing.T) {
@@ -483,6 +625,16 @@ func TestBodyMediaType_InternalBranches(t *testing.T) {
 		_, err := bodyMediaType(req)
 		if err == nil {
 			t.Fatal("bodyMediaType() error = nil, want parse error")
+		}
+	})
+
+	t.Run("duplicate content type values return error", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header["Content-Type"] = []string{"application/json", "text/plain"}
+
+		_, err := bodyMediaType(req)
+		if err == nil {
+			t.Fatal("bodyMediaType() error = nil, want duplicate content type error")
 		}
 	})
 }

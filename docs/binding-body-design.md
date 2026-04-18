@@ -104,7 +104,8 @@ body 存在性的规则固定为：
 
 一旦 body 非空，规则固定为：
 
-- 主媒体类型必须是 `application/json`
+- 必须且只能提供一个 `Content-Type`
+- 该 `Content-Type` 的主媒体类型必须是 `application/json`
 - `charset=utf-8` 之类的媒体类型参数不影响匹配
 - 默认大小限制为 `1 MiB` 原始字节
 - 媒体类型检查先于大小限制；错误媒体类型会先返回 `415 unsupported_media_type`
@@ -196,6 +197,7 @@ body 存在性的规则固定为：
 - 同一个 request 上 `BindBody(...)` / `RequireBody(...)` 可以按任意顺序组合
 - `application/json`
 - `application/json; charset=utf-8`
+- 重复 `Content-Type` 返回 `415 unsupported_media_type`
 - 非空非 JSON `Content-Type` 返回 `415 unsupported_media_type`
 - 大于 `1 MiB` 的 body 返回 `413 request_too_large`
 - 非空非 JSON `Content-Type` 与超大 body 同时出现时，优先返回 `415 unsupported_media_type`

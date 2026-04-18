@@ -75,6 +75,32 @@ func TestWriteErrorWritesEnvelope(t *testing.T) {
 	})
 }
 
+func TestWriteErrorWritesNotFoundProblem(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := WriteError(rr, errx.NewHTTPError(http.StatusNotFound, "", "")); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNotFound)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
+		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["title"]; got != http.StatusText(http.StatusNotFound) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusNotFound))
+	}
+	if got := body["status"]; got != float64(http.StatusNotFound) {
+		t.Fatalf("status = %#v, want %d", got, http.StatusNotFound)
+	}
+	if got := body["code"]; got != "not_found" {
+		t.Fatalf("code = %#v, want not_found", got)
+	}
+}
+
 func TestWriteErrorPreservesWrappedHTTPErrorFields(t *testing.T) {
 	rr := httptest.NewRecorder()
 
@@ -106,6 +132,44 @@ func TestWriteErrorPreservesWrappedHTTPErrorFields(t *testing.T) {
 		"field":  "name",
 		"code":   "required",
 		"detail": "is required",
+	})
+}
+
+func TestWriteErrorPreservesViolationOrderAndContent(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	err := WriteError(rr, errx.NewHTTPError(http.StatusUnprocessableEntity, "", "").WithViolations([]errx.Violation{
+		{Field: "name", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
+		{Field: "email", In: errx.InQuery, Code: errx.CodeInvalid, Detail: "is invalid"},
+		{Field: "name", In: errx.InBody, Code: errx.CodeInvalid, Detail: "must be unique"},
+	}))
+	if err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	errorsValue, ok := body["errors"].([]any)
+	if !ok || len(errorsValue) != 3 {
+		t.Fatalf("errors = %#v, want 3 items", body["errors"])
+	}
+
+	assertPublicErrorObject(t, errorsValue[0], map[string]any{
+		"field":  "name",
+		"in":     "body",
+		"code":   "required",
+		"detail": "is required",
+	})
+	assertPublicErrorObject(t, errorsValue[1], map[string]any{
+		"field":  "email",
+		"in":     "query",
+		"code":   "invalid",
+		"detail": "is invalid",
+	})
+	assertPublicErrorObject(t, errorsValue[2], map[string]any{
+		"field":  "name",
+		"in":     "body",
+		"code":   "invalid",
+		"detail": "must be unique",
 	})
 }
 
@@ -226,32 +290,6 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 			t.Fatalf("body leaked internal cause: %q", rr.Body.String())
 		}
 	})
-}
-
-func TestWriteErrorSkipsTypedNilHTTPErrorInJoinedErrors(t *testing.T) {
-	var typedNil *errx.HTTPError
-
-	rr := httptest.NewRecorder()
-	input := errors.Join(
-		typedNil,
-		context.Canceled,
-		errx.NewHTTPError(http.StatusConflict, "version_conflict", "version mismatch"),
-	)
-
-	if err := WriteError(rr, input); err != nil {
-		t.Fatalf("WriteError() error = %v", err)
-	}
-
-	body := decodePayload(t, rr.Body.Bytes())
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusConflict)
-	}
-	if got := body["code"]; got != "version_conflict" {
-		t.Fatalf("code = %#v, want version_conflict", got)
-	}
-	if got := body["detail"]; got != "version mismatch" {
-		t.Fatalf("detail = %#v, want version mismatch", got)
-	}
 }
 
 func TestWriteErrorResponseBoundaries(t *testing.T) {

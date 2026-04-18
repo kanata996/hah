@@ -15,18 +15,6 @@ const (
 
 var errNilResponseWriter = errors.New("resp: response writer is nil")
 
-type responseWriteError struct {
-	cause error
-}
-
-func (e *responseWriteError) Error() string {
-	return "resp: write response failed: " + e.cause.Error()
-}
-
-func (e *responseWriteError) Unwrap() error {
-	return e.cause
-}
-
 // JSON 写出 JSON 响应。
 func JSON(w http.ResponseWriter, status int, data any) error {
 	return writeJSON(w, status, data)
@@ -85,7 +73,7 @@ func writePreparedJSONBytes(w http.ResponseWriter, status int, contentType strin
 	header.Set("Content-Type", contentType)
 	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
-		return &responseWriteError{cause: err}
+		return fmt.Errorf("resp: write response failed: %w", err)
 	}
 	return nil
 }
