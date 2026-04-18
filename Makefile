@@ -3,7 +3,9 @@ PKG ?= ./...
 RUN ?= .
 COVER_FILE ?= coverage.out
 GOCACHE_DIR ?= $(CURDIR)/.gocache
+GOMODCACHE_DIR ?= $(CURDIR)/.gomodcache
 GOLANGCI_LINT_CACHE_DIR ?= $(CURDIR)/.golangci-lint-cache
+GO_ENV ?= GOCACHE="$(GOCACHE_DIR)" GOMODCACHE="$(GOMODCACHE_DIR)"
 VERSION ?=
 MAIN_BRANCH ?= main
 
@@ -30,10 +32,11 @@ help:
 	@echo "                                 Run release-tag and release-gh"
 
 fmt:
-	@$(GO) fmt ./...
+	@mkdir -p "$(GOCACHE_DIR)" "$(GOMODCACHE_DIR)"
+	@$(GO_ENV) $(GO) fmt ./...
 
 fmt-check:
-	@unformatted="$$(gofmt -l .)"; \
+	@unformatted="$$(find . -path './.gomodcache' -prune -o -name '*.go' -type f -exec gofmt -l {} +)"; \
 	if [ -n "$$unformatted" ]; then \
 		echo "The following files need gofmt:"; \
 		echo "$$unformatted"; \
@@ -41,30 +44,37 @@ fmt-check:
 	fi
 
 vet:
-	@$(GO) vet ./...
+	@mkdir -p "$(GOCACHE_DIR)" "$(GOMODCACHE_DIR)"
+	@$(GO_ENV) $(GO) vet ./...
 
 lint:
-	@mkdir -p "$(GOCACHE_DIR)" "$(GOLANGCI_LINT_CACHE_DIR)"
-	@GOCACHE="$(GOCACHE_DIR)" GOLANGCI_LINT_CACHE="$(GOLANGCI_LINT_CACHE_DIR)" golangci-lint run ./...
+	@mkdir -p "$(GOCACHE_DIR)" "$(GOMODCACHE_DIR)" "$(GOLANGCI_LINT_CACHE_DIR)"
+	@$(GO_ENV) GOLANGCI_LINT_CACHE="$(GOLANGCI_LINT_CACHE_DIR)" golangci-lint run ./...
 
 test:
-	@$(GO) test ./...
+	@mkdir -p "$(GOCACHE_DIR)" "$(GOMODCACHE_DIR)"
+	@$(GO_ENV) $(GO) test ./...
 
 test-pkg:
-	@$(GO) test $(PKG)
+	@mkdir -p "$(GOCACHE_DIR)" "$(GOMODCACHE_DIR)"
+	@$(GO_ENV) $(GO) test $(PKG)
 
 test-name:
-	@$(GO) test $(PKG) -run $(RUN)
+	@mkdir -p "$(GOCACHE_DIR)" "$(GOMODCACHE_DIR)"
+	@$(GO_ENV) $(GO) test $(PKG) -run $(RUN)
 
 test-cover:
-	@$(GO) test ./... -cover -coverprofile=$(COVER_FILE)
-	@$(GO) tool cover -func=$(COVER_FILE)
+	@mkdir -p "$(GOCACHE_DIR)" "$(GOMODCACHE_DIR)"
+	@$(GO_ENV) $(GO) test ./... -cover -coverprofile=$(COVER_FILE)
+	@$(GO_ENV) $(GO) tool cover -func=$(COVER_FILE)
 
 test-race:
-	@$(GO) test ./... -race
+	@mkdir -p "$(GOCACHE_DIR)" "$(GOMODCACHE_DIR)"
+	@$(GO_ENV) $(GO) test ./... -race
 
 bench:
-	@$(GO) test ./... -run '^$$' -bench . -benchmem
+	@mkdir -p "$(GOCACHE_DIR)" "$(GOMODCACHE_DIR)"
+	@$(GO_ENV) $(GO) test ./... -run '^$$' -bench . -benchmem
 
 ci: fmt-check vet test lint
 
