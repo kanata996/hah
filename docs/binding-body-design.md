@@ -1,7 +1,7 @@
 # hah BindBody 设计方案
 
 - 状态：Locked
-- 版本：v7
+- 版本：v8
 - 锁定日期：2026-04-19
 - 适用范围：
   - `hah.BindBody(...)`
@@ -23,11 +23,12 @@
 `BindBody(...)` 是面向 JSON API 的默认 body binder。
 它提供一条直接、稳定、可组合的 body 处理路径：
 
-1. 读取当前 request 的 body 字节
-2. 在同一个 request 上缓存读取结果
-3. 校验媒体类型与大小限制
-4. 用标准库 `encoding/json` 解码到临时 DTO
-5. 成功后一次性提交到 target
+1. 先探测当前 request 是否显式提交了 body
+2. 对零字节 body 提前 no-op
+3. 对非空 body 先校验媒体类型
+4. 仅在进入 JSON 绑定路径时读取并缓存 body 字节，同时执行大小限制
+5. 用标准库 `encoding/json` 解码到临时 DTO
+6. 成功后一次性提交到 target
 
 这套设计的重点是：
 
@@ -106,6 +107,7 @@ body 存在性的规则固定为：
 - 主媒体类型必须是 `application/json`
 - `charset=utf-8` 之类的媒体类型参数不影响匹配
 - 默认大小限制为 `1 MiB` 原始字节
+- 媒体类型检查先于大小限制；错误媒体类型会先返回 `415 unsupported_media_type`
 - 顶层值必须是单个 JSON object
 - 文档前后允许空白
 - 未知字段默认拒绝
@@ -165,10 +167,11 @@ body 存在性的规则固定为：
 冲突条件下的优先级固定为：
 
 1. usage error
-2. body read failure / request too large
+2. body 存在性探测阶段的 read failure
 3. 零字节 body no-op 或缺失 body
 4. 非空 body 的媒体类型检查
-5. JSON 解码与文档边界错误
+5. 进入 JSON 绑定路径后的 body read failure / request too large
+6. JSON 解码与文档边界错误
 
 ## 5. 与 `RequireBody(...)` 的关系
 
@@ -195,6 +198,7 @@ body 存在性的规则固定为：
 - `application/json; charset=utf-8`
 - 非空非 JSON `Content-Type` 返回 `415 unsupported_media_type`
 - 大于 `1 MiB` 的 body 返回 `413 request_too_large`
+- 非空非 JSON `Content-Type` 与超大 body 同时出现时，优先返回 `415 unsupported_media_type`
 - 恰好 `1 MiB` 的 body 仍允许进入 JSON 解码
 - 空白 body、顶层 `null`、array、string、number、boolean 返回 `400 invalid_json`
 - 截断 JSON、尾随数据、多个 top-level 值返回 `400 invalid_json`

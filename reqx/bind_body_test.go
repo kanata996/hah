@@ -266,6 +266,22 @@ func TestBindBody_BoundariesAndUsageErrors(t *testing.T) {
 		}
 	})
 
+	t.Run("unsupported media type wins before size limit and preserves target", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(strings.Repeat("a", int(defaultMaxBodyBytes)+1)))
+		req.Header.Set("Content-Type", "text/plain")
+		dst := request{Name: "existing"}
+
+		err := BindBody(req, &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType)
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
 	t.Run("body read failures are ordinary errors", func(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`

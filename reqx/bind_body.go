@@ -31,6 +31,18 @@ type requestBodyCache struct {
 	err  error
 }
 
+type requestBodyPresenceKey struct{}
+
+type requestBodyPresenceState struct {
+	has bool
+	err error
+}
+
+type replayReadCloser struct {
+	io.Reader
+	io.Closer
+}
+
 func BindBody(r *http.Request, target any) error {
 	if err := validateBindInputs(r, target); err != nil {
 		return err
@@ -39,19 +51,27 @@ func BindBody(r *http.Request, target any) error {
 		return err
 	}
 
-	body, err := requestBodyBytes(r)
+	hasBody, err := requestHasBody(r)
 	if err != nil {
 		if errors.Is(err, errRequestTooLarge) {
 			return requestTooLargeError()
 		}
 		return err
 	}
-	if len(body) == 0 {
+	if !hasBody {
 		return nil
 	}
 
 	if mediaType, err := bodyMediaType(r); err != nil || mediaType != mimeApplicationJSON {
 		return unsupportedMediaTypeError()
+	}
+
+	body, err := requestBodyBytes(r)
+	if err != nil {
+		if errors.Is(err, errRequestTooLarge) {
+			return requestTooLargeError()
+		}
+		return err
 	}
 	if !looksLikeJSONObject(body) {
 		return invalidJSONError(nil)
@@ -105,6 +125,49 @@ func requestBodyBytes(r *http.Request) ([]byte, error) {
 	}
 	*r = *r.WithContext(context.WithValue(r.Context(), requestBodyCacheKey{}, cache))
 	return bytes.Clone(cache.body), cache.err
+}
+
+func requestHasBody(r *http.Request) (bool, error) {
+	if r == nil || r.Body == nil {
+		return false, nil
+	}
+	if cached, ok := r.Context().Value(requestBodyCacheKey{}).(requestBodyCache); ok {
+		return len(cached.body) > 0, cached.err
+	}
+	if cached, ok := r.Context().Value(requestBodyPresenceKey{}).(requestBodyPresenceState); ok {
+		return cached.has, cached.err
+	}
+
+	body := r.Body
+	var prefix [1]byte
+	n, err := body.Read(prefix[:])
+	if err != nil && err != io.EOF {
+		if n > 0 {
+			r.Body = &replayReadCloser{
+				Reader: io.MultiReader(bytes.NewReader(prefix[:n]), body),
+				Closer: body,
+			}
+		}
+		*r = *r.WithContext(context.WithValue(r.Context(), requestBodyPresenceKey{}, requestBodyPresenceState{
+			has: false,
+			err: err,
+		}))
+		return false, err
+	}
+
+	if n == 0 {
+		*r = *r.WithContext(context.WithValue(r.Context(), requestBodyPresenceKey{}, requestBodyPresenceState{}))
+		return false, nil
+	}
+
+	r.Body = &replayReadCloser{
+		Reader: io.MultiReader(bytes.NewReader(prefix[:n]), body),
+		Closer: body,
+	}
+	*r = *r.WithContext(context.WithValue(r.Context(), requestBodyPresenceKey{}, requestBodyPresenceState{
+		has: true,
+	}))
+	return true, nil
 }
 
 func looksLikeJSONObject(body []byte) bool {

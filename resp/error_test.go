@@ -186,6 +186,32 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 	})
 }
 
+func TestWriteErrorSkipsTypedNilHTTPErrorInJoinedErrors(t *testing.T) {
+	var typedNil *errx.HTTPError
+
+	rr := httptest.NewRecorder()
+	input := errors.Join(
+		typedNil,
+		context.Canceled,
+		errx.NewHTTPError(http.StatusConflict, "version_conflict", "version mismatch"),
+	)
+
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusConflict)
+	}
+	if got := body["code"]; got != "version_conflict" {
+		t.Fatalf("code = %#v, want version_conflict", got)
+	}
+	if got := body["detail"]; got != "version mismatch" {
+		t.Fatalf("detail = %#v, want version mismatch", got)
+	}
+}
+
 func TestWriteErrorResponseBoundaries(t *testing.T) {
 	t.Run("nil error is noop", func(t *testing.T) {
 		rr := httptest.NewRecorder()
