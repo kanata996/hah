@@ -3,6 +3,7 @@ package reqx
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/kanata996/hah/errx"
@@ -21,23 +22,22 @@ func (r errorReadCloser) Close() error {
 }
 
 func TestRequireBody(t *testing.T) {
-	t.Run("non-empty body passes and can still be bound", func(t *testing.T) {
+	t.Run("non empty body passes and can still be bound", func(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`
-			Age  int    `json:"age"`
 		}
 
 		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
 		if err := RequireBody(req); err != nil {
-			t.Fatalf("RequireBody(non-empty) error = %v", err)
+			t.Fatalf("RequireBody() error = %v", err)
 		}
 
-		dst := request{Name: "existing", Age: 17}
+		var dst request
 		if err := BindBody(req, &dst); err != nil {
-			t.Fatalf("BindBody() after RequireBody() error = %v", err)
+			t.Fatalf("BindBody() error = %v", err)
 		}
 		if dst != (request{Name: "kanata"}) {
-			t.Fatalf("dst = %#v, want zero-based bind result after RequireBody", dst)
+			t.Fatalf("dst = %#v, want bound body", dst)
 		}
 	})
 
@@ -53,65 +53,51 @@ func TestRequireBody(t *testing.T) {
 			t.Fatalf("BindBody() error = %v", err)
 		}
 		if err := RequireBody(req); err != nil {
-			t.Fatalf("RequireBody() after BindBody() error = %v", err)
-		}
-		if dst != (request{Name: "kanata"}) {
-			t.Fatalf("dst = %#v, want bound result preserved", dst)
+			t.Fatalf("RequireBody() error = %v", err)
 		}
 	})
 
-	t.Run("whitespace body counts as present for RequireBody", func(t *testing.T) {
-		req := newJSONRequest(http.MethodPost, "/", " \n\t ")
-
-		if err := RequireBody(req); err != nil {
-			t.Fatalf("RequireBody(whitespace) error = %v, want nil", err)
+	t.Run("whitespace and null bodies count as present", func(t *testing.T) {
+		for _, body := range []string{" \n\t ", `null`} {
+			req := newJSONRequest(http.MethodPost, "/", body)
+			if err := RequireBody(req); err != nil {
+				t.Fatalf("RequireBody(%q) error = %v, want nil", body, err)
+			}
 		}
 	})
 
-	t.Run("null body counts as present for RequireBody while BindBody rejects it", func(t *testing.T) {
-		type request struct {
-			Name string `json:"name"`
+	t.Run("zero byte bodies are required violations", func(t *testing.T) {
+		testCases := []*http.Request{
+			func() *http.Request {
+				req := newJSONRequest(http.MethodPost, "/", "")
+				req.ContentLength = 0
+				return req
+			}(),
+			func() *http.Request {
+				req := newJSONRequest(http.MethodPost, "/", "")
+				req.ContentLength = -1
+				return req
+			}(),
+			func() *http.Request {
+				req := newJSONRequest(http.MethodPost, "/", "")
+				req.Body = nil
+				req.ContentLength = 0
+				return req
+			}(),
 		}
 
-		req := newJSONRequest(http.MethodPost, "/", `null`)
-
-		if err := RequireBody(req); err != nil {
-			t.Fatalf("RequireBody(null) error = %v, want nil", err)
-		}
-
-		err := BindBody(req, &request{})
-		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, CodeInvalidJSON)
-	})
-
-	t.Run("content length zero body is required violation", func(t *testing.T) {
-		req := newJSONRequest(http.MethodPost, "/", "")
-		req.ContentLength = 0
-
-		violation := assertSingleViolation(t, RequireBody(req))
-		if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
-			t.Fatalf("violation = %#v", violation)
-		}
-	})
-
-	t.Run("unknown length empty body is required violation", func(t *testing.T) {
-		req := newJSONRequest(http.MethodPost, "/", "")
-		req.ContentLength = -1
-
-		violation := assertSingleViolation(t, RequireBody(req))
-		if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
-			t.Fatalf("violation = %#v", violation)
+		for _, req := range testCases {
+			violation := assertSingleViolation(t, RequireBody(req))
+			if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
+				t.Fatalf("violation = %#v", violation)
+			}
 		}
 	})
 
-	t.Run("nil body is required violation", func(t *testing.T) {
-		req := newJSONRequest(http.MethodPost, "/", "")
-		req.Body = nil
-		req.ContentLength = 0
-
-		violation := assertSingleViolation(t, RequireBody(req))
-		if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
-			t.Fatalf("violation = %#v", violation)
-		}
+	t.Run("oversized body returns request too large", func(t *testing.T) {
+		payload := `{"name":"` + strings.Repeat("a", int(defaultMaxBodyBytes)) + `"}`
+		err := RequireBody(newJSONRequest(http.MethodPost, "/", payload))
+		_ = assertHTTPStatusCode(t, err, http.StatusRequestEntityTooLarge, CodeRequestTooLarge)
 	})
 }
 

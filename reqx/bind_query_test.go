@@ -18,17 +18,14 @@ type bindQueryTextValue string
 func (*bindQueryTextValue) UnmarshalText([]byte) error { return nil }
 
 func TestBindQuery_Contracts(t *testing.T) {
-	t.Run("binds supported leaf types and inline structs", func(t *testing.T) {
-		type inlineFields struct {
-			When  time.Time     `query:"when"`
-			Wait  time.Duration `query:"wait"`
-			Token uuid.UUID     `query:"token"`
-		}
+	t.Run("binds supported leaf types", func(t *testing.T) {
 		type request struct {
 			Name    bindQueryNamedString `query:"name"`
 			Enabled bool                 `query:"enabled"`
 			Count   *int                 `query:"count"`
-			Inline  inlineFields         `query:",inline"`
+			When    time.Time            `query:"when"`
+			Wait    time.Duration        `query:"wait"`
+			Token   uuid.UUID            `query:"token"`
 		}
 
 		token := uuid.New()
@@ -38,10 +35,10 @@ func TestBindQuery_Contracts(t *testing.T) {
 		if err := BindQuery(req, &dst); err != nil {
 			t.Fatalf("BindQuery() error = %v", err)
 		}
-		if dst.Name != "kanata" || !dst.Enabled || dst.Count == nil || *dst.Count != 7 || dst.Inline.Wait != 5*time.Second || dst.Inline.Token != token {
+		if dst.Name != "kanata" || !dst.Enabled || dst.Count == nil || *dst.Count != 7 || dst.Wait != 5*time.Second || dst.Token != token {
 			t.Fatalf("dst = %#v, want bound supported fields", dst)
 		}
-		if got := dst.Inline.When.UTC().Format(time.RFC3339); got != "2026-04-13T10:00:00Z" {
+		if got := dst.When.UTC().Format(time.RFC3339); got != "2026-04-13T10:00:00Z" {
 			t.Fatalf("when = %q, want 2026-04-13T10:00:00Z", got)
 		}
 	})
@@ -459,51 +456,26 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid tags and empty inline plans are usage errors", func(t *testing.T) {
+	t.Run("invalid tags are usage errors", func(t *testing.T) {
 		type emptyTag struct {
 			Name string `query:""`
 		}
 		type spacedTag struct {
 			Name string `query:" name "`
 		}
-		type inlineEmpty struct {
-			Inline struct{} `query:",inline"`
+		type inlineTag struct {
+			Filters struct{} `query:",inline"`
+		}
+		type recursiveInline struct {
+			Self *recursiveInline `query:",inline"`
 		}
 
 		req := httptest.NewRequest(http.MethodGet, "/?name=kanata", nil)
 
 		assertNotHTTPError(t, BindQuery(req, &emptyTag{}))
 		assertNotHTTPError(t, BindQuery(req, &spacedTag{}))
-		assertNotHTTPError(t, BindQuery(req, &inlineEmpty{}))
-	})
-
-	t.Run("inline non-struct field shape is usage error", func(t *testing.T) {
-		type request struct {
-			Inline *int `query:",inline"`
-		}
-
-		existing := 7
-		dst := request{Inline: &existing}
-		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?inline=1", nil), &dst))
-		if dst.Inline == nil || *dst.Inline != 7 {
-			t.Fatalf("dst = %#v, want unchanged", dst)
-		}
-	})
-
-	t.Run("inline child planning errors bubble up before writes", func(t *testing.T) {
-		type child struct {
-			Name string `query:""`
-		}
-		type request struct {
-			Page   int   `query:"page"`
-			Inline child `query:",inline"`
-		}
-
-		dst := request{Page: 9}
-		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?page=7", nil), &dst))
-		if dst != (request{Page: 9}) {
-			t.Fatalf("dst = %#v, want unchanged", dst)
-		}
+		assertNotHTTPError(t, BindQuery(req, &inlineTag{}))
+		assertNotHTTPError(t, BindQuery(req, &recursiveInline{}))
 	})
 
 	t.Run("later client input errors do not commit earlier successful field writes", func(t *testing.T) {
@@ -517,36 +489,6 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
 		if dst != (request{Name: "existing", Count: 9}) {
 			t.Fatalf("dst = %#v, want unchanged", dst)
-		}
-	})
-
-	t.Run("inline pointer allocates only when a child binds successfully", func(t *testing.T) {
-		type filters struct {
-			Page int `query:"page"`
-		}
-		type request struct {
-			Filters *filters `query:",inline"`
-		}
-
-		var dst request
-		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), &dst); err != nil {
-			t.Fatalf("BindQuery() error = %v", err)
-		}
-		if dst.Filters != nil {
-			t.Fatalf("filters = %#v, want nil", dst.Filters)
-		}
-
-		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?page=bad", nil), &dst)
-		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
-		if dst.Filters != nil {
-			t.Fatalf("filters = %#v, want nil after failed bind", dst.Filters)
-		}
-
-		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/?page=7", nil), &dst); err != nil {
-			t.Fatalf("BindQuery() error = %v", err)
-		}
-		if dst.Filters == nil || dst.Filters.Page != 7 {
-			t.Fatalf("filters = %#v, want page=7", dst.Filters)
 		}
 	})
 
@@ -621,19 +563,4 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		}
 	})
 
-	t.Run("inline pointer conflicts are rejected regardless of runtime nil state", func(t *testing.T) {
-		type filters struct {
-			Page int `query:"page"`
-		}
-		type request struct {
-			Page    int      `query:"page"`
-			Filters *filters `query:",inline"`
-		}
-
-		var dst request
-		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?page=7", nil), &dst))
-		if dst != (request{}) {
-			t.Fatalf("dst = %#v, want unchanged", dst)
-		}
-	})
 }

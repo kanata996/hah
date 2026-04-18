@@ -45,6 +45,13 @@ type resolver[T any] interface {
 	resolve() (T, error)
 }
 
+func ensureBuilder[P any](p *P) *P {
+	if p == nil {
+		return new(P)
+	}
+	return p
+}
+
 func requireParam[P any](p *P, value requiredSetter) *P {
 	value.setRequired()
 	return p
@@ -238,56 +245,69 @@ type MultiParam[T any] struct {
 }
 
 func (p *ValueParam[T]) Required() *ValueParam[T] {
+	p = ensureBuilder(p)
 	return requireParam(p, &p.value)
 }
 
 func (p *ValueParam[T]) Default(value T) *ValueParam[T] {
+	p = ensureBuilder(p)
 	return defaultParam(p, &p.value, value)
 }
 
 func (p *ValueParam[T]) Check(check func(T) error) *ValueParam[T] {
+	p = ensureBuilder(p)
 	return checkParam(p, p.value.addCheck, check)
 }
 
 func (p *ValueParam[T]) Get() (T, error) {
+	p = ensureBuilder(p)
 	return getParam(&p.value)
 }
 
 func (p *OrderedParam[T]) Required() *OrderedParam[T] {
+	p = ensureBuilder(p)
 	return requireParam(p, &p.value)
 }
 
 func (p *OrderedParam[T]) Default(value T) *OrderedParam[T] {
+	p = ensureBuilder(p)
 	return defaultParam(p, &p.value, value)
 }
 
 func (p *OrderedParam[T]) Min(value T) *OrderedParam[T] {
+	p = ensureBuilder(p)
 	p.value.setMin(value)
 	return p
 }
 
 func (p *OrderedParam[T]) Max(value T) *OrderedParam[T] {
+	p = ensureBuilder(p)
 	p.value.setMax(value)
 	return p
 }
 
 func (p *OrderedParam[T]) Check(check func(T) error) *OrderedParam[T] {
+	p = ensureBuilder(p)
 	return checkParam(p, p.value.addCheck, check)
 }
 
 func (p *OrderedParam[T]) Get() (T, error) {
+	p = ensureBuilder(p)
 	return getParam(&p.value)
 }
 
 func (p *StringParam) Required() *StringParam {
+	p = ensureBuilder(p)
 	return requireParam(p, &p.value)
 }
 
 func (p *StringParam) Default(value string) *StringParam {
+	p = ensureBuilder(p)
 	return defaultParam(p, &p.value, value)
 }
 
 func (p *StringParam) MinLen(n int) *StringParam {
+	p = ensureBuilder(p)
 	if n < 0 {
 		p.value.setUsageErr(usageErrorf("minimum length must be >= 0"))
 		return p
@@ -304,6 +324,7 @@ func (p *StringParam) MinLen(n int) *StringParam {
 }
 
 func (p *StringParam) MaxLen(n int) *StringParam {
+	p = ensureBuilder(p)
 	if n < 0 {
 		p.value.setUsageErr(usageErrorf("maximum length must be >= 0"))
 		return p
@@ -320,6 +341,7 @@ func (p *StringParam) MaxLen(n int) *StringParam {
 }
 
 func (p *StringParam) OneOf(values ...string) *StringParam {
+	p = ensureBuilder(p)
 	if len(values) == 0 {
 		p.value.setUsageErr(usageErrorf("one-of values must not be empty"))
 		return p
@@ -338,6 +360,7 @@ func (p *StringParam) OneOf(values ...string) *StringParam {
 }
 
 func (p *StringParam) Match(pattern *regexp.Regexp) *StringParam {
+	p = ensureBuilder(p)
 	if pattern == nil {
 		p.value.setUsageErr(usageErrorf("match pattern must not be nil"))
 		return p
@@ -352,10 +375,12 @@ func (p *StringParam) Match(pattern *regexp.Regexp) *StringParam {
 }
 
 func (p *StringParam) Check(check func(string) error) *StringParam {
+	p = ensureBuilder(p)
 	return checkParam(p, p.value.addCheck, check)
 }
 
 func (p *StringParam) Get() (string, error) {
+	p = ensureBuilder(p)
 	if p.value.state.usageErr != nil {
 		return "", p.value.state.usageErr
 	}
@@ -377,44 +402,54 @@ func (p *StringParam) constraintUsageErr() error {
 }
 
 func (p *TimeParam) Required() *TimeParam {
+	p = ensureBuilder(p)
 	return requireParam(p, &p.value)
 }
 
 func (p *TimeParam) Default(value time.Time) *TimeParam {
+	p = ensureBuilder(p)
 	return defaultParam(p, &p.value, value)
 }
 
 func (p *TimeParam) After(value time.Time) *TimeParam {
+	p = ensureBuilder(p)
 	p.value.setAfter(value)
 	return p
 }
 
 func (p *TimeParam) Before(value time.Time) *TimeParam {
+	p = ensureBuilder(p)
 	p.value.setBefore(value)
 	return p
 }
 
 func (p *TimeParam) Check(check func(time.Time) error) *TimeParam {
+	p = ensureBuilder(p)
 	return checkParam(p, p.value.addCheck, check)
 }
 
 func (p *TimeParam) Get() (time.Time, error) {
+	p = ensureBuilder(p)
 	return getParam(&p.value)
 }
 
 func (p *MultiParam[T]) Required() *MultiParam[T] {
+	p = ensureBuilder(p)
 	return requireParam(p, &p.value)
 }
 
 func (p *MultiParam[T]) Default(value []T) *MultiParam[T] {
+	p = ensureBuilder(p)
 	return defaultParam(p, &p.value, value)
 }
 
 func (p *MultiParam[T]) Check(check func([]T) error) *MultiParam[T] {
+	p = ensureBuilder(p)
 	return checkParam(p, p.value.addCheck, check)
 }
 
 func (p *MultiParam[T]) Get() ([]T, error) {
+	p = ensureBuilder(p)
 	return getParam(&p.value)
 }
 
@@ -482,14 +517,6 @@ func parseUnixTime(value string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return time.Unix(seconds, 0).UTC(), nil
-}
-
-func parseUnixMilliTime(value string) (time.Time, error) {
-	millis, err := parseFixedWidthTimestamp(value, 13)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return time.UnixMilli(millis).UTC(), nil
 }
 
 func parseFixedWidthTimestamp(value string, digits int) (int64, error) {

@@ -32,13 +32,13 @@ func FuzzBindPublicContracts(f *testing.F) {
 		case 2:
 			fuzzBindInvalidJSONKeepsTarget(t, name, extra)
 		case 3:
-			fuzzBindUnsupportedMediaTypePriority(t)
+			fuzzBindUnsupportedMediaType(t)
 		case 4:
-			fuzzBindRequestTooLargePriority(t)
+			fuzzBindRequestTooLarge(t)
 		case 5:
-			fuzzBindUsageErrorPriority(t)
+			fuzzBindUsageError(t)
 		default:
-			fuzzBindProbeReadErrorPriority(t)
+			fuzzBindReadError(t)
 		}
 	})
 }
@@ -89,10 +89,10 @@ func fuzzBindInvalidJSONKeepsTarget(t *testing.T, name, extra string) {
 	}
 }
 
-func fuzzBindUnsupportedMediaTypePriority(t *testing.T) {
+func fuzzBindUnsupportedMediaType(t *testing.T) {
 	t.Helper()
 
-	payload := "{" + strings.Repeat("a", int(defaultMaxBodyBytes)+1)
+	payload := `{"name":"kanata"}`
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(payload))
 	req.Header.Set("Content-Type", "text/plain")
 
@@ -104,7 +104,7 @@ func fuzzBindUnsupportedMediaTypePriority(t *testing.T) {
 	}
 }
 
-func fuzzBindRequestTooLargePriority(t *testing.T) {
+func fuzzBindRequestTooLarge(t *testing.T) {
 	t.Helper()
 
 	payload := "{" + strings.Repeat("a", int(defaultMaxBodyBytes)+1)
@@ -117,7 +117,7 @@ func fuzzBindRequestTooLargePriority(t *testing.T) {
 	}
 }
 
-func fuzzBindUsageErrorPriority(t *testing.T) {
+func fuzzBindUsageError(t *testing.T) {
 	t.Helper()
 
 	wantErr := errors.New("read failed")
@@ -134,12 +134,12 @@ func fuzzBindUsageErrorPriority(t *testing.T) {
 	}
 }
 
-func fuzzBindProbeReadErrorPriority(t *testing.T) {
+func fuzzBindReadError(t *testing.T) {
 	t.Helper()
 
 	wantErr := errors.New("read failed")
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	req.Header.Set("Content-Type", "text/plain")
+	req.Header.Set("Content-Type", "application/json")
 	req.Body = bindBodyReadErrorCloser{err: wantErr}
 	req.ContentLength = -1
 

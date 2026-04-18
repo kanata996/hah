@@ -1,25 +1,23 @@
 # 请求输入指南
 
-这份文档聚焦 `hah` 的输入侧能力。默认入口是根包 `hah`，底层输入核心包是：
-
-- `reqx`：负责 request helper、query/body binding、`RequireBody`、`InvalidRequest` 和公开 violations
+这份文档聚焦 `hah` 的输入侧能力。
 
 `hah` 是 `net/http`-first 的设计，不提供额外的请求上下文抽象，也不内建 validation engine。它围绕标准库 `*http.Request`、显式读取和显式 post-bind validation 组织 API。
 
 当前设计里：
 
-- `hah.Path(...)` / `hah.Query(...)` 是默认请求侧 API，`reqx.Path(...)` / `reqx.Query(...)` 承载同一底层契约
-- `hah.BindQuery(...)` / `hah.BindBody(...)` 是默认 DTO 绑定入口，`reqx` 公开对应的底层实现
+- `hah.Path(...)` / `hah.Query(...)` 是默认请求侧 API
+- `hah.BindQuery(...)` / `hah.BindBody(...)` 是默认 DTO 绑定入口
 
 ## 先看选型
 
 | 目标 | 推荐 API | 说明 |
 | --- | --- | --- |
 | 单字段 path / query 读取并顺手做常见校验 | `hah.Path` / `hah.Query` | 主路径，直接返回 source-aware `required` / `invalid` 错误 |
-| 批量 query DTO 绑定 | `hah.BindQuery` / `reqx.BindQuery` | 适合筛选条件、分页参数、显式 DTO 投影 |
-| 只做 JSON body 绑定 | `hah.BindBody` / `reqx.BindBody` | 适合 body DTO 解码 |
-| body 是否必须存在 | `hah.RequireBody` / `reqx.RequireBody` | 适合在 body 绑定后显式声明 body-required 契约 |
-| 手写字段级请求违规 | `hah.InvalidRequest` / `reqx.InvalidRequest` | 适合把业务前的输入错误收敛成统一 `422 invalid_request` |
+| 批量 query DTO 绑定 | `hah.BindQuery` | 适合筛选条件、分页参数、显式 DTO 投影 |
+| 只做 JSON body 绑定 | `hah.BindBody` | 适合 body DTO 解码 |
+| body 是否必须存在 | `hah.RequireBody` | 适合在 body 绑定后显式声明 body-required 契约 |
+| 手写字段级请求违规 | `hah.InvalidRequest` | 适合把业务前的输入错误收敛成统一 `422 invalid_request` |
 | 读取 header | `r.Header.Get(...)` / `r.Header.Values(...)` | header 默认直接走标准库 |
 
 ## 读取 request 数据
@@ -96,14 +94,14 @@ tags, err := hah.Query(r, "tag").Values().Get()
 
 ## 绑定 DTO
 
-默认场景优先用根包 `hah.BindQuery(...)` / `hah.BindBody(...)`；如果你更偏好底层包边界，也可以直接用 `reqx`。DTO binder 只负责 source-to-DTO 映射，不做 Normalize、请求级规则或字段校验。
+默认直接用根包 `hah.BindQuery(...)` / `hah.BindBody(...)`。DTO binder 只负责 source-to-DTO 映射，不做 Normalize、请求级规则或字段校验。
 
-`BindQuery(...)` 更完整的公开契约、字段白名单和演进边界，见 [docs/binding-query-design.md](./docs/binding-query-design.md)。
+`BindQuery(...)` 更完整的公开契约、顶层字段模型和演进边界，见 [docs/binding-query-design.md](./docs/binding-query-design.md)。
 `BindBody(...)` 更完整的公开契约和字段支持边界，见 [docs/binding-body-design.md](./docs/binding-body-design.md)。
 
 ### query DTO 绑定
 
-`reqx.BindQuery` / `hah.BindQuery` 只从 query 参数绑定数据。
+`hah.BindQuery(...)` 只从 query 参数绑定数据。
 
 ```go
 type ListAccountsQuery struct {
@@ -119,9 +117,9 @@ if err := hah.BindQuery(r, &query); err != nil {
 
 当前 query binder 的公开语义：
 
-- 目标必须是 struct 或 `map[string]string`
+- 目标必须是 `*struct` 或 `*map[string]string`
 - 对于 struct，只绑定显式声明了 `query` tag 的字段
-- `query:",inline"` 是唯一的嵌套 DTO 展开方式
+- 只支持顶层平铺字段；不展开嵌套 DTO
 - 普通 `query:"name"` 字段支持常见内建标量、命名标量、`time.Time`、`time.Duration`、`uuid.UUID` 及其一级指针
 - query 名字按精确值匹配
 - malformed raw query 返回稳定 `400 bad_request`，并保证 target 零修改
@@ -129,14 +127,13 @@ if err := hah.BindQuery(r, &query); err != nil {
 - 任一 query key 只要出现多个值就返回稳定 `400 bad_request`
 - 缺失参数不会继承 DTO 旧值，而是回到零值临时对象中的默认状态
 - DTO/tag 形状本身非法时，先返回普通错误，并保证 target 零修改
-- 绑定在遇到第一个客户端输入错误时停止；后续字段不会继续处理
 - 对 `struct` target，绑定先写入零值临时对象；客户端输入错误下不会部分污染 DTO
 
-它适合“批量投影”，不适合表达请求级规则。像 `Required`、`Default`、`OneOf`、`Min/Max` 这类规则，仍然优先放在 `hah.Query(...)` / `reqx.Query(...)` 或绑定后的显式校验里。
+它适合“批量投影”，不适合表达请求级规则。像 `Required`、`Default`、`OneOf`、`Min/Max` 这类规则，仍然优先放在 `hah.Query(...)` 或绑定后的显式校验里。
 
 ### body DTO 绑定
 
-`reqx.BindBody` / `hah.BindBody` 只从请求 body 绑定数据。
+`hah.BindBody(...)` 只从请求 body 绑定数据。
 
 ```go
 type CreateAccountBody struct {
@@ -149,31 +146,33 @@ if err := hah.BindBody(r, &body); err != nil {
 }
 ```
 
-`reqx.BindBody` 当前的公开契约是：
+`hah.BindBody(...)` 当前的公开契约是：
 
 - 实际读取到零字节 body 时视为 no-op
-- 公开只支持非 `nil` 的 `*struct` target
+- 公开只支持非 `nil` 的 `*struct` DTO target
+- `BindBody(...)` / `RequireBody(...)` 会在同一个 request 上共享已读取的 body 字节，因此可以按任意顺序组合
 - 这个 no-op 发生在 `Content-Type` 检查之前
 - 非空 body 只接受 `application/json`
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，只允许前后空白
 - 默认使用标准库 `encoding/json`
 - 不接受 `application/*+json`
-- struct 字段支持范围按公开表闭集处理；超出表格的字段类型直接返回 usage error
+- struct 字段解码直接跟随标准库 `encoding/json`；像 `json.RawMessage`、命名类型、自定义 `UnmarshalJSON` / `UnmarshalText` 类型默认允许
 - 默认拒绝未知字段
-- 顶层 `null`、array、string、number、boolean 返回 `invalid_json`；任一 object 层级的重复 key 都返回 `invalid_json`
+- 顶层 `null`、array、string、number、boolean 返回 `invalid_json`
+- 同名 JSON object key 跟随标准库 `encoding/json` 语义，后值覆盖前值
 - 截断 JSON / `unexpected EOF` 返回 `invalid_json`
 - 非 JSON 语义的 body read failure 返回普通 error，不收敛成 `HTTPError`
 - 绑定先解码到临时值；成功后才一次性提交，因此 JSON 里缺失的字段不会继承 DTO 旧值
 - 如果返回错误，DTO 保持调用前状态，不应出现部分更新
 
-`reqx.RequireBody` / `hah.RequireBody` 与 `BindBody` 共享同一个非破坏性 body-presence probe：
+`hah.RequireBody(...)` 与 `BindBody(...)` 的组合语义是：
 
 - 可以先 `RequireBody(...)` 再 `BindBody(...)`
 - 也可以先 `BindBody(...)` 再决定是否显式要求 body 必填
-- 这两条路径都不会因为额外探测而把 body 提前消费掉
 - 零字节 body 对 `BindBody(...)` 是 no-op，对 `RequireBody(...)` 视为缺失
 - 仅空白字符 body 对 `RequireBody(...)` 视为存在，但对 `BindBody(...)` 返回 `invalid_json`
 - 顶层 `null` 对 `RequireBody(...)` 视为存在，但对 `BindBody(...)` 返回 `invalid_json`
+- clone / sibling request 不属于默认组合契约；如果要复用同一份 body，请在同一个 request 上组合调用
 
 如果 body 非法，会返回稳定的公开错误，例如：
 
@@ -183,30 +182,15 @@ if err := hah.BindBody(r, &body); err != nil {
 
 如果失败来自非 JSON 语义的 body read 过程，例如 wrapped `Body.Read` error、transport I/O 或 `context` cancellation，则返回普通 error，而不是 `*errx.HTTPError`。
 
-### 字段类型范围
+### 字段解码范围
 
-当前默认 query binder 只支持封闭白名单中的常见字段类型：
+当前 `BindBody(...)` 不再维护额外的字段家族白名单。公开语义直接跟随标准库 `encoding/json`：
 
-- `string`
-- `bool`
-- `int`、`int8`、`int16`、`int32`、`int64`
-- `uint`、`uint8`、`uint16`、`uint32`、`uint64`
-- `float32`、`float64`
-- 底层为上述标量家族的命名类型
-- `time.Time`
-- `time.Duration`
-- `uuid.UUID`
-- 上述受支持叶子类型的一级指针 `*T`
-- `query:",inline"` 的 `struct` / `*struct`
+- 未知字段继续默认拒绝
+- 字段发现、嵌入字段遮蔽、命名类型、自定义 decoder、`json.RawMessage`、slice / map / 指针 等行为按标准库处理
+- 如果某个字段类型对当前 JSON 输入不可解码，返回 `invalid_json`
 
-当前默认 query binder 不支持：
-
-- `encoding.TextUnmarshaler`
-- 未标记 `inline` 的 `struct` / `*struct`
-- slice、array、map、interface
-- 多级指针
-
-如果你需要 query binder 默认不支持的自定义 decoder、复杂集合或其他扩展语义，优先先绑定为 `string`，再在绑定后显式解析。
+如果你需要更克制、更稳定的 DTO 面，建议由调用方自己收窄 DTO 形状，而不是依赖 binder 内建白名单。
 
 ## 绑定后的显式校验
 
@@ -320,3 +304,5 @@ if actor == "" {
 	})
 }
 ```
+
+补充：本文默认直接使用 `hah.xx`。只有当根包 facade 不满足包边界或导入约束时，才退到同契约的 `reqx.xx`。

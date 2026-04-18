@@ -13,6 +13,31 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.6.2] - 2026-04-19
+
+### Breaking
+
+- Simplified `hah.BindQuery(...)` / `reqx.BindQuery(...)` to a flat top-level DTO model: struct targets now bind only explicit top-level `query:"..."` fields, and `query:",inline"` is rejected as a usage error.
+- Narrowed `hah.Path(...)` / `reqx.Path(...)` to the observable `net/http` `Request.PathValue(...)` contract only: empty path values now count as missing instead of being inferred from `Request.Pattern` wildcards.
+
+### Removed
+
+- Removed `hah.Query(...).UnixMilliTime()` / `reqx.Query(...).UnixMilliTime()` from the public query-helper surface, keeping `Time()` and `UnixTime()` as the supported time readers.
+
+### Changed
+
+- Reworked `hah.BindBody(...)` / `reqx.BindBody(...)` to cache request body bytes on the request itself, so `BindBody(...)` and `RequireBody(...)` can be composed in either order on the same request while oversized bodies consistently map to `request_too_large`.
+- Simplified `BindBody(...)` to follow standard-library `encoding/json` field semantics directly: supported struct fields now include `json.RawMessage`, embedded fields, and custom `UnmarshalJSON` / `UnmarshalText` decoders, while duplicate JSON object keys now follow the standard library's last-value-wins behavior.
+- Tightened `resp.WriteError(...)` HTTP-error selection so typed-nil `*errx.HTTPError` candidates exposed through wrapped or joined errors no longer block the first real public HTTP error from being chosen.
+
+### Documentation
+
+- Refreshed `README.md`, `REQUESTS.md`, and the request/response design docs to document the flat `BindQuery(...)` DTO model, the simplified `BindBody(...)` / `RequireBody(...)` composition contract, the narrowed `Path(...)` lookup model, and the trimmed root-package guidance.
+
+### Testing
+
+- Rebuilt black-box coverage across `reqx` and `resp`, including body-byte caching, `BindBody(...)` standard-library JSON semantics, flat query binding rules, empty path-value handling, and typed-nil HTTP error selection.
+
 ## [v0.6.1] - 2026-04-18
 
 ### Fixed
