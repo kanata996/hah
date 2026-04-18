@@ -12,6 +12,23 @@ import (
 	"github.com/kanata996/hah/errx"
 )
 
+type httpErrorAsCarrier struct {
+	httpErr *errx.HTTPError
+}
+
+func (e httpErrorAsCarrier) Error() string {
+	return "http error carrier"
+}
+
+func (e httpErrorAsCarrier) As(target any) bool {
+	httpErr, ok := target.(**errx.HTTPError)
+	if !ok {
+		return false
+	}
+	*httpErr = e.httpErr
+	return true
+}
+
 func TestWriteErrorWritesEnvelope(t *testing.T) {
 	rr := httptest.NewRecorder()
 
@@ -90,6 +107,31 @@ func TestWriteErrorPreservesWrappedHTTPErrorFields(t *testing.T) {
 		"code":   "required",
 		"detail": "is required",
 	})
+}
+
+func TestWriteErrorUsesCustomAsHTTPError(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	input := httpErrorAsCarrier{
+		httpErr: errx.NewHTTPError(http.StatusUnauthorized, "unauthorized", "token missing"),
+	}
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnauthorized)
+	}
+	if got := body["code"]; got != "unauthorized" {
+		t.Fatalf("code = %#v, want unauthorized", got)
+	}
+	if got := body["title"]; got != http.StatusText(http.StatusUnauthorized) {
+		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusUnauthorized))
+	}
+	if got := body["detail"]; got != "token missing" {
+		t.Fatalf("detail = %#v, want token missing", got)
+	}
 }
 
 func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
