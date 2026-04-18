@@ -159,7 +159,7 @@ DTO binding 与显式规则：
 
 - `hah.Violation`、`hah.HTTPError`、`hah.NewHTTPError(...)`、`hah.NewHTTPErrorWithCause(...)` 是根包暴露的常见公共错误模型入口
 - `hah.WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成 `application/problem+json`
-- `hah.JSON(...)`、`hah.OK(...)`、`hah.Created(...)`、`hah.NoContent(...)` 负责写回标准成功响应
+- `hah.JSON(...)` 写回调用方指定状态的 JSON 响应；`hah.OK(...)`、`hah.Created(...)`、`hah.NoContent(...)` 是成功响应快捷入口
 - `hah.WriteError(...)` 的返回值表示响应边界自身异常，例如响应写出失败；生产代码通常至少要记录这个错误
 
 ## 公开契约要点
@@ -173,8 +173,9 @@ DTO binding 与显式规则：
 - `hah.BindQuery(...)` 默认忽略未知 query key；同名 query key 只要出现多个值就返回稳定 `400 bad_request`
 - malformed raw query 返回稳定 `400 bad_request` 且不修改 target；DTO 或 tag 形状非法时，先返回普通错误且不修改 target
 - `hah.BindBody(...)` 公开只支持非 `nil` 的 `*struct` DTO target
-- `hah.BindBody(...)` 在同一个 request 上会缓存 body 字节，因此可和 `hah.RequireBody(...)` 按任意顺序组合
+- `hah.BindBody(...)` 可和 `hah.RequireBody(...)` 在同一个 request 上按任意顺序组合
 - 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
+- 零字节 body 不要求 `Content-Type` 为 JSON
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，未知字段默认拒绝
 - struct 字段解码直接跟随标准库 `encoding/json`；像 `json.RawMessage`、自定义 `UnmarshalJSON` / `UnmarshalText` 类型默认允许
 - 绑定先解到临时值，成功后才一次性提交，因此失败不会污染 target

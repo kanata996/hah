@@ -1,7 +1,7 @@
 # hah BindBody 设计方案
 
 - 状态：Locked
-- 版本：v8
+- 版本：v9
 - 锁定日期：2026-04-19
 - 适用范围：
   - `hah.BindBody(...)`
@@ -26,7 +26,7 @@
 1. 先探测当前 request 是否显式提交了 body
 2. 对零字节 body 提前 no-op
 3. 对非空 body 先校验媒体类型
-4. 仅在进入 JSON 绑定路径时读取并缓存 body 字节，同时执行大小限制
+4. 对非空 body 读取字节并执行大小限制
 5. 用标准库 `encoding/json` 解码到临时 DTO
 6. 成功后一次性提交到 target
 
@@ -39,10 +39,10 @@
 
 ## 2. 心智模型
 
-### 2.1 request 级 body 缓存
+### 2.1 request 级组合语义
 
 body 是 request 级输入。
-`BindBody(...)` 与 `RequireBody(...)` 在同一个 request 上共享已经读取到的 body 字节。
+`BindBody(...)` 与 `RequireBody(...)` 在同一个 request 上共享同一份 body 读取结果。
 
 公开语义固定为：
 
@@ -97,8 +97,7 @@ body 存在性的规则固定为：
 
 补充规则：
 
-- 零字节 body 的 no-op 发生在 `Content-Type` 检查之前
-- 零字节 body 不要求 `Content-Type` 为 JSON
+- 零字节 body 是 no-op，且不要求 `Content-Type` 为 JSON
 
 ### 3.3 非空 body 的输入模型
 
@@ -108,7 +107,7 @@ body 存在性的规则固定为：
 - 该 `Content-Type` 的主媒体类型必须是 `application/json`
 - `charset=utf-8` 之类的媒体类型参数不影响匹配
 - 默认大小限制为 `1 MiB` 原始字节
-- 媒体类型检查先于大小限制；错误媒体类型会先返回 `415 unsupported_media_type`
+- 若同时命中错误媒体类型与超大 body，返回 `415 unsupported_media_type`
 - 顶层值必须是单个 JSON object
 - 文档前后允许空白
 - 未知字段默认拒绝
@@ -162,17 +161,6 @@ body 存在性的规则固定为：
 - `Body.Read` 包装错误
 - transport I/O error
 - `context` cancellation / deadline
-
-### 4.4 优先级
-
-冲突条件下的优先级固定为：
-
-1. usage error
-2. body 存在性探测阶段的 read failure
-3. 零字节 body no-op 或缺失 body
-4. 非空 body 的媒体类型检查
-5. 进入 JSON 绑定路径后的 body read failure / request too large
-6. JSON 解码与文档边界错误
 
 ## 5. 与 `RequireBody(...)` 的关系
 

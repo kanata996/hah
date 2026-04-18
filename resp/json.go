@@ -20,7 +20,7 @@ func JSON(w http.ResponseWriter, status int, data any) error {
 	return writeJSON(w, status, data)
 }
 
-// writeJSON 是通用 JSON 成功响应的核心路径。
+// writeJSON 是通用 JSON 响应的核心路径。
 // 它先校验响应边界，再编码 payload，最后写出已准备好的 JSON 字节，
 // 避免无效状态码或空 writer 触发多余编码，也避免底层写回重复做同一轮校验。
 func writeJSON(w http.ResponseWriter, status int, data any) error {
@@ -52,17 +52,14 @@ func validateJSONBodyWriter(w http.ResponseWriter, status int) error {
 	if w == nil {
 		return errNilResponseWriter
 	}
-	switch {
-	case status < 100 || status > 999:
+	if status < 100 || status > 999 {
 		return fmt.Errorf("resp: invalid HTTP status %d", status)
 	}
-
-	switch status {
-	case http.StatusOK, http.StatusCreated, http.StatusAccepted:
-		return nil
-	default:
-		return fmt.Errorf("resp: JSON only supports status 200, 201, or 202")
+	if status < 200 || status == http.StatusNoContent || status == http.StatusResetContent || status == http.StatusNotModified {
+		return fmt.Errorf("resp: JSON does not support status %d without a response body", status)
 	}
+
+	return nil
 }
 
 // writePreparedJSONBytes 假定 writer 与 status 已完成校验，直接执行头和 body 的实际写回。

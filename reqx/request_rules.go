@@ -20,8 +20,7 @@ func InvalidRequest(violations ...errx.Violation) error {
 
 // RequireBody 按 body 绑定契约要求请求必须显式提交 body。
 //
-// 在当前实现里，它与 BindBody 共享同一个 request 上已经读取过的 body 字节，
-// 因此可按调用方需要在同一个 request 上前后组合使用。
+// 它可按调用方需要与 BindBody 在同一个 request 上前后组合使用。
 func RequireBody(r *http.Request) error {
 	if r == nil {
 		return usageErrorf("request must not be nil")

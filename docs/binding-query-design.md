@@ -1,7 +1,7 @@
 # hah BindQuery 设计方案
 
 - 状态：Locked
-- 版本：v8
+- 版本：v9
 - 锁定日期：2026-04-19
 - 适用范围：
   - `hah.BindQuery(...)`
@@ -145,7 +145,7 @@ type ListAccountsQuery struct {
 - `+`、百分号解码和 malformed escape 的处理都跟随标准库 `net/url`
 - `query:"name"` 的 tag key 必须与解析后的 query key 做精确字符串匹配
 - query source 采用默认单值模型：同名 key 出现多个值时，视为客户端输入错误
-- 对 `struct` 目标，未知 key 默认忽略；但未知 key 也受单值模型约束
+- 对 `struct` 目标，未知 key 默认忽略
 - 缺失 key 不会继承 target 旧值；对应字段保持零值临时对象中的默认状态
 - 参数存在但首值为空字符串时，仍视为“已提交参数”
 - 只有 `string`、底层为 `string` 的命名标量及其一级指针接受空字符串；其他受支持类型把空字符串当解析失败处理
@@ -192,7 +192,7 @@ type ListAccountsQuery struct {
 
 ## 5. 与其他文档的关系
 
-- `BindQuery(...)` 与 `Query(...)` 共享“空字符串视为已提交参数”“单值入口拒绝重复 key”“默认忽略未知 key”的输入模型
+- `BindQuery(...)` 与 `Query(...)` 共享“空字符串视为已提交参数”“单值入口拒绝重复值”的输入方向
 - `BindQuery(...)` 是 DTO binder；`Query(...)` 是单字段 helper
 - `BindQuery(...)` 比 `Query(...)` 更严格，因为它还要处理 DTO 规划、整条 raw query 解析和原子提交
 - 顶层错误模型来自 `errx`；对外如何写成 Problem JSON 由 `resp` 决定
@@ -214,7 +214,7 @@ type ListAccountsQuery struct {
 - `map[string]string` 在空 query 下得到空 map
 - `map[string]string` 成功绑定时清除旧项
 - query source 中任一重复 key 返回 `400 bad_request`
-- 重复 key 时 target 零修改
+- 客户端输入导致的重复 key 时 target 零修改
 - `query:"name"`
 - `query:"-"`
 - `query:",inline"` 返回 usage error

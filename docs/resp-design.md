@@ -1,7 +1,7 @@
 # hah resp 设计方案
 
 - 状态：Locked
-- 版本：v5
+- 版本：v6
 - 锁定日期：2026-04-19
 - 适用范围：
   - `resp.JSON`
@@ -29,7 +29,8 @@
 
 它的目标是保持响应边界简单、稳定、可预测：
 
-- 成功入口只写成功响应
+- `JSON` 只按调用方给定状态写 JSON 响应
+- 成功快捷入口只写成功响应
 - 错误入口只把错误收敛成公开 Problem JSON
 - 不做内容协商
 - 不发明 envelope
@@ -58,13 +59,13 @@
 - `HEAD` 请求沿用 `net/http` 默认语义
 - 不负责恢复调用方自定义 `MarshalJSON`、`Error()` 或包装 `ResponseWriter` 实现中的 panic
 
-## 4. 成功写回
+## 4. JSON 与成功写回
 
 ### 4.1 `JSON` / `OK` / `Created`
 
-成功写回契约固定为：
+JSON/成功写回契约固定为：
 
-- `JSON` 只接受 `200 OK`、`201 Created`、`202 Accepted`
+- `JSON` 接受常规 HTTP 语义下允许携带响应体的状态码
 - `OK` 固定写 `200`
 - `Created` 固定写 `201`
 - 主媒体类型必须是 `application/json`
@@ -74,9 +75,16 @@
 
 失败规则：
 
-- 非法成功状态码必须在首次提交前返回 error
+- 不支持的状态码必须在首次提交前返回 error
 - payload 不可 JSON 编码时必须在首次提交前返回 error
-- 成功入口不得隐式回退成 `500` Problem 响应
+- `JSON` / 成功快捷入口不得隐式回退成 `500` Problem 响应
+
+这里的“不支持”固定包括：
+
+- `1xx` 状态码
+- `204 No Content`
+- `205 Reset Content`
+- `304 Not Modified`
 
 ### 4.2 `NoContent`
 
@@ -151,14 +159,17 @@
 后续实现或重构至少应锁住：
 
 - `JSON(..., 200, obj)` 写出 `200`、`application/json`，且响应体语义与输入一致
+- `JSON(..., 203, obj)` 这类带响应体的 `2xx` 状态可正常写出
+- `JSON(..., 302, obj)`、`JSON(..., 400, obj)` 这类允许携带 body 的非 `2xx` 状态可正常写出
 - `OK(...)` 写出 `200`
 - `Created(...)` 写出 `201`
 - 数组、布尔值、数字、字符串和 `nil` 都按其 JSON 本体写出
 - 无关自定义头部会保留
 - 冲突的 `Content-Type` 会被覆盖
 - 预设的 `Content-Length` 不会原样穿透
-- payload 不可序列化时，成功入口返回 error 且不得发生首次提交
-- `JSON` 只接受 `200`、`201`、`202`
+- payload 不可序列化时，`JSON` / 成功快捷入口返回 error 且不得发生首次提交
+- `JSON` 接受常规 HTTP 语义下允许携带响应体的状态码
+- `JSON` 拒绝 `1xx`、`204`、`205`、`304` 与非法状态码
 - `NoContent()` 写出 `204`、空响应体、空 `Content-Type`、空 `Content-Length`
 - 除 `WriteError(nil, nil)` 外，任一公开入口在 `w == nil` 时都返回 error 且不写内容
 - `WriteError(errxHTTPError404)` 写出 `404`、`application/problem+json`、`title=Not Found`、`status=404`、`code=not_found`

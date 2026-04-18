@@ -12,7 +12,8 @@
 //   - 使用 NewHTTPErrorWithCause 构造保留底层 cause 的公共 HTTP 错误
 //   - 使用 WithViolations 绑定公开 violation 列表
 //   - 使用 BadRequest、NotFound、UnprocessableEntity 等快捷构造复用常见错误
-//   - 大多数 handler 也可以直接使用根包 hah 暴露的对应 facade
+//   - 大多数 handler 也可以直接使用根包 hah 暴露的常用错误模型入口
+//   - BadRequest、NotFound、UnprocessableEntity 等状态快捷构造器仍直接使用 errx
 //
 // 公开 API：
 //   - 公开类型：HTTPError、Violation、ViolationCode、ViolationIn

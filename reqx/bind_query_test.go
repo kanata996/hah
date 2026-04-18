@@ -76,8 +76,12 @@ func TestBindQuery_Contracts(t *testing.T) {
 			Name string `query:"name"`
 		}
 
-		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?extra=1&extra=2", nil), &request{})
+		dst := request{Name: "stale"}
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?extra=1&extra=2", nil), &dst)
 		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if dst != (request{Name: "stale"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
 	})
 
 	t.Run("empty string only string family accepts", func(t *testing.T) {
