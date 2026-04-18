@@ -119,7 +119,7 @@ if err := hah.BindQuery(r, &query); err != nil {
 
 当前 query binder 的公开语义：
 
-- 目标必须是 struct 或 `map[string]string`
+- 目标必须是 `*struct` 或 `*map[string]string`
 - 对于 struct，只绑定显式声明了 `query` tag 的字段
 - `query:",inline"` 是唯一的嵌套 DTO 展开方式
 - 普通 `query:"name"` 字段支持常见内建标量、命名标量、`time.Time`、`time.Duration`、`uuid.UUID` 及其一级指针
@@ -152,7 +152,8 @@ if err := hah.BindBody(r, &body); err != nil {
 `reqx.BindBody` 当前的公开契约是：
 
 - 实际读取到零字节 body 时视为 no-op
-- 公开只支持非 `nil` 的 `*struct` target
+- 公开只支持非 `nil` 的 `*struct` DTO target
+- 顶层 target 若通过 `json.Unmarshaler` / `encoding.TextUnmarshaler` 整体解码（例如 `*time.Time`），属于 usage error
 - 这个 no-op 发生在 `Content-Type` 检查之前
 - 非空 body 只接受 `application/json`
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，只允许前后空白

@@ -173,9 +173,8 @@
 `query:",inline"` 的 `*struct` 规则：
 
 - 冲突检测基于元素类型，而不是运行时是否为 `nil`
-- 若零值临时对象中的该字段本次没有命中任何子字段，`nil` 保持 `nil`
-- 只有首个命中的子字段即将成功写入时，才允许为 `nil` 指针分配对象
-- 若 `nil` 指针的首个命中子字段在写入前失败，临时对象中的字段必须保持 `nil`
+- 若该字段本次没有任何成功提交的子字段，提交结果中的 `nil` 保持 `nil`
+- 子字段写入过程中的客户端输入错误不得污染 target 当前值
 
 ### 2.7 原子提交
 
@@ -275,8 +274,8 @@
 - 普通 pointer 字段命中时按成功结果分配或覆盖
 - 普通 pointer 字段单字段解码失败不污染字段当前值
 - inline `*struct` 冲突检测不依赖运行时 `nil` 状态
-- inline `*struct` 仅在首个子字段即将成功写入时按需分配
-- inline `*struct` 在 `nil` 状态下首个命中子字段失败时保持 `nil`
+- inline `*struct` 未产生任何成功提交的子字段时，在提交结果中保持 `nil`
+- inline `*struct` 的客户端输入错误不污染 target 当前值
 - `*struct` target 写入先进入零值临时对象，成功后一次性提交
 - `string` / `bool` / `int` / `uint` / `float` 的代表性成功 / 失败路径
 - `uuid.UUID` / `time.Time` / `time.Duration` 的代表性成功 / 失败路径

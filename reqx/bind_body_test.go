@@ -463,6 +463,16 @@ func TestBindBody_UsageAndBoundaryContracts(t *testing.T) {
 	})
 
 	t.Run("rejects top level custom decoder target", func(t *testing.T) {
+		t.Run("time target", func(t *testing.T) {
+			dst := time.Date(2026, time.April, 13, 10, 0, 0, 0, time.UTC)
+
+			err := BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &dst)
+			assertNotHTTPError(t, err)
+			if !dst.Equal(time.Date(2026, time.April, 13, 10, 0, 0, 0, time.UTC)) {
+				t.Fatalf("dst = %v, want unchanged", dst)
+			}
+		})
+
 		t.Run("json unmarshaler", func(t *testing.T) {
 			dst := bindBodyTopLevelJSONDecoder{Name: "existing"}
 

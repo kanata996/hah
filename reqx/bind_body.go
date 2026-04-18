@@ -84,7 +84,7 @@ func validateBindBodyTarget(targetType reflect.Type) error {
 	if targetType.Kind() != reflect.Pointer || targetType.Elem().Kind() != reflect.Struct {
 		return usageErrorf("destination must point to struct")
 	}
-	if disallowedBindBodyDecoder(targetType.Elem()) {
+	if disallowedBindBodyTargetDecoder(targetType.Elem()) {
 		return usageErrorf("unsupported body field type")
 	}
 	return validateBindBodyStructType(targetType.Elem())
@@ -162,6 +162,11 @@ func disallowedBindBodyDecoder(t reflect.Type) bool {
 		}
 	}
 	return false
+}
+
+func disallowedBindBodyTargetDecoder(t reflect.Type) bool {
+	ptr := reflect.PointerTo(t)
+	return ptr.Implements(bodyJSONUnmarshalerType) || ptr.Implements(bodyTextUnmarshalType)
 }
 
 func bodyMediaType(r *http.Request) (string, error) {

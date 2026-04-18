@@ -170,11 +170,11 @@ DTO binding 与显式规则：
 
 请求输入的关键边界：
 
-- `hah.BindQuery(...)` / `reqx.BindQuery(...)` 的目标必须是 struct 或 `map[string]string`
+- `hah.BindQuery(...)` / `reqx.BindQuery(...)` 的目标必须是 `*struct` 或 `*map[string]string`
 - 对于 struct，只有显式 `query` tag 的字段会参与绑定；嵌套 DTO 需要显式写 `query:",inline"`
 - `hah.BindQuery(...)` / `reqx.BindQuery(...)` 默认忽略未知 query key；同名 query key 只要出现多个值就返回稳定 `400 bad_request`
 - malformed raw query 返回稳定 `400 bad_request` 且不修改 target；DTO 或 tag 形状非法时，先返回普通错误且不修改 target
-- `hah.BindBody(...)` / `reqx.BindBody(...)` 公开只支持非 `nil` 的 `*struct` target
+- `hah.BindBody(...)` / `reqx.BindBody(...)` 公开只支持非 `nil` 的 `*struct` DTO target
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，未知字段默认拒绝
 - 绑定先解到临时值，成功后才一次性提交，因此失败不会污染 target
 - 零字节 body 对 `BindBody(...)` 是 no-op、对 `RequireBody(...)` 是缺失 body；仅空白字符 body 对 `RequireBody(...)` 视为存在、对 `BindBody(...)` 视为 `invalid_json`

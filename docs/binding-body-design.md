@@ -46,7 +46,7 @@
 
 | target 形状             | 是否支持 | 说明                       |
 | ----------------------- | -------- | -------------------------- |
-| 非 `nil` 的 `*struct`   | 是       | 唯一支持的顶层 bind target |
+| 非 `nil` 的 `*struct`   | 是       | 唯一支持的顶层 DTO bind target |
 | `nil target`            | 否       | usage error                |
 | typed-nil target        | 否       | usage error                |
 | 非指针 target           | 否       | usage error                |
@@ -63,6 +63,7 @@
 - 零字节 body 不要求 `Content-Type` 为 JSON
 - 判定依据是“实际可读取字节”，不是 `Content-Length`
 - 顶层 target 类型本身不得通过 `json.Unmarshaler` / `encoding.TextUnmarshaler` 自定义整体解码；否则属于 usage error
+- 这条约束同样排除 `*time.Time` 这类虽为 `struct`、但整体解码语义依赖自定义 decoder 的顶层 target
 
 ### 2.2 非空 body 的输入模型
 
@@ -203,6 +204,7 @@ JSON 文档边界固定为：
 
 - 合法 target 仅限非 `nil` 的 `*struct`
 - 非法 `request` / `target` 返回 usage error
+- 顶层 `*time.Time` 等整体依赖自定义 decoder 的 target 返回 usage error
 - 可稳定判定为零字节 body 时 no-op，且不修改 target
 - 零字节 body 不要求 `Content-Type` 为 JSON
 - 零字节 body 按实际可读字节判定，而不是只按 `Content-Length`
