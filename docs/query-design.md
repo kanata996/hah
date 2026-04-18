@@ -1,7 +1,7 @@
 # hah Query 设计方案
 
 - 状态：Locked
-- 版本：v6
+- 版本：v7
 - 锁定日期：2026-04-19
 - 适用范围：
   - `hah.Query(...)`
@@ -136,7 +136,6 @@ limit, err := Query(r, "limit").Int().Get()
 - `Check(nil)` 返回普通 usage error
 - builder 一旦记录 usage error，后续链式调用不会清除该状态
 - `Get()` 返回首次记录的 usage error
-- builder 不缓存 query 快照；每次 `Get()` 都重新读取当前 request
 
 ### 3.5 约束能力
 
@@ -236,4 +235,3 @@ limit, err := Query(r, "limit").Int().Get()
 - `Duration()`、`UUID()`、`Time()`、`UnixTime()` 的代表性成功 / 失败路径
 - 空字符串只有 `String()` 接受，其他类型按解析失败处理
 - `Check(...)` 失败时公开 detail 仍保持稳定 `is invalid`
-- 同一 builder 多次 `Get()` 会重新读取当前 request query

@@ -24,9 +24,41 @@ func TestJSONWritersWriteExpectedResponses(t *testing.T) {
 			wantBody:        "{\"id\":\"u_1\"}\n",
 		},
 		{
-			name:            "JSON writes compact JSON",
+			name:            "JSON writes accepted response",
 			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusAccepted, map[string]any{"id": "u_1"}) },
 			wantStatus:      http.StatusAccepted,
+			wantContentType: "application/json",
+			wantBody:        "{\"id\":\"u_1\"}\n",
+		},
+		{
+			name: "JSON accepts other 2xx body statuses",
+			write: func(w http.ResponseWriter) error {
+				return JSON(w, http.StatusNonAuthoritativeInfo, map[string]any{"id": "u_1"})
+			},
+			wantStatus:      http.StatusNonAuthoritativeInfo,
+			wantContentType: "application/json",
+			wantBody:        "{\"id\":\"u_1\"}\n",
+		},
+		{
+			name:            "JSON writes redirect response",
+			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusFound, map[string]any{"id": "u_1"}) },
+			wantStatus:      http.StatusFound,
+			wantContentType: "application/json",
+			wantBody:        "{\"id\":\"u_1\"}\n",
+		},
+		{
+			name:            "JSON writes client error response",
+			write:           func(w http.ResponseWriter) error { return JSON(w, http.StatusBadRequest, map[string]any{"id": "u_1"}) },
+			wantStatus:      http.StatusBadRequest,
+			wantContentType: "application/json",
+			wantBody:        "{\"id\":\"u_1\"}\n",
+		},
+		{
+			name: "JSON writes server error response",
+			write: func(w http.ResponseWriter) error {
+				return JSON(w, http.StatusInternalServerError, map[string]any{"id": "u_1"})
+			},
+			wantStatus:      http.StatusInternalServerError,
 			wantContentType: "application/json",
 			wantBody:        "{\"id\":\"u_1\"}\n",
 		},
@@ -132,9 +164,9 @@ func TestJSONBodyWritersRejectUnsupportedStatusesBeforeCommit(t *testing.T) {
 		write func(http.ResponseWriter) error
 	}{
 		{
-			name: "JSON unsupported 203",
+			name: "JSON unsupported 101",
 			write: func(w http.ResponseWriter) error {
-				return JSON(w, http.StatusNonAuthoritativeInfo, map[string]any{"id": "u_1"})
+				return JSON(w, http.StatusSwitchingProtocols, map[string]any{"id": "u_1"})
 			},
 		},
 		{
@@ -148,24 +180,10 @@ func TestJSONBodyWritersRejectUnsupportedStatusesBeforeCommit(t *testing.T) {
 			},
 		},
 		{
-			name: "JSON unsupported 206",
+			name: "JSON unsupported 304",
 			write: func(w http.ResponseWriter) error {
-				return JSON(w, http.StatusPartialContent, map[string]any{"id": "u_1"})
+				return JSON(w, http.StatusNotModified, map[string]any{"id": "u_1"})
 			},
-		},
-		{
-			name:  "JSON unsupported 207",
-			write: func(w http.ResponseWriter) error { return JSON(w, http.StatusMultiStatus, map[string]any{"id": "u_1"}) },
-		},
-		{
-			name: "JSON unsupported 208",
-			write: func(w http.ResponseWriter) error {
-				return JSON(w, http.StatusAlreadyReported, map[string]any{"id": "u_1"})
-			},
-		},
-		{
-			name:  "JSON unsupported 226",
-			write: func(w http.ResponseWriter) error { return JSON(w, http.StatusIMUsed, map[string]any{"id": "u_1"}) },
 		},
 		{
 			name:  "JSON invalid status",

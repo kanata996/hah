@@ -123,7 +123,7 @@ if err := hah.BindQuery(r, &query); err != nil {
 - 普通 `query:"name"` 字段支持常见内建标量、命名标量、`time.Time`、`time.Duration`、`uuid.UUID` 及其一级指针
 - query 名字按精确值匹配
 - malformed raw query 返回稳定 `400 bad_request`，并保证 target 零修改
-- 未知 query key 默认忽略
+- 对于 struct target，未知 query key 默认忽略
 - 任一 query key 只要出现多个值就返回稳定 `400 bad_request`
 - 缺失参数不会继承 DTO 旧值，而是回到零值临时对象中的默认状态
 - DTO/tag 形状本身非法时，先返回普通错误，并保证 target 零修改
@@ -150,9 +150,9 @@ if err := hah.BindBody(r, &body); err != nil {
 
 - 实际读取到零字节 body 时视为 no-op
 - 公开只支持非 `nil` 的 `*struct` DTO target
-- `BindBody(...)` / `RequireBody(...)` 会在同一个 request 上共享已读取的 body 字节，因此可以按任意顺序组合
-- 这个 no-op 发生在 `Content-Type` 检查之前
+- `BindBody(...)` / `RequireBody(...)` 在同一个 request 上可以按任意顺序组合
 - 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
+- 零字节 body 不要求 `Content-Type` 为 JSON
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，只允许前后空白
 - 默认使用标准库 `encoding/json`
 - 不接受 `application/*+json`
