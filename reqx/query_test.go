@@ -76,6 +76,19 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 		}
 	})
 
+	t.Run("unix time parses fixed width seconds into utc", func(t *testing.T) {
+		want := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+		req := httptest.NewRequest(http.MethodGet, "/items?sec="+strconv.FormatInt(want.Unix(), 10), nil)
+
+		got, err := Query(req, "sec").UnixTime().Get()
+		if err != nil {
+			t.Fatalf("UnixTime().Get() error = %v", err)
+		}
+		if !got.Equal(want) {
+			t.Fatalf("sec = %v, want %v", got, want)
+		}
+	})
+
 	t.Run("unix time width is fixed to 10 digits", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?sec=123", nil)
 

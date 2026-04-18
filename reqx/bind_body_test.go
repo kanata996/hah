@@ -338,6 +338,8 @@ func TestBindBody_ClientErrorsPreserveTarget(t *testing.T) {
 		{name: "top level null", body: `null`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
 		{name: "top level array", body: `[]`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
 		{name: "top level string", body: `"x"`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
+		{name: "top level number", body: `123`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
+		{name: "top level boolean", body: `true`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
 		{name: "truncated json", body: `{"name":"kanata"`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
 		{name: "trailing data", body: `{"name":"kanata"} true`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
 		{name: "unknown field", body: `{"extra":1}`, contentType: "application/json", wantStatus: http.StatusBadRequest, wantCode: CodeInvalidJSON},
