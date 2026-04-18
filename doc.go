@@ -19,5 +19,8 @@
 //   - 错误响应入口：WriteError
 //   - 成功响应入口：JSON、OK、Created、NoContent
 //
-// 只有当根包 facade 不满足包边界或导入约束时，才退到同契约的 reqx.xx。
+// 只有当根包 facade 不满足包边界或导入约束时，才按能力退到对应子包：
+//   - 请求侧入口退到 reqx.xx
+//   - 公共错误模型退到 errx.xx
+//   - 响应写回入口退到 resp.xx
 package hah
