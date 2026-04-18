@@ -28,12 +28,9 @@ const mimeApplicationJSON = "application/json"
 type requestBodyCacheKey struct{}
 
 type requestBodyState struct {
-	probed   bool
-	hasBody  bool
-	probeErr error
-	cached   bool
-	body     []byte
-	bodyErr  error
+	loaded bool
+	body   []byte
+	err    error
 }
 
 type replayReadCloser struct {
@@ -103,24 +100,16 @@ func validateBindBodyTarget(targetType reflect.Type) error {
 
 func requestBodyBytes(r *http.Request) ([]byte, error) {
 	state := requestBodyStateFromRequest(r)
-	if state.cached {
-		return bytes.Clone(state.body), state.bodyErr
+	if state.loaded {
+		return bytes.Clone(state.body), state.err
 	}
 
-	var (
-		body []byte
-		err  error
-	)
-	if r.Body != nil {
-		body, err = readBody(r.Body)
-	}
+	body, err := readRequestBody(r)
 
 	cachedBody := bytes.Clone(body)
-	state.probed = true
-	state.hasBody = len(cachedBody) > 0
-	state.cached = true
+	state.loaded = true
 	state.body = cachedBody
-	state.bodyErr = err
+	state.err = err
 	if err == nil && r.Body != nil {
 		r.Body = io.NopCloser(bytes.NewReader(cachedBody))
 	}
@@ -134,46 +123,30 @@ func requestHasBody(r *http.Request) (bool, error) {
 	}
 
 	state := requestBodyStateFromRequest(r)
-	if state.cached {
-		return len(state.body) > 0, state.bodyErr
-	}
-	if state.probed {
-		return state.hasBody, state.probeErr
+	if state.loaded {
+		return len(state.body) > 0, state.err
 	}
 
-	body := r.Body
 	var prefix [1]byte
-	n, err := readWithProgress(body, prefix[:])
+	n, err := readWithProgress(r.Body, prefix[:])
 	if err != nil && err != io.EOF {
 		if n > 0 {
 			r.Body = &replayReadCloser{
-				Reader: io.MultiReader(bytes.NewReader(prefix[:n]), body),
-				Closer: body,
+				Reader: io.MultiReader(bytes.NewReader(prefix[:n]), r.Body),
+				Closer: r.Body,
 			}
 		}
-		state.probed = true
-		state.hasBody = false
-		state.probeErr = err
-		setRequestBodyState(r, state)
 		return false, err
 	}
 
 	if n == 0 {
-		state.probed = true
-		state.hasBody = false
-		state.probeErr = nil
-		setRequestBodyState(r, state)
 		return false, nil
 	}
 
 	r.Body = &replayReadCloser{
-		Reader: io.MultiReader(bytes.NewReader(prefix[:n]), body),
-		Closer: body,
+		Reader: io.MultiReader(bytes.NewReader(prefix[:n]), r.Body),
+		Closer: r.Body,
 	}
-	state.probed = true
-	state.hasBody = true
-	state.probeErr = nil
-	setRequestBodyState(r, state)
 	return true, nil
 }
 
@@ -189,6 +162,13 @@ func requestBodyStateFromRequest(r *http.Request) requestBodyState {
 
 func setRequestBodyState(r *http.Request, state requestBodyState) {
 	*r = *r.WithContext(context.WithValue(r.Context(), requestBodyCacheKey{}, state))
+}
+
+func readRequestBody(r *http.Request) ([]byte, error) {
+	if r == nil || r.Body == nil {
+		return nil, nil
+	}
+	return readBody(r.Body)
 }
 
 func looksLikeJSONObject(body []byte) bool {

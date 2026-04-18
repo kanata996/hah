@@ -228,6 +228,26 @@ func TestBindBody_ComposesWithRequireBodyOnSameRequest(t *testing.T) {
 	})
 }
 
+func TestBindBody_UnsupportedMediaTypeStillPreservesBodyForRequireBody(t *testing.T) {
+	type request struct {
+		Name string `json:"name"`
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
+	req.Header.Set("Content-Type", "text/plain")
+
+	dst := request{Name: "existing"}
+	err := BindBody(req, &dst)
+	_ = assertHTTPStatusCode(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType)
+	if dst != (request{Name: "existing"}) {
+		t.Fatalf("dst = %#v, want unchanged", dst)
+	}
+
+	if err := RequireBody(req); err != nil {
+		t.Fatalf("RequireBody() error = %v, want body to remain readable after media type check", err)
+	}
+}
+
 func TestBindBody_FollowsEncodingJSONFieldSemantics(t *testing.T) {
 	t.Run("raw message and custom decoders are allowed", func(t *testing.T) {
 		type request struct {
