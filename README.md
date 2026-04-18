@@ -169,7 +169,7 @@ DTO binding 与显式规则：
 请求输入的关键边界：
 
 - `hah.BindQuery(...)` 的目标必须是 `*struct` 或 `*map[string]string`
-- 对于 struct，只有显式 `query` tag 的字段会参与绑定；嵌套 DTO 需要显式写 `query:",inline"`
+- 对于 struct，只有显式 `query` tag 的顶层字段会参与绑定；`BindQuery(...)` 不展开嵌套 DTO
 - `hah.BindQuery(...)` 默认忽略未知 query key；同名 query key 只要出现多个值就返回稳定 `400 bad_request`
 - malformed raw query 返回稳定 `400 bad_request` 且不修改 target；DTO 或 tag 形状非法时，先返回普通错误且不修改 target
 - `hah.BindBody(...)` 公开只支持非 `nil` 的 `*struct` DTO target

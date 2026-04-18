@@ -96,7 +96,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 
 默认直接用根包 `hah.BindQuery(...)` / `hah.BindBody(...)`。DTO binder 只负责 source-to-DTO 映射，不做 Normalize、请求级规则或字段校验。
 
-`BindQuery(...)` 更完整的公开契约、字段白名单和演进边界，见 [docs/binding-query-design.md](./docs/binding-query-design.md)。
+`BindQuery(...)` 更完整的公开契约、顶层字段模型和演进边界，见 [docs/binding-query-design.md](./docs/binding-query-design.md)。
 `BindBody(...)` 更完整的公开契约和字段支持边界，见 [docs/binding-body-design.md](./docs/binding-body-design.md)。
 
 ### query DTO 绑定
@@ -119,7 +119,7 @@ if err := hah.BindQuery(r, &query); err != nil {
 
 - 目标必须是 `*struct` 或 `*map[string]string`
 - 对于 struct，只绑定显式声明了 `query` tag 的字段
-- `query:",inline"` 是唯一的嵌套 DTO 展开方式
+- 只支持顶层平铺字段；不展开嵌套 DTO
 - 普通 `query:"name"` 字段支持常见内建标量、命名标量、`time.Time`、`time.Duration`、`uuid.UUID` 及其一级指针
 - query 名字按精确值匹配
 - malformed raw query 返回稳定 `400 bad_request`，并保证 target 零修改

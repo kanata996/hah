@@ -22,9 +22,8 @@ var (
 )
 
 type bindQueryFieldPlan struct {
-	index []int
+	index int
 	key   string
-	typ   reflect.Type
 }
 
 // BindQuery 只从 query 参数绑定数据。
@@ -36,7 +35,7 @@ func BindQuery(r *http.Request, target any) error {
 	dst := reflect.ValueOf(target).Elem()
 	switch dst.Kind() {
 	case reflect.Struct:
-		plans, err := buildBindQueryPlan(dst.Type(), nil, map[string]struct{}{})
+		plans, err := buildBindQueryPlan(dst.Type())
 		if err != nil {
 			return err
 		}
@@ -105,7 +104,7 @@ func bindQueryIntoStruct(dst reflect.Value, source url.Values, plans []bindQuery
 		if !ok || len(values) == 0 {
 			continue
 		}
-		if err := setBindQueryPlannedField(temp, plan, values[0]); err != nil {
+		if err := setBindQueryPlannedField(temp.Field(plan.index), values[0]); err != nil {
 			return err
 		}
 	}
@@ -114,8 +113,9 @@ func bindQueryIntoStruct(dst reflect.Value, source url.Values, plans []bindQuery
 	return nil
 }
 
-func buildBindQueryPlan(t reflect.Type, prefix []int, seen map[string]struct{}) ([]bindQueryFieldPlan, error) {
+func buildBindQueryPlan(t reflect.Type) ([]bindQueryFieldPlan, error) {
 	var plans []bindQueryFieldPlan
+	seen := map[string]struct{}{}
 
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
@@ -123,32 +123,11 @@ func buildBindQueryPlan(t reflect.Type, prefix []int, seen map[string]struct{}) 
 			continue
 		}
 
-		tag, ok, inline, err := parseBindQueryTag(field)
+		tag, ok, err := parseBindQueryTag(field)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
-			continue
-		}
-
-		index := append(append([]int(nil), prefix...), i)
-		if inline {
-			inlineType := field.Type
-			if inlineType.Kind() == reflect.Pointer {
-				inlineType = inlineType.Elem()
-			}
-			if inlineType.Kind() != reflect.Struct {
-				return nil, usageErrorf("unsupported query field type")
-			}
-
-			childPlans, err := buildBindQueryPlan(inlineType, index, seen)
-			if err != nil {
-				return nil, err
-			}
-			if len(childPlans) == 0 {
-				return nil, usageErrorf("inline field must expose at least one bindable child")
-			}
-			plans = append(plans, childPlans...)
 			continue
 		}
 
@@ -159,29 +138,24 @@ func buildBindQueryPlan(t reflect.Type, prefix []int, seen map[string]struct{}) 
 			return nil, usageErrorf("duplicate query field %q", tag)
 		}
 		seen[tag] = struct{}{}
-		plans = append(plans, bindQueryFieldPlan{index: index, key: tag, typ: field.Type})
+		plans = append(plans, bindQueryFieldPlan{index: i, key: tag})
 	}
 
 	return plans, nil
 }
 
-func parseBindQueryTag(field reflect.StructField) (name string, ok bool, inline bool, err error) {
+func parseBindQueryTag(field reflect.StructField) (name string, ok bool, err error) {
 	raw, tagged := field.Tag.Lookup("query")
 	if !tagged {
-		return "", false, false, nil
+		return "", false, nil
 	}
-
-	switch raw {
-	case "-":
-		return "", false, false, nil
-	case ",inline":
-		return "", true, true, nil
+	if raw == "-" {
+		return "", false, nil
 	}
-
 	if raw == "" || strings.TrimSpace(raw) != raw || strings.Contains(raw, ",") {
-		return "", false, false, usageErrorf("invalid query tag")
+		return "", false, usageErrorf("invalid query tag")
 	}
-	return raw, true, false, nil
+	return raw, true, nil
 }
 
 func validateBindQueryLeafType(t reflect.Type) error {
@@ -225,9 +199,7 @@ func disallowedBindQueryDecoder(t reflect.Type) bool {
 	return false
 }
 
-func setBindQueryPlannedField(dst reflect.Value, plan bindQueryFieldPlan, raw string) error {
-	field := fieldByIndexForSet(dst, plan.index)
-
+func setBindQueryPlannedField(field reflect.Value, raw string) error {
 	if field.Kind() == reflect.Pointer {
 		elem := reflect.New(field.Type().Elem())
 		if err := setBindQueryLeaf(elem.Elem(), raw); err != nil {
@@ -238,25 +210,6 @@ func setBindQueryPlannedField(dst reflect.Value, plan bindQueryFieldPlan, raw st
 	}
 
 	return setBindQueryLeaf(field, raw)
-}
-
-func fieldByIndexForSet(v reflect.Value, index []int) reflect.Value {
-	current := v
-	for _, i := range index {
-		field := current.Field(i)
-		if field.Kind() == reflect.Pointer {
-			if field.Type().Elem().Kind() != reflect.Struct {
-				return field
-			}
-			if field.IsNil() {
-				field.Set(reflect.New(field.Type().Elem()))
-			}
-			current = field.Elem()
-			continue
-		}
-		current = field
-	}
-	return current
 }
 
 func setBindQueryLeaf(field reflect.Value, raw string) error {
