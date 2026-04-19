@@ -14,11 +14,11 @@ import (
 )
 
 var (
-	queryTimeType            = reflect.TypeOf(time.Time{})
-	queryUUIDType            = reflect.TypeOf(uuid.UUID{})
-	queryDurationType        = reflect.TypeOf(time.Duration(0))
-	queryStringStringMapType = reflect.TypeOf(map[string]string{})
-	queryTextUnmarshalerType = reflect.TypeOf((*encoding.TextUnmarshaler)(nil)).Elem()
+	queryTimeType            = reflect.TypeFor[time.Time]()
+	queryUUIDType            = reflect.TypeFor[uuid.UUID]()
+	queryDurationType        = reflect.TypeFor[time.Duration]()
+	queryStringStringMapType = reflect.TypeFor[map[string]string]()
+	queryTextUnmarshalerType = reflect.TypeFor[encoding.TextUnmarshaler]()
 )
 
 type bindQueryFieldPlan struct {
