@@ -145,11 +145,7 @@ func (r *createAccountRequest) normalize() {
 	r.Name = strings.TrimSpace(r.Name)
 }
 
-func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) error {
-	if err := hah.RequireBody(r); err != nil {
-		return err
-	}
-
+func validateCreateAccountRequest(req *createAccountRequest) error {
 	req.normalize()
 	switch nameLen := utf8.RuneCountInString(req.Name); {
 	case req.Name == "":
@@ -230,7 +226,7 @@ func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	if err := validateCreateAccountRequest(r, &req); err != nil {
+	if err := validateCreateAccountRequest(&req); err != nil {
 		writeError(w, r, err)
 		return
 	}

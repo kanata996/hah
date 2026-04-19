@@ -139,7 +139,6 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 - `Path(...)` 服从 `docs/path-design.md`
 - `BindQuery(...)` 服从 `docs/binding-query-design.md`
 - `BindBody(...)` 服从 `docs/binding-body-design.md`
-- 文档里引用到但尚未单独锁版的 `RequireBody(...)` 组合语义，至少按相关设计文档中的组合场景覆盖
 
 ### 6.3 `errx`
 

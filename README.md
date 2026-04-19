@@ -62,11 +62,7 @@ type createAccountRequest struct {
 	Name string `json:"name"`
 }
 
-func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) error {
-	if err := hah.RequireBody(r); err != nil {
-		return err
-	}
-
+func validateCreateAccountRequest(req *createAccountRequest) error {
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
 		return hah.InvalidRequest(hah.Violation{
@@ -99,7 +95,7 @@ func main() {
 			writeError(w, err)
 			return
 		}
-		if err := validateCreateAccountRequest(r, &req); err != nil {
+		if err := validateCreateAccountRequest(&req); err != nil {
 			writeError(w, err)
 			return
 		}
@@ -125,7 +121,7 @@ func main() {
 
 - 用 `hah.Path(...)` / `hah.Query(...)` 读取单字段 path/query 参数
 - 用 `hah.BindQuery(...)` / `hah.BindBody(...)` 绑定 DTO
-- 用 `hah.RequireBody(...)` / `hah.InvalidRequest(...)` 补充显式请求规则
+- 用 `hah.InvalidRequest(...)` 补充显式请求规则
 - 用 `hah.WriteError(...)` / `hah.OK(...)` / `hah.Created(...)` / `hah.NoContent(...)` 写回响应
 
 ## 公开 API 速览
@@ -141,7 +137,6 @@ DTO binding 与显式规则：
 
 - `hah.BindQuery(...)` 只负责 query -> DTO 的映射，不内建请求级校验
 - `hah.BindBody(...)` 只负责 JSON body -> DTO 的解码，不替代业务层或 validation library 的规则
-- `hah.RequireBody(...)` 用于显式声明 body-required 契约，可按调用方需要在 `BindBody(...)` 前后组合使用
 - `hah.InvalidRequest(...)` 负责把显式输入错误收敛到稳定的 `invalid_request`
 - header 通常直接使用标准库 `r.Header.Get(...)` / `r.Header.Values(...)`
 
@@ -164,14 +159,13 @@ DTO binding 与显式规则：
 - `hah.BindQuery(...)` 默认忽略未知 query key；同名 query key 只要出现多个值就返回稳定 `400 bad_request`
 - malformed raw query 返回稳定 `400 bad_request` 且不修改 target；DTO 或 tag 形状非法时，先返回普通错误且不修改 target
 - `hah.BindBody(...)` 公开只支持非 `nil` 的 `*struct` DTO target
-- `hah.BindBody(...)` 可和 `hah.RequireBody(...)` 在同一个 request 上按任意顺序组合
 - 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
 - 零字节 body 不要求 `Content-Type` 为 JSON
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，未知字段默认拒绝
 - struct 字段解码直接跟随标准库 `encoding/json`；像 `json.RawMessage`、自定义 `UnmarshalJSON` / `UnmarshalText` 类型默认允许
 - 绑定先解到临时值，成功后才一次性提交，因此失败不会污染 target
 - 同名 JSON object key 跟随标准库 `encoding/json` 语义，后值覆盖前值
-- 零字节 body 对 `BindBody(...)` 是 no-op、对 `RequireBody(...)` 是缺失 body；仅空白字符 body 对 `RequireBody(...)` 视为存在、对 `BindBody(...)` 视为 `invalid_json`
+- 零字节 body 对 `BindBody(...)` 是 no-op；仅空白字符 body 和顶层 `null` 对 `BindBody(...)` 视为 `invalid_json`
 
 响应边界的关键约束：
 
@@ -192,7 +186,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 对外主要分成两个包：
 
 - `hah`：默认公开 HTTP 边界，聚合常用 request helper、绑定、显式请求规则、公共错误模型入口与响应写回入口
-- `reqx`：请求侧辅助包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`RequireBody`、`InvalidRequest` 以及 request-side violation 规范化
+- `reqx`：请求侧辅助包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`InvalidRequest` 以及 request-side violation 规范化
 
 实现层还包含 `internal/errx` 与 `internal/resp`，但它们不属于公开 API。
 

@@ -7,13 +7,13 @@
 //   - 常用 JSON 成功响应辅助
 //   - 统一错误响应写回
 //
-// 当前项目里，Path / Query、BindQuery / BindBody、RequireBody /
-// InvalidRequest 与响应写回 helper 都可以直接从这里使用。
+// 当前项目里，Path / Query、BindQuery / BindBody、InvalidRequest 与响应写回
+// helper 都可以直接从这里使用。
 //
 // 公开 API：
 //   - request helper：Path、Query
 //   - 绑定入口：BindQuery、BindBody
-//   - 请求级规则 helper：RequireBody、InvalidRequest
+//   - 请求级规则 helper：InvalidRequest
 //   - 公共错误模型：Violation、HTTPError、NewHTTPError、NewHTTPErrorWithCause
 //   - 常用错误快捷构造：BadRequest、Unauthorized、Forbidden、NotFound、
 //     MethodNotAllowed、Conflict、UnprocessableEntity、TooManyRequests

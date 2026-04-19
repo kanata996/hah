@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -189,63 +188,6 @@ func TestBindBody_BasicContracts(t *testing.T) {
 			t.Fatalf("dst = %#v, want bound body", dst)
 		}
 	})
-}
-
-func TestBindBody_ComposesWithRequireBodyOnSameRequest(t *testing.T) {
-	type request struct {
-		Name string `json:"name"`
-	}
-
-	t.Run("require then bind", func(t *testing.T) {
-		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
-
-		if err := RequireBody(req); err != nil {
-			t.Fatalf("RequireBody() error = %v", err)
-		}
-
-		var dst request
-		if err := BindBody(req, &dst); err != nil {
-			t.Fatalf("BindBody() error = %v", err)
-		}
-		if dst != (request{Name: "kanata"}) {
-			t.Fatalf("dst = %#v, want bound body", dst)
-		}
-	})
-
-	t.Run("bind then require", func(t *testing.T) {
-		req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
-
-		var dst request
-		if err := BindBody(req, &dst); err != nil {
-			t.Fatalf("BindBody() error = %v", err)
-		}
-		if err := RequireBody(req); err != nil {
-			t.Fatalf("RequireBody() error = %v", err)
-		}
-		if dst != (request{Name: "kanata"}) {
-			t.Fatalf("dst = %#v, want bound body", dst)
-		}
-	})
-}
-
-func TestBindBody_UnsupportedMediaTypeStillPreservesBodyForRequireBody(t *testing.T) {
-	type request struct {
-		Name string `json:"name"`
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"kanata"}`))
-	req.Header.Set("Content-Type", "text/plain")
-
-	dst := request{Name: "existing"}
-	err := BindBody(req, &dst)
-	_ = assertHTTPStatusCode(t, err, http.StatusUnsupportedMediaType, CodeUnsupportedMediaType)
-	if dst != (request{Name: "existing"}) {
-		t.Fatalf("dst = %#v, want unchanged", dst)
-	}
-
-	if err := RequireBody(req); err != nil {
-		t.Fatalf("RequireBody() error = %v, want body to remain readable after media type check", err)
-	}
 }
 
 func TestBindBody_FollowsEncodingJSONFieldSemantics(t *testing.T) {
@@ -548,34 +490,6 @@ func TestBindBody_ExactOneMiBStillBinds(t *testing.T) {
 	}
 }
 
-func TestBindBody_CachesBodyBytesForSameRequest(t *testing.T) {
-	type request struct {
-		Name string `json:"name"`
-	}
-
-	req := newJSONRequest(http.MethodPost, "/", `{"name":"kanata"}`)
-	var first request
-	if err := BindBody(req, &first); err != nil {
-		t.Fatalf("first BindBody() error = %v", err)
-	}
-
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		t.Fatalf("ReadAll(req.Body) error = %v", err)
-	}
-	if string(body) != `{"name":"kanata"}` {
-		t.Fatalf("body = %q, want original request body replayed", string(body))
-	}
-
-	var second request
-	if err := BindBody(req, &second); err != nil {
-		t.Fatalf("second BindBody() error = %v", err)
-	}
-	if !reflect.DeepEqual(first, second) {
-		t.Fatalf("second bind = %#v, want %#v", second, first)
-	}
-}
-
 func TestRequestHasBody_ReplaysPeekedPrefixOnReadError(t *testing.T) {
 	wantErr := errors.New("peek failed")
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -599,12 +513,6 @@ func TestRequestHasBody_ReplaysPeekedPrefixOnReadError(t *testing.T) {
 	}
 	if string(body) != "{" {
 		t.Fatalf("body = %q, want replayed peeked prefix", string(body))
-	}
-}
-
-func TestRequestBodyStateFromRequest_NilRequest(t *testing.T) {
-	if state := requestBodyStateFromRequest(nil); state.loaded || state.body != nil || state.err != nil {
-		t.Fatalf("requestBodyStateFromRequest(nil) = %#v, want zero state", state)
 	}
 }
 

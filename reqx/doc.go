@@ -3,7 +3,7 @@
 // 它只覆盖 request 边界：
 //   - 单字段 path/query helper：Path、Query
 //   - DTO binder：BindQuery、BindBody
-//   - 请求级显式规则：RequireBody、InvalidRequest
+//   - 请求级显式规则：InvalidRequest
 //
 // Path / Query 是请求侧主路径。它们暴露两个 source root：
 //   - PathParam

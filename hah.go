@@ -52,13 +52,6 @@ func Query(r *http.Request, name string) *reqx.QueryParam {
 	return reqx.Query(r, name)
 }
 
-// RequireBody 按默认 binder 契约要求请求必须显式提交 body。
-//
-// 它可按调用方需要在 BindBody 前后组合使用。
-func RequireBody(r *http.Request) error {
-	return reqx.RequireBody(r)
-}
-
 // InvalidRequest 生成统一的 invalid_request 错误包络。
 func InvalidRequest(violations ...Violation) error {
 	return reqx.InvalidRequest(violations...)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -18,7 +17,7 @@ import (
 // [✓] 根包 facade 会把 reqx / resp 的核心能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
 // [✓] 根包 facade 公开常用绑定入口：BindBody、BindQuery
-// [✓] 根包 facade 继续暴露 body-required helper 与统一错误响应写回
+// [✓] 根包 facade 继续暴露统一错误响应写回与 invalid_request helper
 
 type rootPayloadMap map[string]any
 
@@ -27,27 +26,6 @@ type decodedRootViolation struct {
 	In     string
 	Code   string
 	Detail string
-}
-
-type partialReadErrorCloser struct {
-	done bool
-	err  error
-}
-
-func (r *partialReadErrorCloser) Read(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	if r.done {
-		return 0, io.EOF
-	}
-	r.done = true
-	p[0] = '{'
-	return 1, r.err
-}
-
-func (r *partialReadErrorCloser) Close() error {
-	return nil
 }
 
 // BindBody 只从 JSON body 绑定数据。
@@ -119,17 +97,6 @@ func TestQuery_ValuesDelegatesToReqx(t *testing.T) {
 	}
 	if got := strings.Join(tags, ","); got != "a,b" {
 		t.Fatalf("tags = %q, want a,b", got)
-	}
-}
-
-// RequireBody 会通过根包 facade 暴露 reqx 的 body-required 规则 helper。
-func TestRequireBody_DelegatesToReqx(t *testing.T) {
-	req := newJSONRequest(http.MethodPost, "/accounts", "")
-	req.ContentLength = -1
-
-	violation := assertSingleRootViolation(t, RequireBody(req))
-	if violation.Field != "body" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Detail != "is required" {
-		t.Fatalf("violation = %#v", violation)
 	}
 }
 
@@ -246,28 +213,6 @@ func TestRootErrorHelpers_CommonStatuses(t *testing.T) {
 				t.Fatalf("Detail() = %q, want custom detail", got)
 			}
 		})
-	}
-}
-
-// 同一请求先经过 body-required 探测，再进入 body 绑定时，底层短读错误不能被后续探测掩盖。
-func TestRequireBodyThenBindBody_PreservesShortReadError(t *testing.T) {
-	wantErr := errors.New("short read")
-	req := newJSONRequest(http.MethodPost, "/accounts", "")
-	req.Body = &partialReadErrorCloser{err: wantErr}
-	req.ContentLength = -1
-
-	if err := RequireBody(req); !errors.Is(err, wantErr) {
-		t.Fatalf("RequireBody() error = %v, want %v", err, wantErr)
-	}
-
-	dst := struct {
-		Name string `json:"name"`
-	}{Name: "existing"}
-	if err := BindBody(req, &dst); !errors.Is(err, wantErr) {
-		t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
-	}
-	if dst.Name != "existing" {
-		t.Fatalf("name = %q, want existing value preserved on read error", dst.Name)
 	}
 }
 

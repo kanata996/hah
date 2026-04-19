@@ -16,7 +16,6 @@
 | 单字段 path / query 读取并顺手做常见校验 | `hah.Path` / `hah.Query` | 主路径，直接返回 source-aware `required` / `invalid` 错误 |
 | 批量 query DTO 绑定 | `hah.BindQuery` | 适合筛选条件、分页参数、显式 DTO 投影 |
 | 只做 JSON body 绑定 | `hah.BindBody` | 适合 body DTO 解码 |
-| body 是否必须存在 | `hah.RequireBody` | 适合在 body 绑定后显式声明 body-required 契约 |
 | 手写字段级请求违规 | `hah.InvalidRequest` | 适合把业务前的输入错误收敛成统一 `422 invalid_request` |
 | 读取 header | `r.Header.Get(...)` / `r.Header.Values(...)` | header 默认直接走标准库 |
 
@@ -150,7 +149,6 @@ if err := hah.BindBody(r, &body); err != nil {
 
 - 实际读取到零字节 body 时视为 no-op
 - 公开只支持非 `nil` 的 `*struct` DTO target
-- `BindBody(...)` / `RequireBody(...)` 在同一个 request 上可以按任意顺序组合
 - 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
 - 零字节 body 不要求 `Content-Type` 为 JSON
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，只允许前后空白
@@ -165,14 +163,11 @@ if err := hah.BindBody(r, &body); err != nil {
 - 绑定先解码到临时值；成功后才一次性提交，因此 JSON 里缺失的字段不会继承 DTO 旧值
 - 如果返回错误，DTO 保持调用前状态，不应出现部分更新
 
-`hah.RequireBody(...)` 与 `BindBody(...)` 的组合语义是：
+`hah` 不内建独立的 body-required helper。是否把零字节 body 视为业务错误，由调用方在 `BindBody(...)` 之后自行决定。
 
-- 可以先 `RequireBody(...)` 再 `BindBody(...)`
-- 也可以先 `BindBody(...)` 再决定是否显式要求 body 必填
-- 零字节 body 对 `BindBody(...)` 是 no-op，对 `RequireBody(...)` 视为缺失
-- 仅空白字符 body 对 `RequireBody(...)` 视为存在，但对 `BindBody(...)` 返回 `invalid_json`
-- 顶层 `null` 对 `RequireBody(...)` 视为存在，但对 `BindBody(...)` 返回 `invalid_json`
-- clone / sibling request 不属于默认组合契约；如果要复用同一份 body，请在同一个 request 上组合调用
+- 零字节 body 对 `BindBody(...)` 是 no-op
+- 仅空白字符 body 对 `BindBody(...)` 返回 `invalid_json`
+- 顶层 `null` 对 `BindBody(...)` 返回 `invalid_json`
 
 如果 body 非法，会返回稳定的公开错误，例如：
 
@@ -204,11 +199,7 @@ type CreateAccountBody struct {
 	Name string `json:"name"`
 }
 
-func validateCreateAccountBody(r *http.Request, body *CreateAccountBody) error {
-	if err := hah.RequireBody(r); err != nil {
-		return err
-	}
-
+func validateCreateAccountBody(body *CreateAccountBody) error {
 	body.Name = strings.TrimSpace(body.Name)
 	if body.Name == "" {
 		return hah.InvalidRequest(hah.Violation{
@@ -232,7 +223,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		_ = hah.WriteError(w, err)
 		return
 	}
-	if err := validateCreateAccountBody(r, &body); err != nil {
+	if err := validateCreateAccountBody(&body); err != nil {
 		_ = hah.WriteError(w, err)
 		return
 	}

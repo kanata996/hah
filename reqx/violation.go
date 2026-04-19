@@ -14,6 +14,7 @@ import (
 //   - 422 invalid_request 错误的统一构造
 
 const invalidRequestCode = "invalid_request"
+const invalidRequestDetail = "request contains invalid fields"
 
 const (
 	violationDetailInvalid       = "is invalid"
@@ -23,15 +24,17 @@ const (
 	violationDetailMustNotRepeat = "must appear only once"
 )
 
-func invalidFieldsError(violations []errx.Violation) error {
-	details := make([]errx.Violation, 0, len(violations))
-	for _, violation := range violations {
-		details = append(details, normalizeViolation(violation))
+// InvalidRequest 生成统一的 invalid_request 错误包络。
+func InvalidRequest(violations ...errx.Violation) error {
+	details := make([]errx.Violation, len(violations))
+	for i, violation := range violations {
+		details[i] = normalizeViolation(violation)
 	}
+
 	return errx.NewHTTPError(
 		http.StatusUnprocessableEntity,
 		invalidRequestCode,
-		"request contains invalid fields",
+		invalidRequestDetail,
 	).WithViolations(details)
 }
 
@@ -48,13 +51,14 @@ func normalizeViolation(violation errx.Violation) errx.Violation {
 	if violation.Code == "" {
 		violation.Code = errx.CodeInvalid
 	}
-	if violation.Detail == "" {
-		violation.Detail = violationDetailForCode(violation.Code)
+	if violation.Detail != "" {
+		return violation
 	}
+	violation.Detail = defaultViolationDetail(violation.Code)
 	return violation
 }
 
-func violationDetailForCode(code errx.ViolationCode) string {
+func defaultViolationDetail(code errx.ViolationCode) string {
 	switch code {
 	case errx.CodeRequired:
 		return violationDetailRequired

@@ -2,7 +2,6 @@ package reqx
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -24,14 +23,6 @@ const (
 )
 
 const mimeApplicationJSON = "application/json"
-
-type requestBodyCacheKey struct{}
-
-type requestBodyState struct {
-	loaded bool
-	body   []byte
-	err    error
-}
 
 type replayReadCloser struct {
 	io.Reader
@@ -61,7 +52,7 @@ func BindBody(r *http.Request, target any) error {
 		return unsupportedMediaTypeError()
 	}
 
-	body, err := requestBodyBytes(r)
+	body, err := readRequestBody(r)
 	if err != nil {
 		if errors.Is(err, errRequestTooLarge) {
 			return requestTooLargeError()
@@ -98,33 +89,9 @@ func validateBindBodyTarget(targetType reflect.Type) error {
 	return nil
 }
 
-func requestBodyBytes(r *http.Request) ([]byte, error) {
-	state := requestBodyStateFromRequest(r)
-	if state.loaded {
-		return bytes.Clone(state.body), state.err
-	}
-
-	body, err := readRequestBody(r)
-
-	cachedBody := bytes.Clone(body)
-	state.loaded = true
-	state.body = cachedBody
-	state.err = err
-	if err == nil && r.Body != nil {
-		r.Body = io.NopCloser(bytes.NewReader(cachedBody))
-	}
-	setRequestBodyState(r, state)
-	return bytes.Clone(cachedBody), err
-}
-
 func requestHasBody(r *http.Request) (bool, error) {
 	if r == nil || r.Body == nil {
 		return false, nil
-	}
-
-	state := requestBodyStateFromRequest(r)
-	if state.loaded {
-		return len(state.body) > 0, state.err
 	}
 
 	var prefix [1]byte
@@ -148,20 +115,6 @@ func requestHasBody(r *http.Request) (bool, error) {
 		Closer: r.Body,
 	}
 	return true, nil
-}
-
-func requestBodyStateFromRequest(r *http.Request) requestBodyState {
-	if r == nil {
-		return requestBodyState{}
-	}
-	if state, ok := r.Context().Value(requestBodyCacheKey{}).(requestBodyState); ok {
-		return state
-	}
-	return requestBodyState{}
-}
-
-func setRequestBodyState(r *http.Request, state requestBodyState) {
-	*r = *r.WithContext(context.WithValue(r.Context(), requestBodyCacheKey{}, state))
 }
 
 func readRequestBody(r *http.Request) ([]byte, error) {
