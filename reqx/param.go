@@ -11,10 +11,6 @@ var errInvalidParamValue = errors.New("invalid param value")
 
 type paramLookupFunc func(r *http.Request, name string) ([]string, bool)
 
-type paramCheck[T any] struct {
-	fn func(T) error
-}
-
 type paramSpec struct {
 	r      *http.Request
 	name   string
@@ -45,7 +41,7 @@ type paramValue[T any] struct {
 	required      bool
 	hasDefault    bool
 	defaultValue  T
-	checks        []paramCheck[T]
+	checks        []func(T) error
 	usageErr      error
 }
 
@@ -104,17 +100,17 @@ func (p *paramValue[T]) addCheck(check func(T) error) {
 		p.setUsageErr(usageErrorf("check must not be nil"))
 		return
 	}
-	p.checks = append(p.checks, paramCheck[T]{fn: check})
+	p.checks = append(p.checks, check)
 }
 
 func (p *paramValue[T]) validateDefault(value T, validateBuiltins func(T) error) error {
 	if validateBuiltins != nil {
-		if err := validateBuiltins(value); err != nil {
+		if err := validateBuiltins(p.cloneValue(value)); err != nil {
 			return usageErrorf("default value failed validation")
 		}
 	}
 	for _, check := range p.checks {
-		if err := check.fn(value); err != nil {
+		if err := check(p.cloneValue(value)); err != nil {
 			return usageErrorf("default value failed validation")
 		}
 	}
@@ -123,12 +119,12 @@ func (p *paramValue[T]) validateDefault(value T, validateBuiltins func(T) error)
 
 func (p *paramValue[T]) validateRequest(value T, validateBuiltins func(T) error) error {
 	if validateBuiltins != nil {
-		if err := validateBuiltins(value); err != nil {
+		if err := validateBuiltins(p.cloneValue(value)); err != nil {
 			return InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
 		}
 	}
 	for _, check := range p.checks {
-		if err := check.fn(value); err != nil {
+		if err := check(p.cloneValue(value)); err != nil {
 			return InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
 		}
 	}
@@ -175,5 +171,5 @@ func (p *paramValue[T]) resolve(validateBuiltins func(T) error) (T, error) {
 	if err := p.validateRequest(value, validateBuiltins); err != nil {
 		return zero, err
 	}
-	return value, nil
+	return p.cloneValue(value), nil
 }

@@ -13,6 +13,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.7.1] - 2026-04-20
+
+### Fixed
+
+- Tightened `reqx.BindQuery(...)` / `hah.BindQuery(...)` and `reqx.Query(...).Time()` / `hah.Query(...).Time()` to require strict RFC3339 timestamp syntax, so non-standard values such as `2026-04-13T10:00:00,123Z` now fail as invalid request input instead of being accepted by the underlying `time.Time` text decoder.
+- Hardened `reqx.Query(...).Values()` / `hah.Query(...).Values()` defensive-copy behavior so configured defaults, request-derived slices, and `Check(...)` callbacks no longer share mutable backing storage with the final caller-visible result.
+
+### Testing
+
+- Expanded `reqx` regression coverage for strict RFC3339 parsing and slice-copy semantics across `BindQuery(...)`, `Query(...).Time()`, and `Query(...).Values()`.
+
 ## [v0.7.0] - 2026-04-20
 
 ### Breaking

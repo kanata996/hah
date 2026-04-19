@@ -312,6 +312,21 @@ func TestBindQuery_Contracts(t *testing.T) {
 		}
 	})
 
+	t.Run("time fields reject non strict rfc3339 syntax", func(t *testing.T) {
+		type request struct {
+			When time.Time `query:"when"`
+		}
+
+		existing := time.Date(2026, time.April, 13, 10, 0, 0, 0, time.UTC)
+		dst := request{When: existing}
+
+		err := BindQuery(httptest.NewRequest(http.MethodGet, "/?when=2026-04-13T10:00:00,123Z", nil), &dst)
+		_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+		if !dst.When.Equal(existing) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
 	t.Run("unsigned and float leaf types bind and reject invalid input", func(t *testing.T) {
 		type request struct {
 			Limit uint16  `query:"limit"`

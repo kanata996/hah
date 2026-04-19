@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 )
 
+var strictRFC3339Pattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$`)
+
 func newStringParam(spec paramSpec) *StringParam {
 	return &StringParam{value: newParamValue(spec, parseStringValue)}
 }
@@ -20,132 +22,17 @@ func newValueParam[T any](spec paramSpec, parse func(string) (T, error)) *ValueP
 }
 
 func newOrderedParam[T cmp.Ordered](spec paramSpec, parse func(string) (T, error)) *OrderedParam[T] {
-	return &OrderedParam[T]{value: newOrderedRangeParam(spec, parse)}
+	return &OrderedParam[T]{value: newParamValue(spec, parse)}
 }
 
 func newTimeParam(spec paramSpec, parse func(string) (time.Time, error)) *TimeParam {
-	return &TimeParam{value: newTimeRangeParam(spec, parse)}
+	return &TimeParam{value: newParamValue(spec, parse)}
 }
 
-func newMultiParam[T any](spec paramSpec, parse func([]string) []T) *MultiParam[T] {
+func newMultiParam[T any](spec paramSpec, parse func([]string) []T, clone func([]T) []T) *MultiParam[T] {
 	return &MultiParam[T]{
-		value: newMultiParamValue(spec, parse, cloneSlice[T]),
+		value: newMultiParamValue(spec, parse, clone),
 	}
-}
-
-type orderedRangeParam[T cmp.Ordered] struct {
-	value paramValue[T]
-	min   *T
-	max   *T
-}
-
-func newOrderedRangeParam[T cmp.Ordered](spec paramSpec, parse func(string) (T, error)) orderedRangeParam[T] {
-	return orderedRangeParam[T]{value: newParamValue(spec, parse)}
-}
-
-func (p *orderedRangeParam[T]) setRequired() {
-	p.value.setRequired()
-}
-
-func (p *orderedRangeParam[T]) setDefault(value T) {
-	p.value.setDefault(value)
-}
-
-func (p *orderedRangeParam[T]) addCheck(check func(T) error) {
-	p.value.addCheck(check)
-}
-
-func (p *orderedRangeParam[T]) resolve() (T, error) {
-	var zero T
-	if p.value.usageErr != nil {
-		return zero, p.value.usageErr
-	}
-	if err := p.constraintUsageErr(); err != nil {
-		return zero, err
-	}
-	return p.value.resolve(p.validateBuiltins)
-}
-
-func (p *orderedRangeParam[T]) setMin(value T) {
-	p.min = &value
-}
-
-func (p *orderedRangeParam[T]) setMax(value T) {
-	p.max = &value
-}
-
-func (p *orderedRangeParam[T]) validateBuiltins(value T) error {
-	if p.min != nil && value < *p.min {
-		return errInvalidParamValue
-	}
-	if p.max != nil && value > *p.max {
-		return errInvalidParamValue
-	}
-	return nil
-}
-
-func (p *orderedRangeParam[T]) constraintUsageErr() error {
-	if p.min == nil || p.max == nil || *p.min <= *p.max {
-		return nil
-	}
-	return usageErrorf("minimum must be less than or equal to maximum")
-}
-
-type timeRangeParam struct {
-	value  paramValue[time.Time]
-	after  *time.Time
-	before *time.Time
-}
-
-func newTimeRangeParam(spec paramSpec, parse func(string) (time.Time, error)) timeRangeParam {
-	return timeRangeParam{value: newParamValue(spec, parse)}
-}
-
-func (p *timeRangeParam) setRequired() {
-	p.value.setRequired()
-}
-
-func (p *timeRangeParam) setDefault(value time.Time) {
-	p.value.setDefault(value)
-}
-
-func (p *timeRangeParam) addCheck(check func(time.Time) error) {
-	p.value.addCheck(check)
-}
-
-func (p *timeRangeParam) resolve() (time.Time, error) {
-	if p.value.usageErr != nil {
-		return time.Time{}, p.value.usageErr
-	}
-	if err := p.constraintUsageErr(); err != nil {
-		return time.Time{}, err
-	}
-	return p.value.resolve(p.validateBuiltins)
-}
-
-func (p *timeRangeParam) setAfter(value time.Time) {
-	p.after = &value
-}
-
-func (p *timeRangeParam) setBefore(value time.Time) {
-	p.before = &value
-}
-
-func (p *timeRangeParam) validateBuiltins(value time.Time) error {
-	if p.after != nil && !value.After(*p.after) {
-		return errInvalidParamValue
-	}
-	if p.before != nil && !value.Before(*p.before) {
-		return errInvalidParamValue
-	}
-	return nil
-}
-
-func (p *timeRangeParam) constraintUsageErr() error {
-	if p.after == nil || p.before == nil || p.after.Before(*p.before) {
-		return nil
-	}
-	return usageErrorf("after time must be earlier than before time")
 }
 
 // ValueParam 读取并校验通用单值参数。
@@ -155,7 +42,9 @@ type ValueParam[T any] struct {
 
 // OrderedParam 读取并校验可比较范围的单值参数。
 type OrderedParam[T cmp.Ordered] struct {
-	value orderedRangeParam[T]
+	value paramValue[T]
+	min   *T
+	max   *T
 }
 
 // StringParam 读取并校验 string 参数。
@@ -163,13 +52,15 @@ type StringParam struct {
 	value  paramValue[string]
 	minLen *int
 	maxLen *int
-	oneOf  map[string]struct{}
+	oneOf  []string
 	match  *regexp.Regexp
 }
 
 // TimeParam 读取并校验 time.Time 参数。
 type TimeParam struct {
-	value timeRangeParam
+	value  paramValue[time.Time]
+	after  *time.Time
+	before *time.Time
 }
 
 // MultiParam 读取并校验多值参数。
@@ -207,12 +98,12 @@ func (p *OrderedParam[T]) Default(value T) *OrderedParam[T] {
 }
 
 func (p *OrderedParam[T]) Min(value T) *OrderedParam[T] {
-	p.value.setMin(value)
+	p.min = &value
 	return p
 }
 
 func (p *OrderedParam[T]) Max(value T) *OrderedParam[T] {
-	p.value.setMax(value)
+	p.max = &value
 	return p
 }
 
@@ -222,7 +113,31 @@ func (p *OrderedParam[T]) Check(check func(T) error) *OrderedParam[T] {
 }
 
 func (p *OrderedParam[T]) Get() (T, error) {
-	return p.value.resolve()
+	var zero T
+	if p.value.usageErr != nil {
+		return zero, p.value.usageErr
+	}
+	if err := p.constraintUsageErr(); err != nil {
+		return zero, err
+	}
+	return p.value.resolve(p.validateBuiltins)
+}
+
+func (p *OrderedParam[T]) validateBuiltins(value T) error {
+	if p.min != nil && value < *p.min {
+		return errInvalidParamValue
+	}
+	if p.max != nil && value > *p.max {
+		return errInvalidParamValue
+	}
+	return nil
+}
+
+func (p *OrderedParam[T]) constraintUsageErr() error {
+	if p.min == nil || p.max == nil || *p.min <= *p.max {
+		return nil
+	}
+	return usageErrorf("minimum must be less than or equal to maximum")
 }
 
 func (p *StringParam) Required() *StringParam {
@@ -258,11 +173,7 @@ func (p *StringParam) OneOf(values ...string) *StringParam {
 		p.value.setUsageErr(usageErrorf("one-of values must not be empty"))
 		return p
 	}
-	allowed := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		allowed[value] = struct{}{}
-	}
-	p.oneOf = allowed
+	p.oneOf = append([]string(nil), values...)
 	return p
 }
 
@@ -301,7 +212,7 @@ func (p *StringParam) validateBuiltins(value string) error {
 		}
 	}
 	if p.oneOf != nil {
-		if _, ok := p.oneOf[value]; !ok {
+		if !containsString(p.oneOf, value) {
 			return errInvalidParamValue
 		}
 	}
@@ -329,12 +240,12 @@ func (p *TimeParam) Default(value time.Time) *TimeParam {
 }
 
 func (p *TimeParam) After(value time.Time) *TimeParam {
-	p.value.setAfter(value)
+	p.after = &value
 	return p
 }
 
 func (p *TimeParam) Before(value time.Time) *TimeParam {
-	p.value.setBefore(value)
+	p.before = &value
 	return p
 }
 
@@ -344,7 +255,30 @@ func (p *TimeParam) Check(check func(time.Time) error) *TimeParam {
 }
 
 func (p *TimeParam) Get() (time.Time, error) {
-	return p.value.resolve()
+	if p.value.usageErr != nil {
+		return time.Time{}, p.value.usageErr
+	}
+	if err := p.constraintUsageErr(); err != nil {
+		return time.Time{}, err
+	}
+	return p.value.resolve(p.validateBuiltins)
+}
+
+func (p *TimeParam) validateBuiltins(value time.Time) error {
+	if p.after != nil && !value.After(*p.after) {
+		return errInvalidParamValue
+	}
+	if p.before != nil && !value.Before(*p.before) {
+		return errInvalidParamValue
+	}
+	return nil
+}
+
+func (p *TimeParam) constraintUsageErr() error {
+	if p.after == nil || p.before == nil || p.after.Before(*p.before) {
+		return nil
+	}
+	return usageErrorf("after time must be earlier than before time")
 }
 
 func (p *MultiParam[T]) Required() *MultiParam[T] {
@@ -417,8 +351,11 @@ func parseUUIDValue(value string) (uuid.UUID, error) {
 }
 
 func parseRFC3339Time(value string) (time.Time, error) {
-	var parsed time.Time
-	if err := parsed.UnmarshalText([]byte(value)); err != nil {
+	if !strictRFC3339Pattern.MatchString(value) {
+		return time.Time{}, errors.New("timestamp is not strict RFC3339")
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
 		return time.Time{}, err
 	}
 	return parsed, nil
@@ -444,4 +381,13 @@ func cloneSlice[T any](values []T) []T {
 		return nil
 	}
 	return append([]T(nil), values...)
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

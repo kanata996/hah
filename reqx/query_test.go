@@ -96,6 +96,20 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 		assertInvalidViolationAt(t, err, "sec", errx.InQuery)
 	})
 
+	t.Run("time rejects non strict rfc3339 syntax", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?at=2026-04-13T10:00:00,123Z", nil)
+
+		_, err := Query(req, "at").Time().Get()
+		assertInvalidViolationAt(t, err, "at", errx.InQuery)
+	})
+
+	t.Run("time rejects strict rfc3339 values with invalid calendar fields", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?at=2026-13-13T10:00:00Z", nil)
+
+		_, err := Query(req, "at").Time().Get()
+		assertInvalidViolationAt(t, err, "at", errx.InQuery)
+	})
+
 }
 
 func TestQueryBuilder_UsageContracts(t *testing.T) {
@@ -277,6 +291,22 @@ func TestQueryStringAndMultiValueContracts(t *testing.T) {
 			Get()
 		if err != nil {
 			t.Fatalf("String().Get() error = %v", err)
+		}
+		if got != "go" {
+			t.Fatalf("mode = %q, want go", got)
+		}
+	})
+
+	t.Run("one of snapshots configured candidates", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?mode=go", nil)
+		allowed := []string{"go", "rust"}
+
+		builder := Query(req, "mode").String().OneOf(allowed...)
+		allowed[0] = "python"
+
+		got, err := builder.Get()
+		if err != nil {
+			t.Fatalf("String().OneOf().Get() error = %v", err)
 		}
 		if got != "go" {
 			t.Fatalf("mode = %q, want go", got)
@@ -831,6 +861,39 @@ func TestQueryValues_RequestResultIsDefensiveCopy(t *testing.T) {
 	if !reflect.DeepEqual(again, []string{"a", "b"}) {
 		t.Fatalf("values second = %#v, want []string{\"a\", \"b\"}", again)
 	}
+}
+
+func TestQueryValues_CheckCannotMutateReturnedValue(t *testing.T) {
+	t.Run("request values", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?tag=a&tag=b", nil), "tag").Values().
+			Check(func(values []string) error {
+				values[0] = "mutated"
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("Values().Get() error = %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{"a", "b"}) {
+			t.Fatalf("values = %#v, want []string{\"a\", \"b\"}", got)
+		}
+	})
+
+	t.Run("default values", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().
+			Default([]string{"a", "b"}).
+			Check(func(values []string) error {
+				values[0] = "mutated"
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("Values().Get() error = %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{"a", "b"}) {
+			t.Fatalf("values = %#v, want []string{\"a\", \"b\"}", got)
+		}
+	})
 }
 
 func TestQueryValues_ReReadsCurrentRequest(t *testing.T) {
