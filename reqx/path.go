@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 // PathParam 表示一个待解析的 path 单参数。

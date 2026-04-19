@@ -180,7 +180,7 @@ if err := hah.BindBody(r, &body); err != nil {
 - `unsupported_media_type`
 - `request_too_large`
 
-如果失败来自非 JSON 语义的 body read 过程，例如 wrapped `Body.Read` error、transport I/O 或 `context` cancellation，则返回普通 error，而不是 `*errx.HTTPError`。
+如果失败来自非 JSON 语义的 body read 过程，例如 wrapped `Body.Read` error、transport I/O 或 `context` cancellation，则返回普通 error，而不是 `*hah.HTTPError`。
 
 ### 字段解码范围
 
@@ -195,7 +195,7 @@ if err := hah.BindBody(r, &body); err != nil {
 ## 绑定后的显式校验
 
 `hah` 不预设 DTO 的校验方式。绑定完成后，调用方自己决定下一步是手写校验、接入第三方库，还是映射到应用层命令再校验。
-多数 handler 直接用 `hah.InvalidRequest(...)`、`hah.Violation{...}` 就够了；如果你需要更完整的错误构造器族，或某个更深层已经明确要返回稳定公共 HTTP 错误，再导入 `errx`。
+多数 handler 直接用 `hah.InvalidRequest(...)`、`hah.Violation{...}` 就够了；如果你需要更完整的错误构造器族，或某个更深层已经明确要返回稳定公共 HTTP 错误，继续直接使用根包提供的 `hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)` 等入口即可。
 
 ### 1. 手写校验
 

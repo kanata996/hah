@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 type errorReadCloser struct {

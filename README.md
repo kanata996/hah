@@ -15,7 +15,7 @@
 - 支持把 query、body 绑定到 DTO，再由调用方显式做后续校验
 - 把常见请求违规收敛为稳定的公开 HTTP 错误
 - 内置 JSON 成功响应与 `application/problem+json` 错误响应
-- 根包提供常用 facade，也支持按需直接导入子包
+- 根包提供默认且完整的公开 HTTP 边界
 - 适合渐进接入现有服务，不要求整体迁移
 
 ## 不负责什么
@@ -43,16 +43,6 @@ go get github.com/kanata996/hah@latest
 
 ```go
 import "github.com/kanata996/hah"
-```
-
-也可以直接导入子包：
-
-```go
-import (
-	"github.com/kanata996/hah/errx"
-	"github.com/kanata996/hah/reqx"
-	"github.com/kanata996/hah/resp"
-)
 ```
 
 ## 快速示例
@@ -157,8 +147,8 @@ DTO binding 与显式规则：
 
 错误与响应：
 
-- `hah.Violation`、`hah.HTTPError`、`hah.NewHTTPError(...)`、`hah.NewHTTPErrorWithCause(...)` 是根包暴露的常见公共错误模型入口
-- 如果某个更深层已经明确要向客户端暴露稳定公共 HTTP 错误，可以直接返回 `errx.xx`；如果仍是内部业务错误，继续返回普通 error 并在 HTTP 边界再映射
+- `hah.Violation`、`hah.HTTPError`、`hah.NewHTTPError(...)`、`hah.NewHTTPErrorWithCause(...)` 是根包暴露的公共错误模型入口
+- `hah.BadRequest(...)`、`hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)` 等快捷构造器适合在已明确公开错误语义的更深层直接返回
 - `hah.WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成 `application/problem+json`
 - `hah.JSON(...)` 写回调用方指定状态的 JSON 响应；`hah.OK(...)`、`hah.Created(...)`、`hah.NoContent(...)` 是成功响应快捷入口
 - `hah.WriteError(...)` 的返回值表示响应边界自身异常，例如响应写出失败；生产代码通常至少要记录这个错误
@@ -199,12 +189,12 @@ tags, err := hah.Query(r, "tag").Values().Get()
 
 ## 包边界
 
-仓库分成四个包：
+对外主要分成两个包：
 
-- `hah`：根包 facade，聚合常用 request helper、绑定、显式请求规则、公共错误模型入口与响应写回入口
-- `reqx`：输入侧核心包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`RequireBody`、`InvalidRequest` 以及 request-side violation 规范化
-- `errx`：共享公共 HTTP 错误模型，负责 `HTTPError`、`Violation` 和共享 violation 常量
-- `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
+- `hah`：默认公开 HTTP 边界，聚合常用 request helper、绑定、显式请求规则、公共错误模型入口与响应写回入口
+- `reqx`：请求侧辅助包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`RequireBody`、`InvalidRequest` 以及 request-side violation 规范化
+
+实现层还包含 `internal/errx` 与 `internal/resp`，但它们不属于公开 API。
 
 ## 深入文档
 
@@ -219,4 +209,4 @@ tags, err := hah.Query(r, "tag").Values().Get()
 - [`_examples/nethttp`](./_examples/nethttp)：纯 `net/http` / `ServeMux` 示例
 - [`_examples/chi`](./_examples/chi)：`chi` router + `RequestID` / `traceid` / `httplog` / 常用中间件示例
 
-补充：本文默认直接使用 `hah.xx`。只有当根包 facade 不满足包边界或导入约束时，才退到同契约的 `reqx.xx`。
+补充：本文默认直接使用 `hah.xx`。只有当你在请求侧需要更细粒度 builder 或绑定入口时，才退到同契约的 `reqx.xx`。

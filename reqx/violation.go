@@ -3,7 +3,7 @@ package reqx
 import (
 	"net/http"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 // 本文件负责 reqx 对外公开的违规模型、错误码和 invalid_request 错误包络。

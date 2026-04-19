@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/errx"
 )
 
 // 测试清单：
@@ -22,6 +21,13 @@ import (
 // [✓] 根包 facade 继续暴露 body-required helper 与统一错误响应写回
 
 type rootPayloadMap map[string]any
+
+type decodedRootViolation struct {
+	Field  string
+	In     string
+	Code   string
+	Detail string
+}
 
 type partialReadErrorCloser struct {
 	done bool
@@ -122,7 +128,7 @@ func TestRequireBody_DelegatesToReqx(t *testing.T) {
 	req.ContentLength = -1
 
 	violation := assertSingleRootViolation(t, RequireBody(req))
-	if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
+	if violation.Field != "body" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -135,7 +141,7 @@ func TestInvalidRequest_DelegatesToReqx(t *testing.T) {
 		Code:  CodeRequired,
 	}))
 
-	if violation.Field != "name" || violation.In != InBody || violation.Code != CodeRequired || violation.Detail != "is required" {
+	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -162,7 +168,7 @@ func TestNewHTTPError_DelegatesToErrx(t *testing.T) {
 	}
 
 	violation := assertSingleRootViolation(t, err)
-	if violation.Field != "name" || violation.In != InBody || violation.Code != CodeInvalid || violation.Detail != "is invalid" {
+	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeInvalid) || violation.Detail != "is invalid" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -183,6 +189,63 @@ func TestNewHTTPErrorWithCause_DelegatesToErrx(t *testing.T) {
 	}
 	if got := err.Error(); got != "Internal Server Error" {
 		t.Fatalf("Error() = %q, want Internal Server Error", got)
+	}
+}
+
+// 根包也会直接暴露常用 HTTP 错误快捷构造器与 violation 常量。
+func TestRootErrorHelpersExposePublicViolationSurface(t *testing.T) {
+	err := UnprocessableEntity("invalid_account", "account is invalid").WithViolations([]Violation{
+		{
+			Field:  "name",
+			In:     InBody,
+			Code:   CodeRequired,
+			Detail: "is required",
+		},
+	})
+
+	if got := err.Status(); got != http.StatusUnprocessableEntity {
+		t.Fatalf("Status() = %d, want %d", got, http.StatusUnprocessableEntity)
+	}
+	if got := err.Code(); got != "invalid_account" {
+		t.Fatalf("Code() = %q, want invalid_account", got)
+	}
+
+	violation := assertSingleRootViolation(t, err)
+	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Detail != "is required" {
+		t.Fatalf("violation = %#v", violation)
+	}
+}
+
+func TestRootErrorHelpers_CommonStatuses(t *testing.T) {
+	tests := []struct {
+		name       string
+		build      func(code, detail string) *HTTPError
+		wantStatus int
+	}{
+		{name: "bad request", build: BadRequest, wantStatus: http.StatusBadRequest},
+		{name: "unauthorized", build: Unauthorized, wantStatus: http.StatusUnauthorized},
+		{name: "forbidden", build: Forbidden, wantStatus: http.StatusForbidden},
+		{name: "not found", build: NotFound, wantStatus: http.StatusNotFound},
+		{name: "method not allowed", build: MethodNotAllowed, wantStatus: http.StatusMethodNotAllowed},
+		{name: "conflict", build: Conflict, wantStatus: http.StatusConflict},
+		{name: "unprocessable entity", build: UnprocessableEntity, wantStatus: http.StatusUnprocessableEntity},
+		{name: "too many requests", build: TooManyRequests, wantStatus: http.StatusTooManyRequests},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.build("custom_code", "custom detail")
+
+			if got := err.Status(); got != tt.wantStatus {
+				t.Fatalf("Status() = %d, want %d", got, tt.wantStatus)
+			}
+			if got := err.Code(); got != "custom_code" {
+				t.Fatalf("Code() = %q, want custom_code", got)
+			}
+			if got := err.Detail(); got != "custom detail" {
+				t.Fatalf("Detail() = %q, want custom detail", got)
+			}
+		})
 	}
 }
 
@@ -319,7 +382,7 @@ func decodeRootPayload(t *testing.T, body []byte) rootPayloadMap {
 	return payload
 }
 
-func assertSingleRootViolation(t *testing.T, err error) Violation {
+func assertSingleRootViolation(t *testing.T, err error) decodedRootViolation {
 	t.Helper()
 
 	payload := decodeRootPayload(t, mustWriteRootError(t, err))
@@ -333,10 +396,10 @@ func assertSingleRootViolation(t *testing.T, err error) Violation {
 		t.Fatalf("violation type = %T, want map[string]any", errorsValue[0])
 	}
 
-	return Violation{
+	return decodedRootViolation{
 		Field:  stringValue(violationMap["field"]),
-		In:     errx.ViolationIn(stringValue(violationMap["in"])),
-		Code:   errx.ViolationCode(stringValue(violationMap["code"])),
+		In:     stringValue(violationMap["in"]),
+		Code:   stringValue(violationMap["code"]),
 		Detail: stringValue(violationMap["detail"]),
 	}
 }

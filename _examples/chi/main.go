@@ -18,7 +18,6 @@ import (
 	httplog "github.com/go-chi/httplog/v3"
 	"github.com/go-chi/traceid"
 	"github.com/kanata996/hah"
-	"github.com/kanata996/hah/errx"
 )
 
 type account struct {
@@ -75,7 +74,7 @@ func (s *accountStore) list(orgID string, limit int) []account {
 func (s *accountStore) create(orgID, name string) (account, error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
-		return account{}, errx.UnprocessableEntity("account_name_required", "account name must not be blank")
+		return account{}, hah.UnprocessableEntity("account_name_required", "account name must not be blank")
 	}
 
 	s.mu.Lock()
@@ -83,7 +82,7 @@ func (s *accountStore) create(orgID, name string) (account, error) {
 
 	nameKey := accountNameKey(orgID, trimmed)
 	if _, exists := s.nameIndex[nameKey]; exists {
-		return account{}, errx.Conflict("account_name_conflict", "account name already exists")
+		return account{}, hah.Conflict("account_name_conflict", "account name already exists")
 	}
 
 	acct := account{
@@ -103,7 +102,7 @@ func (s *accountStore) get(orgID, accountID string) (account, error) {
 
 	acct, ok := s.accounts[accountID]
 	if !ok || acct.OrgID != orgID {
-		return account{}, errx.NotFound("account_not_found", "account not found")
+		return account{}, hah.NotFound("account_not_found", "account not found")
 	}
 	return acct, nil
 }
@@ -114,7 +113,7 @@ func (s *accountStore) delete(orgID, accountID string) error {
 
 	acct, ok := s.accounts[accountID]
 	if !ok || acct.OrgID != orgID {
-		return errx.NotFound("account_not_found", "account not found")
+		return hah.NotFound("account_not_found", "account not found")
 	}
 
 	delete(s.accounts, accountID)

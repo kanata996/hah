@@ -177,7 +177,7 @@ type ListAccountsQuery struct {
 
 ### 4.2 客户端输入错误
 
-以下场景返回稳定 `*errx.HTTPError`：
+以下场景返回稳定 `*hah.HTTPError`：
 
 - raw query 解析失败
 - query source 中存在重复 key
@@ -186,7 +186,7 @@ type ListAccountsQuery struct {
 
 稳定契约只锁以下结果：
 
-- `errors.As(err, *errx.HTTPError)` 必须成功
+- `errors.As(err, *hah.HTTPError)` 必须成功
 - `Status() == 400`
 - `Code() == "bad_request"`
 
@@ -195,7 +195,7 @@ type ListAccountsQuery struct {
 - `BindQuery(...)` 与 `Query(...)` 共享“空字符串视为已提交参数”“单值入口拒绝重复值”的输入方向
 - `BindQuery(...)` 是 DTO binder；`Query(...)` 是单字段 helper
 - `BindQuery(...)` 比 `Query(...)` 更严格，因为它还要处理 DTO 规划、整条 raw query 解析和原子提交
-- 顶层错误模型来自 `errx`；对外如何写成 Problem JSON 由 `resp` 决定
+- 顶层错误模型来自 `hah.HTTPError`；对外如何写成 Problem JSON 也由 `hah.WriteError(...)` 决定
 
 ## 6. 测试基线
 

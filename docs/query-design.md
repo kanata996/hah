@@ -171,7 +171,7 @@ limit, err := Query(r, "limit").Int().Get()
 
 ### 4.1 usage error
 
-以下场景返回普通 error，而不是 `*errx.HTTPError`：
+以下场景返回普通 error，而不是 `*hah.HTTPError`：
 
 - `Query(nil, name)`
 - 参数名为空
@@ -181,7 +181,7 @@ limit, err := Query(r, "limit").Int().Get()
 
 ### 4.2 客户端输入错误
 
-以下场景返回稳定 `*errx.HTTPError`：
+以下场景返回稳定 `*hah.HTTPError`：
 
 - `Required()` 参数缺失
 - 单值 typed builder 命中重复 key
@@ -196,17 +196,17 @@ limit, err := Query(r, "limit").Int().Get()
 - `Detail() == "request contains invalid fields"`
 - `Errors()` 只包含一个 violation
 - violation `Field` 等于裁剪后的参数名
-- violation `In == errx.InQuery`
-- 缺失 required 参数时，violation `Code == errx.CodeRequired`
-- 单值 typed builder 命中重复 key 时，violation `Code == errx.CodeMultiple`
-- 解析失败或校验失败时，violation `Code == errx.CodeInvalid`
+- violation `In == hah.InQuery`
+- 缺失 required 参数时，violation `Code == hah.CodeRequired`
+- 单值 typed builder 命中重复 key 时，violation `Code == hah.CodeMultiple`
+- 解析失败或校验失败时，violation `Code == hah.CodeInvalid`
 
 ## 5. 与其他文档的关系
 
 - `Query(...)` 是单字段 helper；`BindQuery(...)` 是 DTO binder
 - 两者共享“空字符串视为已提交参数”“单值入口拒绝重复 key”“默认忽略未知 key”这些方向上的输入模型
 - `Query(...)` 不为读取单个 key 额外扫描整条 raw query 的全局合法性
-- 顶层错误模型和 violation 词汇由 `errx` 提供；响应写回由 `resp` 决定
+- 顶层错误模型和 violation 词汇由 `hah` 提供；默认响应写回也由 `hah` 决定
 
 ## 6. 测试基线
 

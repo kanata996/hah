@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 var errInvalidParamValue = errors.New("invalid param value")

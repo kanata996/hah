@@ -4,9 +4,10 @@
 - 版本：v3
 - 锁定日期：2026-04-18
 - 适用范围：
-  - `errx`
-  - `reqx` 对 `errx` 的错误生产依赖
-  - `resp` 对 `errx` 的错误消费依赖
+  - `hah.HTTPError`
+  - `hah.Violation`
+  - `reqx` 对共享错误模型的错误生产依赖
+  - 响应写回入口对共享错误模型的错误消费依赖
 - 不覆盖：
   - 请求输入规则
   - 业务错误分类
@@ -22,12 +23,12 @@
 
 ## 1. 包定位
 
-`errx` 是仓库共享的公共 HTTP 错误模型。
+当前仓库通过根包 `hah` 暴露共享的公共 HTTP 错误模型，内部实现位于 `internal/errx`。
 它只负责表达稳定、可公开返回、可组合的 HTTP 错误语义。
-它不限定错误必须在 handler 层构造；只要某一层已经明确决定该错误可以直接公开给客户端，就可以返回 `errx.HTTPError`。
+它不限定错误必须在 handler 层构造；只要某一层已经明确决定该错误可以直接公开给客户端，就可以返回 `hah.HTTPError`。
 如果错误仍属于内部业务语义，则应继续保留普通 error 或内部错误类型，并在 HTTP 边界再映射。
 
-`errx` 负责：
+该错误模型负责：
 
 - 定义 `HTTPError`
 - 定义 `Violation`
@@ -35,7 +36,7 @@
 - 提供可保留或不保留 `cause` 的基础构造器
 - 提供项目级共享 violation 常量
 
-`errx` 不负责：
+该错误模型不负责：
 
 - request-side 默认文案
 - `invalid_request` 包络
@@ -51,8 +52,6 @@
 
 - `HTTPError`
 - `Violation`
-- `ViolationCode`
-- `ViolationIn`
 - `NewHTTPError(status int, code, detail string) *HTTPError`
 - `NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPError`
 - `BadRequest(code, detail string) *HTTPError`
@@ -81,7 +80,7 @@
 
 ### 2.3 共享常量
 
-必须导出以下 `ViolationCode`：
+必须导出以下 violation code 常量：
 
 - `CodeInvalid`
 - `CodeRequired`
@@ -89,7 +88,7 @@
 - `CodeType`
 - `CodeMultiple`
 
-必须导出以下 `ViolationIn`：
+必须导出以下 violation in 常量：
 
 - `InBody`
 - `InQuery`
@@ -238,7 +237,7 @@
 
 后续实现或重构至少应锁住：
 
-- `HTTPError`、`Violation`、`ViolationCode`、`ViolationIn` 类型存在
+- `HTTPError`、`Violation` 类型存在
 - 两个构造器存在
 - 八个快捷构造器存在
 - `HTTPError` 的八个公开方法存在

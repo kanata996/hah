@@ -20,7 +20,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 // problemPayload 是最终写入响应体的公共错误字段。

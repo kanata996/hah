@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 const defaultMaxBodyBytes int64 = 1 << 20

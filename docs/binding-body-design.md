@@ -148,7 +148,7 @@ body 存在性的规则固定为：
 
 ### 4.2 客户端输入错误
 
-以下场景返回稳定 `*errx.HTTPError`：
+以下场景返回稳定 `*hah.HTTPError`：
 
 - 非空 body 但媒体类型不是 JSON：`415 unsupported_media_type`
 - body 超过 `1 MiB`：`413 request_too_large`

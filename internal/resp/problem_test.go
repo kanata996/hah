@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 type httpErrorAsCarrier struct {

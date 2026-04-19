@@ -120,7 +120,7 @@
 
 ### 4.1 usage error
 
-以下场景返回普通 error，而不是 `*errx.HTTPError`：
+以下场景返回普通 error，而不是 `*hah.HTTPError`：
 
 - `Path(nil, name)`
 - 参数名为空
@@ -130,7 +130,7 @@
 
 ### 4.2 客户端输入错误
 
-以下场景返回稳定 `*errx.HTTPError`：
+以下场景返回稳定 `*hah.HTTPError`：
 
 - `Required()` 参数缺失
 - 来自请求输入的类型解析失败
@@ -144,15 +144,15 @@
 - `Detail() == "request contains invalid fields"`
 - `Errors()` 只包含一个 violation
 - violation `Field` 等于裁剪后的参数名
-- violation `In == errx.InPath`
-- 缺失 required 参数时，violation `Code == errx.CodeRequired`
-- 解析失败或校验失败时，violation `Code == errx.CodeInvalid`
+- violation `In == hah.InPath`
+- 缺失 required 参数时，violation `Code == hah.CodeRequired`
+- 解析失败或校验失败时，violation `Code == hah.CodeInvalid`
 
 ## 5. 与其他文档的关系
 
 - `Path(...)` 与 `Query(...)` 共享显式类型入口、链式约束和 request-side violation 模型
 - `Path(...)` 故意比 `Query(...)` 更窄：只支持 path 常见的单值类型
-- `errx` 提供统一错误模型；`resp` 决定这些错误如何写回
+- `hah` 提供统一错误模型与默认响应写回入口
 - router-specific bridge 不是默认契约的一部分，必须在进入 `Path(...)` 前完成
 
 ## 6. 测试基线
