@@ -1,13 +1,11 @@
 # hah BindBody 设计方案
 
 - 状态：Locked
-- 版本：v9
-- 锁定日期：2026-04-19
+- 版本：v11
+- 锁定日期：2026-04-20
 - 适用范围：
   - `hah.BindBody(...)`
   - `reqx.BindBody(...)`
-  - `hah.RequireBody(...)`
-  - `reqx.RequireBody(...)`
 - 不覆盖：
   - `BindQuery(...)`
   - 业务校验
@@ -21,35 +19,31 @@
 ## 1. 设计目标
 
 `BindBody(...)` 是面向 JSON API 的默认 body binder。
-它提供一条直接、稳定、可组合的 body 处理路径：
+它提供一条直接、稳定的 body 处理路径：
 
-1. 先探测当前 request 是否显式提交了 body
+1. 先读取当前 request body，并执行大小限制
 2. 对零字节 body 提前 no-op
-3. 对非空 body 先校验媒体类型
-4. 对非空 body 读取字节并执行大小限制
-5. 用标准库 `encoding/json` 解码到临时 DTO
-6. 成功后一次性提交到 target
+3. 对非空 body 校验媒体类型
+4. 用标准库 `encoding/json` 解码到临时 DTO
+5. 成功后一次性提交到 target
 
 这套设计的重点是：
 
 - 保持 `net/http`-first
 - 复用标准库 JSON 语义
-- 让 `BindBody(...)` 与 `RequireBody(...)` 可在同一个 request 上自然组合
 - 用临时值提交保证 DTO 不会被失败路径污染
 
 ## 2. 心智模型
 
-### 2.1 request 级组合语义
+### 2.1 body 提交语义
 
 body 是 request 级输入。
-`BindBody(...)` 与 `RequireBody(...)` 在同一个 request 上共享同一份 body 读取结果。
 
 公开语义固定为：
 
-- 同一个 request 上，`BindBody(...)` / `RequireBody(...)` 可以按任意顺序组合调用
 - body 只按 request 当前看到的字节语义解释
-- 零字节 body 代表“没有提交 body”
-- 非零字节 body 代表“客户端显式提交了 body”
+- 零字节 body 对 binder 是 no-op
+- 非零字节 body 进入 JSON body 输入模型
 
 ### 2.2 DTO 绑定模型
 
@@ -89,11 +83,11 @@ body 是 request 级输入。
 
 body 存在性的规则固定为：
 
-| 输入              | `BindBody(...)`    | `RequireBody(...)` |
-| ----------------- | ------------------ | ------------------ |
-| 零字节 body       | no-op，target 不变 | 视为缺失 body      |
-| 仅空白字符的 body | `400 invalid_json` | 视为存在 body      |
-| 顶层 `null`       | `400 invalid_json` | 视为存在 body      |
+| 输入              | `BindBody(...)`    |
+| ----------------- | ------------------ |
+| 零字节 body       | no-op，target 不变 |
+| 仅空白字符的 body | `400 invalid_json` |
+| 顶层 `null`       | `400 invalid_json` |
 
 补充规则：
 
@@ -107,7 +101,7 @@ body 存在性的规则固定为：
 - 该 `Content-Type` 的主媒体类型必须是 `application/json`
 - `charset=utf-8` 之类的媒体类型参数不影响匹配
 - 默认大小限制为 `1 MiB` 原始字节
-- 若同时命中错误媒体类型与超大 body，返回 `415 unsupported_media_type`
+- 大小限制在读取 body 时先执行；若 body 超过限制，返回 `413 request_too_large`
 - 顶层值必须是单个 JSON object
 - 文档前后允许空白
 - 未知字段默认拒绝
@@ -148,7 +142,7 @@ body 存在性的规则固定为：
 
 ### 4.2 客户端输入错误
 
-以下场景返回稳定 `*errx.HTTPError`：
+以下场景返回稳定 `*hah.HTTPError`：
 
 - 非空 body 但媒体类型不是 JSON：`415 unsupported_media_type`
 - body 超过 `1 MiB`：`413 request_too_large`
@@ -162,17 +156,15 @@ body 存在性的规则固定为：
 - transport I/O error
 - `context` cancellation / deadline
 
-## 5. 与 `RequireBody(...)` 的关系
+## 5. 业务校验边界
 
-`RequireBody(...)` 负责表达“调用方显式要求 body 必填”。
-`BindBody(...)` 负责表达“把当前 request body 绑定到 DTO”。
+`BindBody(...)` 只负责 JSON body 到 DTO 的绑定。
 
-两者的组合方式固定为：
+以下判断不属于 binder 默认职责：
 
-- 可以先 `RequireBody(...)` 再 `BindBody(...)`
-- 也可以先 `BindBody(...)` 再 `RequireBody(...)`
-- 组合范围限定在同一个 request
-- 调用方可以把“body 是否必填”和“body 如何解码”分开表达
+- 某个 endpoint 是否要求客户端必须显式提交 body
+- 零字节 body 是否要升级成业务错误
+- 绑定后字段之间的业务约束
 
 ## 6. 测试基线
 
@@ -181,14 +173,12 @@ body 存在性的规则固定为：
 - 合法 target 仅限非 `nil` 的 `*struct`
 - 非法 `request` / `target` 返回 usage error
 - 零字节 body 是 no-op，且不修改 target
-- 零字节 body 对 `RequireBody(...)` 是缺失 body
-- 同一个 request 上 `BindBody(...)` / `RequireBody(...)` 可以按任意顺序组合
 - `application/json`
 - `application/json; charset=utf-8`
 - 重复 `Content-Type` 返回 `415 unsupported_media_type`
 - 非空非 JSON `Content-Type` 返回 `415 unsupported_media_type`
 - 大于 `1 MiB` 的 body 返回 `413 request_too_large`
-- 非空非 JSON `Content-Type` 与超大 body 同时出现时，优先返回 `415 unsupported_media_type`
+- 非空非 JSON `Content-Type` 与超大 body 同时出现时，优先返回 `413 request_too_large`
 - 恰好 `1 MiB` 的 body 仍允许进入 JSON 解码
 - 空白 body、顶层 `null`、array、string、number、boolean 返回 `400 invalid_json`
 - 截断 JSON、尾随数据、多个 top-level 值返回 `400 invalid_json`

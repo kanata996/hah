@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 func newJSONRequest(method, target, body string) *http.Request {

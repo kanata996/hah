@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 // PathParam 表示一个待解析的 path 单参数。
@@ -27,37 +27,31 @@ func Path(r *http.Request, name string) *PathParam {
 
 // String 读取 string 参数。
 func (p *PathParam) String() *StringParam {
-	p = ensureBuilder(p)
 	return newStringParam(p.spec)
 }
 
 // Int 读取 int 参数。
 func (p *PathParam) Int() *OrderedParam[int] {
-	p = ensureBuilder(p)
 	return newOrderedParam(p.spec, parseIntValue)
 }
 
 // Int64 读取 int64 参数。
 func (p *PathParam) Int64() *OrderedParam[int64] {
-	p = ensureBuilder(p)
 	return newOrderedParam(p.spec, parseInt64Value)
 }
 
 // Uint64 读取 uint64 参数。
 func (p *PathParam) Uint64() *OrderedParam[uint64] {
-	p = ensureBuilder(p)
 	return newOrderedParam(p.spec, parseUint64Value)
 }
 
 // Uint 读取 uint 参数。
 func (p *PathParam) Uint() *OrderedParam[uint] {
-	p = ensureBuilder(p)
 	return newOrderedParam(p.spec, parseUintValue)
 }
 
 // UUID 读取 uuid.UUID 参数。
 func (p *PathParam) UUID() *ValueParam[uuid.UUID] {
-	p = ensureBuilder(p)
 	return newValueParam(p.spec, parseUUIDValue)
 }
 

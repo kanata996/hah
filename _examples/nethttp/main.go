@@ -10,7 +10,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/kanata996/hah"
-	"github.com/kanata996/hah/errx"
 )
 
 type account struct {
@@ -69,7 +68,7 @@ func (s *accountStore) list(orgID, name string) []account {
 func (s *accountStore) create(orgID, name string) (account, error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
-		return account{}, errx.UnprocessableEntity("account_name_required", "account name must not be blank")
+		return account{}, hah.UnprocessableEntity("account_name_required", "account name must not be blank")
 	}
 
 	s.mu.Lock()
@@ -77,7 +76,7 @@ func (s *accountStore) create(orgID, name string) (account, error) {
 
 	nameKey := accountNameKey(orgID, trimmed)
 	if _, exists := s.nameIndex[nameKey]; exists {
-		return account{}, errx.Conflict("account_name_conflict", "account name already exists")
+		return account{}, hah.Conflict("account_name_conflict", "account name already exists")
 	}
 
 	acct := account{
@@ -97,7 +96,7 @@ func (s *accountStore) get(orgID, accountID string) (account, error) {
 
 	acct, ok := s.accounts[accountID]
 	if !ok || acct.OrgID != orgID {
-		return account{}, errx.NotFound("account_not_found", "account not found")
+		return account{}, hah.NotFound("account_not_found", "account not found")
 	}
 	return acct, nil
 }
@@ -108,7 +107,7 @@ func (s *accountStore) delete(orgID, accountID string) error {
 
 	acct, ok := s.accounts[accountID]
 	if !ok || acct.OrgID != orgID {
-		return errx.NotFound("account_not_found", "account not found")
+		return hah.NotFound("account_not_found", "account not found")
 	}
 
 	delete(s.accounts, accountID)
@@ -146,11 +145,7 @@ func (r *createAccountRequest) normalize() {
 	r.Name = strings.TrimSpace(r.Name)
 }
 
-func validateCreateAccountRequest(r *http.Request, req *createAccountRequest) error {
-	if err := hah.RequireBody(r); err != nil {
-		return err
-	}
-
+func validateCreateAccountRequest(req *createAccountRequest) error {
 	req.normalize()
 	switch nameLen := utf8.RuneCountInString(req.Name); {
 	case req.Name == "":
@@ -231,7 +226,7 @@ func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, err)
 		return
 	}
-	if err := validateCreateAccountRequest(r, &req); err != nil {
+	if err := validateCreateAccountRequest(&req); err != nil {
 		writeError(w, r, err)
 		return
 	}

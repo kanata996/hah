@@ -3,13 +3,14 @@ package resp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"testing"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 type httpErrorAsCarrier struct {
@@ -292,6 +293,41 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 	})
 }
 
+func TestProblemPayloadsStayJSONEncodable(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "http error with violations",
+			err: errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid").WithViolations([]errx.Violation{
+				{Field: "name", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
+			}),
+		},
+		{
+			name: "context canceled",
+			err:  context.Canceled,
+		},
+		{
+			name: "context deadline exceeded",
+			err:  context.DeadlineExceeded,
+		},
+		{
+			name: "plain error",
+			err:  errors.New("db timeout"),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := encodeProblemPayload(normalizeProblemPayload(tc.err))
+			if !json.Valid(body) {
+				t.Fatalf("encodeProblemPayload() produced invalid JSON: %q", string(body))
+			}
+		})
+	}
+}
+
 func TestWriteErrorResponseBoundaries(t *testing.T) {
 	t.Run("nil error is noop", func(t *testing.T) {
 		rr := httptest.NewRecorder()
@@ -365,7 +401,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 	})
 }
 
-func TestWriteErrorWriteFailureAndFallback(t *testing.T) {
+func TestWriteErrorWriteFailure(t *testing.T) {
 	t.Run("returns write failure after first commit", func(t *testing.T) {
 		cause := errors.New("socket closed")
 		w := &failingWriter{cause: cause}
@@ -381,45 +417,6 @@ func TestWriteErrorWriteFailureAndFallback(t *testing.T) {
 		}
 		if w.writes != 1 {
 			t.Fatalf("writes = %d, want 1", w.writes)
-		}
-	})
-
-	t.Run("falls back to internal error when problem encoding fails", func(t *testing.T) {
-		t.Cleanup(func() {
-			problemBodyEncoder = encodeJSON
-		})
-		problemBodyEncoder = func(any) ([]byte, error) {
-			return nil, errors.New("encode payload failed")
-		}
-
-		rr := httptest.NewRecorder()
-		err := WriteError(rr, errx.NewHTTPError(
-			http.StatusBadRequest,
-			"invalid_json",
-			"payload invalid",
-		).WithViolations([]errx.Violation{
-			{Field: "name", Code: "required", Detail: "is required"},
-		}))
-		if err != nil {
-			t.Fatalf("WriteError() error = %v, want nil after fallback write", err)
-		}
-
-		if rr.Code != http.StatusInternalServerError {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
-		}
-		if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
-			t.Fatalf("Content-Type = %q, want application/problem+json", got)
-		}
-
-		payload := decodePayload(t, rr.Body.Bytes())
-		if got := payload["code"]; got != "internal_error" {
-			t.Fatalf("code = %#v, want internal_error", got)
-		}
-		if _, exists := payload["detail"]; exists {
-			t.Fatalf("detail unexpectedly present: %#v", payload["detail"])
-		}
-		if _, exists := payload["errors"]; exists {
-			t.Fatalf("errors unexpectedly present: %#v", payload["errors"])
 		}
 	})
 

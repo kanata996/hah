@@ -4,11 +4,11 @@
 - 版本：v6
 - 锁定日期：2026-04-19
 - 适用范围：
-  - `resp.JSON`
-  - `resp.OK`
-  - `resp.Created`
-  - `resp.NoContent`
-  - `resp.WriteError`
+  - `hah.JSON`
+  - `hah.OK`
+  - `hah.Created`
+  - `hah.NoContent`
+  - `hah.WriteError`
 - 不覆盖：
   - router / handler 生命周期
   - 业务 envelope
@@ -21,7 +21,7 @@
 
 ## 1. 设计目标
 
-`resp` 只负责 HTTP 响应写回。
+根包 `hah` 公开的响应入口只负责 HTTP 响应写回。
 它提供两类默认输出：
 
 - 成功响应：`application/json`
@@ -52,7 +52,7 @@
 
 - 除 `WriteError(nil, nil)` 外，`w == nil` 时返回 error，且不得写出内容
 - `WriteError(nil, nil)` 是纯 no-op：返回 `nil` 且不得写出任何内容
-- `resp` 只拥有 `Content-Type` 与 `Content-Length` 的所有权
+- `hah` 的响应写回入口只拥有 `Content-Type` 与 `Content-Length` 的所有权
 - 无关自定义头部必须保留
 - 冲突的 `Content-Type` 必须覆盖
 - 预设的 `Content-Length` 不得原样穿透
@@ -120,7 +120,7 @@ JSON/成功写回契约固定为：
 - `code` 必须写出
 - `errors` 仅在公开错误对象本身提供非空 violations 时写出
 - `errors` 的稳定 JSON 字段固定为 `field` / `in` / `code` / `detail`
-- `resp` 不排序、不去重、不改写 `errors`
+- 响应写回入口不排序、不去重、不改写 `errors`
 
 ### 5.2 `WriteError` 收敛模型
 
@@ -128,7 +128,7 @@ JSON/成功写回契约固定为：
 
 1. `err == nil`：返回 `nil`，不写任何内容
 2. `w == nil`：返回 error，且不得写任何内容
-3. 若错误链里存在 `*errx.HTTPError`：直接按该公开错误写回
+3. 若错误链里存在 `*hah.HTTPError`：直接按该公开错误写回
 4. `errors.Is(err, context.Canceled)`：写回 `499`
 5. `errors.Is(err, context.DeadlineExceeded)`：写回 `504`
 6. 其他情况：写回最小 `500` Problem
@@ -140,7 +140,7 @@ JSON/成功写回契约固定为：
 对 `context.Canceled`、`context.DeadlineExceeded` 与普通 `error` 这类框架合成错误：
 
 - `title` 由最终状态码决定
-- `code` 使用 `errx` 的默认 `code`
+- `code` 使用 `hah` 公开错误模型的默认 `code`
 - 不写 `detail`
 - 不写 `errors`
 - 不得泄漏原始 `err.Error()` 文本
@@ -151,7 +151,6 @@ JSON/成功写回契约固定为：
 
 - 若完整、合法的目标响应已成功写出，则返回 `nil`
 - 必须先在内存里构造好目标 payload，再执行首次提交
-- 若 Problem payload 在首次提交前无法 JSON 编码，可以回退为最小 `500` Problem
 - 若首次提交后发生底层写失败，返回写失败 error，且不得尝试改写已开始的响应
 
 ## 6. 测试基线
@@ -172,16 +171,16 @@ JSON/成功写回契约固定为：
 - `JSON` 拒绝 `1xx`、`204`、`205`、`304` 与非法状态码
 - `NoContent()` 写出 `204`、空响应体、空 `Content-Type`、空 `Content-Length`
 - 除 `WriteError(nil, nil)` 外，任一公开入口在 `w == nil` 时都返回 error 且不写内容
-- `WriteError(errxHTTPError404)` 写出 `404`、`application/problem+json`、`title=Not Found`、`status=404`、`code=not_found`
-- `WriteError` 会保留来自 `*errx.HTTPError` 的 `detail`
-- `WriteError` 会保留来自 `*errx.HTTPError` 的 `code`
-- `WriteError` 会保留来自 `*errx.HTTPError` 的 violations 顺序与内容
+- `WriteError(hahHTTPError404)` 写出 `404`、`application/problem+json`、`title=Not Found`、`status=404`、`code=not_found`
+- `WriteError` 会保留来自 `*hah.HTTPError` 的 `detail`
+- `WriteError` 会保留来自 `*hah.HTTPError` 的 `code`
+- `WriteError` 会保留来自 `*hah.HTTPError` 的 violations 顺序与内容
 - `errors[]` 的稳定 JSON 字段固定为 `field` / `in` / `code` / `detail`
 - `WriteError(context.Canceled)` 写出 `499`、`Client Closed Request`、`code=client_closed_request`，且不写 `detail` / `errors`
 - `WriteError(context.DeadlineExceeded)` 写出 `504`、`Gateway Timeout`、`code=timeout`，且不写 `detail` / `errors`
 - `WriteError` 对普通错误写出最小 `500` Problem，且不写 `detail` / `errors`
 - `WriteError(nil)` 是 no-op
-- Problem payload 无法编码时，`WriteError` 可回退为最小内部错误 Problem
-- 错误链同时匹配 `*errx.HTTPError` 与 `context` 错误时，优先按 `*errx.HTTPError` 收敛
+- Problem payload 形状固定且必须保持可 JSON 编码；`WriteError` 不暴露单独的 problem 编码失败分支
+- 错误链同时匹配 `*hah.HTTPError` 与 `context` 错误时，优先按 `*hah.HTTPError` 收敛
 - 任一失败场景都不得产生“前半段成功 JSON、后半段错误 JSON”的混杂响应
 - 首次提交后的底层写失败只要求返回错误，不要求响应可回退

@@ -1,8 +1,8 @@
 # hah Query 设计方案
 
 - 状态：Locked
-- 版本：v7
-- 锁定日期：2026-04-19
+- 版本：v8
+- 锁定日期：2026-04-20
 - 适用范围：
   - `hah.Query(...)`
   - `reqx.Query(...)`
@@ -69,7 +69,7 @@ limit, err := Query(r, "limit").Int().Get()
 - `name` 会先做 `strings.TrimSpace`
 - `r == nil` 不是构造期 panic，而是在 `Get()` 时返回普通 usage error
 - `name` 为空字符串时，在 `Get()` 时返回普通 usage error
-- 零值 builder 不是合法公开入口，`Get()` 时返回普通 usage error
+- builder 必须通过 `Query(...)` 创建；零值 builder 和 typed-nil builder 不属于公开契约
 - 数据只从 `request.URL` 的 query source 读取
 - `request.URL == nil` 视为“没有 query 参数”
 - query 的解码语义跟随 `net/url`
@@ -133,6 +133,8 @@ limit, err := Query(r, "limit").Int().Get()
 - 未声明 `Required()` 且参数缺失时，若未配置 `Default(...)`，直接返回类型零值
 - 参数缺失且命中 `Default(v)` 时，以默认值进入后续约束与 `Check(...)`
 - 默认值仍然要经过后续全部约束与 `Check(...)`
+- 同类 built-in constraint 重复声明时，后一条覆盖前一条
+- built-in constraint 总在 `Check(...)` 之前执行，不跟随链式声明顺序重排
 - `Check(nil)` 返回普通 usage error
 - builder 一旦记录 usage error，后续链式调用不会清除该状态
 - `Get()` 返回首次记录的 usage error
@@ -171,17 +173,16 @@ limit, err := Query(r, "limit").Int().Get()
 
 ### 4.1 usage error
 
-以下场景返回普通 error，而不是 `*errx.HTTPError`：
+以下场景返回普通 error，而不是 `*hah.HTTPError`：
 
 - `Query(nil, name)`
 - 参数名为空
-- 零值 builder 直接使用
 - 非法约束配置
 - 配置的 `Default(...)` 未通过后续约束或 `Check(...)`
 
 ### 4.2 客户端输入错误
 
-以下场景返回稳定 `*errx.HTTPError`：
+以下场景返回稳定 `*hah.HTTPError`：
 
 - `Required()` 参数缺失
 - 单值 typed builder 命中重复 key
@@ -196,17 +197,17 @@ limit, err := Query(r, "limit").Int().Get()
 - `Detail() == "request contains invalid fields"`
 - `Errors()` 只包含一个 violation
 - violation `Field` 等于裁剪后的参数名
-- violation `In == errx.InQuery`
-- 缺失 required 参数时，violation `Code == errx.CodeRequired`
-- 单值 typed builder 命中重复 key 时，violation `Code == errx.CodeMultiple`
-- 解析失败或校验失败时，violation `Code == errx.CodeInvalid`
+- violation `In == hah.InQuery`
+- 缺失 required 参数时，violation `Code == hah.CodeRequired`
+- 单值 typed builder 命中重复 key 时，violation `Code == hah.CodeMultiple`
+- 解析失败或校验失败时，violation `Code == hah.CodeInvalid`
 
 ## 5. 与其他文档的关系
 
 - `Query(...)` 是单字段 helper；`BindQuery(...)` 是 DTO binder
 - 两者共享“空字符串视为已提交参数”“单值入口拒绝重复 key”“默认忽略未知 key”这些方向上的输入模型
 - `Query(...)` 不为读取单个 key 额外扫描整条 raw query 的全局合法性
-- 顶层错误模型和 violation 词汇由 `errx` 提供；响应写回由 `resp` 决定
+- 顶层错误模型和 violation 词汇由 `hah` 提供；默认响应写回也由 `hah` 决定
 
 ## 6. 测试基线
 
@@ -215,7 +216,6 @@ limit, err := Query(r, "limit").Int().Get()
 - `Query(r, name)` 会裁剪参数名空白
 - `nil request`
 - 空参数名
-- 零值 builder 与零值 typed builder 直接使用
 - `request.URL == nil` 视为空输入
 - typed builder 命中重复 key 时返回单个 `multiple` violation
 - `Values()` 返回全部解析后值并保留顺序
@@ -230,6 +230,8 @@ limit, err := Query(r, "limit").Int().Get()
 - 重复 `Default(...)` 以后一次为准
 - default 值仍然经过后续校验
 - `Check(nil)` usage error
+- 同类 built-in constraint 重复声明时以后一次为准
+- built-in constraint 总在 `Check(...)` 之前执行
 - `String().MinLen()` / `MaxLen()` 的成功、失败路径
 - 数值类型 `Min()` / `Max()` 的成功、失败路径
 - `Duration()`、`UUID()`、`Time()`、`UnixTime()` 的代表性成功 / 失败路径

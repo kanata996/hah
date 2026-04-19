@@ -1,4 +1,4 @@
-// Package hah 提供默认的根包请求/响应边界入口，聚合 reqx、resp 与 errx 中最常用的一组能力。
+// Package hah 提供默认的根包请求/响应边界入口，聚合 reqx 与内部错误/响应实现中最常用的一组能力。
 //
 // 适合在大多数 handler 中直接使用：
 //   - 核心 request helper：Path、Query
@@ -7,20 +7,20 @@
 //   - 常用 JSON 成功响应辅助
 //   - 统一错误响应写回
 //
-// 当前项目里，Path / Query、BindQuery / BindBody、RequireBody /
-// InvalidRequest 与响应写回 helper 都可以直接从这里使用。
+// 当前项目里，Path / Query、BindQuery / BindBody、InvalidRequest 与响应写回
+// helper 都可以直接从这里使用。
 //
 // 公开 API：
 //   - request helper：Path、Query
 //   - 绑定入口：BindQuery、BindBody
-//   - 请求级规则 helper：RequireBody、InvalidRequest
+//   - 请求级规则 helper：InvalidRequest
 //   - 公共错误模型：Violation、HTTPError、NewHTTPError、NewHTTPErrorWithCause
+//   - 常用错误快捷构造：BadRequest、Unauthorized、Forbidden、NotFound、
+//     MethodNotAllowed、Conflict、UnprocessableEntity、TooManyRequests
 //   - 公开 violation 常量：Code*、In*
 //   - 错误响应入口：WriteError
 //   - 成功响应入口：JSON、OK、Created、NoContent
 //
-// 只有当根包 facade 不满足包边界或导入约束时，才按能力退到对应子包：
-//   - 请求侧入口退到 reqx.xx
-//   - 公共错误模型退到 errx.xx
-//   - 响应写回入口退到 resp.xx
+// 当前根包是默认且唯一的公开错误/响应边界；只有在请求侧需要更细粒度 builder
+// 或绑定入口时，才退到 reqx.xx。
 package hah

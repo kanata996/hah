@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 func TestPathBuilder_Contracts(t *testing.T) {
@@ -62,43 +62,12 @@ func TestPathBuilder_Contracts(t *testing.T) {
 }
 
 func TestPathBuilder_BaselineContracts(t *testing.T) {
-	t.Run("nil request empty name and zero value builders are usage errors", func(t *testing.T) {
+	t.Run("nil request and empty name are usage errors", func(t *testing.T) {
 		_, err := Path(nil, "id").String().Get()
 		assertNotHTTPError(t, err)
 
 		_, err = Path(httptest.NewRequest(http.MethodGet, "/", nil), " ").String().Get()
 		assertNotHTTPError(t, err)
-
-		var builder PathParam
-		_, err = builder.String().Get()
-		assertNotHTTPError(t, err)
-
-		var typed StringParam
-		_, err = typed.Get()
-		assertNotHTTPError(t, err)
-	})
-
-	t.Run("typed nil builders are usage errors", func(t *testing.T) {
-		t.Run("PathParam entrypoints", func(t *testing.T) {
-			testCases := []struct {
-				name string
-				run  func(*PathParam) error
-			}{
-				{name: "String", run: func(p *PathParam) error { _, err := p.String().Get(); return err }},
-				{name: "Int", run: func(p *PathParam) error { _, err := p.Int().Min(1).Get(); return err }},
-				{name: "Int64", run: func(p *PathParam) error { _, err := p.Int64().Max(1).Get(); return err }},
-				{name: "Uint", run: func(p *PathParam) error { _, err := p.Uint().Min(1).Get(); return err }},
-				{name: "Uint64", run: func(p *PathParam) error { _, err := p.Uint64().Max(1).Get(); return err }},
-				{name: "UUID", run: func(p *PathParam) error { _, err := p.UUID().Required().Get(); return err }},
-			}
-
-			for _, tc := range testCases {
-				t.Run(tc.name, func(t *testing.T) {
-					var builder *PathParam
-					assertNotHTTPError(t, tc.run(builder))
-				})
-			}
-		})
 	})
 
 	t.Run("optional missing returns zero and required is idempotent", func(t *testing.T) {

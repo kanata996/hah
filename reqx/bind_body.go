@@ -2,7 +2,6 @@ package reqx
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,11 +10,10 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 const defaultMaxBodyBytes int64 = 1 << 20
-const maxConsecutiveEmptyBodyReads = 100
 
 const (
 	CodeInvalidJSON          = "invalid_json"
@@ -25,19 +23,6 @@ const (
 
 const mimeApplicationJSON = "application/json"
 
-type requestBodyCacheKey struct{}
-
-type requestBodyState struct {
-	loaded bool
-	body   []byte
-	err    error
-}
-
-type replayReadCloser struct {
-	io.Reader
-	io.Closer
-}
-
 func BindBody(r *http.Request, target any) error {
 	if err := validateBindInputs(r, target); err != nil {
 		return err
@@ -46,27 +31,19 @@ func BindBody(r *http.Request, target any) error {
 		return err
 	}
 
-	hasBody, err := requestHasBody(r)
+	body, err := readRequestBody(r)
 	if err != nil {
-		if errors.Is(err, errRequestTooLarge) {
+		if err == errRequestTooLarge {
 			return requestTooLargeError()
 		}
 		return err
 	}
-	if !hasBody {
+	if len(body) == 0 {
 		return nil
 	}
 
 	if mediaType, err := bodyMediaType(r); err != nil || mediaType != mimeApplicationJSON {
 		return unsupportedMediaTypeError()
-	}
-
-	body, err := requestBodyBytes(r)
-	if err != nil {
-		if errors.Is(err, errRequestTooLarge) {
-			return requestTooLargeError()
-		}
-		return err
 	}
 	if !looksLikeJSONObject(body) {
 		return invalidJSONError(nil)
@@ -96,72 +73,6 @@ func validateBindBodyTarget(targetType reflect.Type) error {
 		return usageErrorf("destination must point to struct")
 	}
 	return nil
-}
-
-func requestBodyBytes(r *http.Request) ([]byte, error) {
-	state := requestBodyStateFromRequest(r)
-	if state.loaded {
-		return bytes.Clone(state.body), state.err
-	}
-
-	body, err := readRequestBody(r)
-
-	cachedBody := bytes.Clone(body)
-	state.loaded = true
-	state.body = cachedBody
-	state.err = err
-	if err == nil && r.Body != nil {
-		r.Body = io.NopCloser(bytes.NewReader(cachedBody))
-	}
-	setRequestBodyState(r, state)
-	return bytes.Clone(cachedBody), err
-}
-
-func requestHasBody(r *http.Request) (bool, error) {
-	if r == nil || r.Body == nil {
-		return false, nil
-	}
-
-	state := requestBodyStateFromRequest(r)
-	if state.loaded {
-		return len(state.body) > 0, state.err
-	}
-
-	var prefix [1]byte
-	n, err := readWithProgress(r.Body, prefix[:])
-	if err != nil && err != io.EOF {
-		if n > 0 {
-			r.Body = &replayReadCloser{
-				Reader: io.MultiReader(bytes.NewReader(prefix[:n]), r.Body),
-				Closer: r.Body,
-			}
-		}
-		return false, err
-	}
-
-	if n == 0 {
-		return false, nil
-	}
-
-	r.Body = &replayReadCloser{
-		Reader: io.MultiReader(bytes.NewReader(prefix[:n]), r.Body),
-		Closer: r.Body,
-	}
-	return true, nil
-}
-
-func requestBodyStateFromRequest(r *http.Request) requestBodyState {
-	if r == nil {
-		return requestBodyState{}
-	}
-	if state, ok := r.Context().Value(requestBodyCacheKey{}).(requestBodyState); ok {
-		return state
-	}
-	return requestBodyState{}
-}
-
-func setRequestBodyState(r *http.Request, state requestBodyState) {
-	*r = *r.WithContext(context.WithValue(r.Context(), requestBodyCacheKey{}, state))
 }
 
 func readRequestBody(r *http.Request) ([]byte, error) {
@@ -226,7 +137,7 @@ var errRequestTooLarge = errors.New("reqx: request body too large")
 var errDuplicateContentType = errors.New("reqx: multiple Content-Type values")
 
 func readBody(body io.ReadCloser) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(newProgressReader(body), defaultMaxBodyBytes+1))
+	data, err := io.ReadAll(io.LimitReader(body, defaultMaxBodyBytes+1))
 	if err != nil {
 		return nil, err
 	}
@@ -234,37 +145,4 @@ func readBody(body io.ReadCloser) ([]byte, error) {
 		return nil, errRequestTooLarge
 	}
 	return data, nil
-}
-
-func readWithProgress(r io.Reader, p []byte) (int, error) {
-	progressReader := newProgressReader(r)
-	for {
-		n, err := progressReader.Read(p)
-		if n != 0 || err != nil {
-			return n, err
-		}
-	}
-}
-
-type progressReader struct {
-	reader     io.Reader
-	emptyReads int
-}
-
-func newProgressReader(r io.Reader) *progressReader {
-	return &progressReader{reader: r}
-}
-
-func (r *progressReader) Read(p []byte) (int, error) {
-	n, err := r.reader.Read(p)
-	if n != 0 || err != nil {
-		r.emptyReads = 0
-		return n, err
-	}
-
-	r.emptyReads++
-	if r.emptyReads >= maxConsecutiveEmptyBodyReads {
-		return 0, io.ErrNoProgress
-	}
-	return 0, nil
 }

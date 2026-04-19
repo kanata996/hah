@@ -3,9 +3,9 @@ package hah
 import (
 	"net/http"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
+	"github.com/kanata996/hah/internal/resp"
 	"github.com/kanata996/hah/reqx"
-	"github.com/kanata996/hah/resp"
 )
 
 const (
@@ -52,13 +52,6 @@ func Query(r *http.Request, name string) *reqx.QueryParam {
 	return reqx.Query(r, name)
 }
 
-// RequireBody 按默认 binder 契约要求请求必须显式提交 body。
-//
-// 它可按调用方需要在 BindBody 前后组合使用。
-func RequireBody(r *http.Request) error {
-	return reqx.RequireBody(r)
-}
-
 // InvalidRequest 生成统一的 invalid_request 错误包络。
 func InvalidRequest(violations ...Violation) error {
 	return reqx.InvalidRequest(violations...)
@@ -72,6 +65,46 @@ func NewHTTPError(status int, code, detail string) *HTTPError {
 // NewHTTPErrorWithCause 基于给定 cause 构造公共 HTTP 错误。
 func NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPError {
 	return errx.NewHTTPErrorWithCause(status, code, detail, cause)
+}
+
+// BadRequest 构造 400 Bad Request 公共错误。
+func BadRequest(code, detail string) *HTTPError {
+	return errx.BadRequest(code, detail)
+}
+
+// Unauthorized 构造 401 Unauthorized 公共错误。
+func Unauthorized(code, detail string) *HTTPError {
+	return errx.Unauthorized(code, detail)
+}
+
+// Forbidden 构造 403 Forbidden 公共错误。
+func Forbidden(code, detail string) *HTTPError {
+	return errx.Forbidden(code, detail)
+}
+
+// NotFound 构造 404 Not Found 公共错误。
+func NotFound(code, detail string) *HTTPError {
+	return errx.NotFound(code, detail)
+}
+
+// MethodNotAllowed 构造 405 Method Not Allowed 公共错误。
+func MethodNotAllowed(code, detail string) *HTTPError {
+	return errx.MethodNotAllowed(code, detail)
+}
+
+// Conflict 构造 409 Conflict 公共错误。
+func Conflict(code, detail string) *HTTPError {
+	return errx.Conflict(code, detail)
+}
+
+// UnprocessableEntity 构造 422 Unprocessable Entity 公共错误。
+func UnprocessableEntity(code, detail string) *HTTPError {
+	return errx.UnprocessableEntity(code, detail)
+}
+
+// TooManyRequests 构造 429 Too Many Requests 公共错误。
+func TooManyRequests(code, detail string) *HTTPError {
+	return errx.TooManyRequests(code, detail)
 }
 
 // WriteError 按统一错误对象写回响应。

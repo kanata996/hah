@@ -16,7 +16,6 @@
 | 单字段 path / query 读取并顺手做常见校验 | `hah.Path` / `hah.Query` | 主路径，直接返回 source-aware `required` / `invalid` 错误 |
 | 批量 query DTO 绑定 | `hah.BindQuery` | 适合筛选条件、分页参数、显式 DTO 投影 |
 | 只做 JSON body 绑定 | `hah.BindBody` | 适合 body DTO 解码 |
-| body 是否必须存在 | `hah.RequireBody` | 适合在 body 绑定后显式声明 body-required 契约 |
 | 手写字段级请求违规 | `hah.InvalidRequest` | 适合把业务前的输入错误收敛成统一 `422 invalid_request` |
 | 读取 header | `r.Header.Get(...)` / `r.Header.Values(...)` | header 默认直接走标准库 |
 
@@ -78,6 +77,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 - `Required()`：参数缺失时返回 `required` violation
 - `Default(v)`：参数缺失时使用默认值；与 `Required()` 互斥
 - 常见快捷校验直接链式表达，例如 `Min`、`Max`、`MinLen`、`MaxLen`、`OneOf`、`Match`、`Before`、`After`
+- 同类 built-in constraint 重复声明时以后一次为准；built-in constraint 总在 `Check(...)` 之前执行
 - `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` violation
 - `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
 - `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
@@ -150,7 +150,6 @@ if err := hah.BindBody(r, &body); err != nil {
 
 - 实际读取到零字节 body 时视为 no-op
 - 公开只支持非 `nil` 的 `*struct` DTO target
-- `BindBody(...)` / `RequireBody(...)` 在同一个 request 上可以按任意顺序组合
 - 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
 - 零字节 body 不要求 `Content-Type` 为 JSON
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，只允许前后空白
@@ -161,18 +160,16 @@ if err := hah.BindBody(r, &body); err != nil {
 - 顶层 `null`、array、string、number、boolean 返回 `invalid_json`
 - 同名 JSON object key 跟随标准库 `encoding/json` 语义，后值覆盖前值
 - 截断 JSON / `unexpected EOF` 返回 `invalid_json`
+- body 大小限制在读取阶段先执行；超大 body 返回 `request_too_large`
 - 非 JSON 语义的 body read failure 返回普通 error，不收敛成 `HTTPError`
 - 绑定先解码到临时值；成功后才一次性提交，因此 JSON 里缺失的字段不会继承 DTO 旧值
 - 如果返回错误，DTO 保持调用前状态，不应出现部分更新
 
-`hah.RequireBody(...)` 与 `BindBody(...)` 的组合语义是：
+`hah` 不内建独立的 body-required helper。是否把零字节 body 视为业务错误，由调用方在 `BindBody(...)` 之后自行决定。
 
-- 可以先 `RequireBody(...)` 再 `BindBody(...)`
-- 也可以先 `BindBody(...)` 再决定是否显式要求 body 必填
-- 零字节 body 对 `BindBody(...)` 是 no-op，对 `RequireBody(...)` 视为缺失
-- 仅空白字符 body 对 `RequireBody(...)` 视为存在，但对 `BindBody(...)` 返回 `invalid_json`
-- 顶层 `null` 对 `RequireBody(...)` 视为存在，但对 `BindBody(...)` 返回 `invalid_json`
-- clone / sibling request 不属于默认组合契约；如果要复用同一份 body，请在同一个 request 上组合调用
+- 零字节 body 对 `BindBody(...)` 是 no-op
+- 仅空白字符 body 对 `BindBody(...)` 返回 `invalid_json`
+- 顶层 `null` 对 `BindBody(...)` 返回 `invalid_json`
 
 如果 body 非法，会返回稳定的公开错误，例如：
 
@@ -180,7 +177,7 @@ if err := hah.BindBody(r, &body); err != nil {
 - `unsupported_media_type`
 - `request_too_large`
 
-如果失败来自非 JSON 语义的 body read 过程，例如 wrapped `Body.Read` error、transport I/O 或 `context` cancellation，则返回普通 error，而不是 `*errx.HTTPError`。
+如果失败来自非 JSON 语义的 body read 过程，例如 wrapped `Body.Read` error、transport I/O 或 `context` cancellation，则返回普通 error，而不是 `*hah.HTTPError`。
 
 ### 字段解码范围
 
@@ -195,7 +192,7 @@ if err := hah.BindBody(r, &body); err != nil {
 ## 绑定后的显式校验
 
 `hah` 不预设 DTO 的校验方式。绑定完成后，调用方自己决定下一步是手写校验、接入第三方库，还是映射到应用层命令再校验。
-多数 handler 直接用 `hah.InvalidRequest(...)`、`hah.Violation{...}` 就够了；如果你需要更完整的错误构造器族，再导入 `errx`。
+多数 handler 直接用 `hah.InvalidRequest(...)`、`hah.Violation{...}` 就够了；如果你需要更完整的错误构造器族，或某个更深层已经明确要返回稳定公共 HTTP 错误，继续直接使用根包提供的 `hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)` 等入口即可。
 
 ### 1. 手写校验
 
@@ -204,11 +201,7 @@ type CreateAccountBody struct {
 	Name string `json:"name"`
 }
 
-func validateCreateAccountBody(r *http.Request, body *CreateAccountBody) error {
-	if err := hah.RequireBody(r); err != nil {
-		return err
-	}
-
+func validateCreateAccountBody(body *CreateAccountBody) error {
 	body.Name = strings.TrimSpace(body.Name)
 	if body.Name == "" {
 		return hah.InvalidRequest(hah.Violation{
@@ -232,7 +225,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		_ = hah.WriteError(w, err)
 		return
 	}
-	if err := validateCreateAccountBody(r, &body); err != nil {
+	if err := validateCreateAccountBody(&body); err != nil {
 		_ = hah.WriteError(w, err)
 		return
 	}

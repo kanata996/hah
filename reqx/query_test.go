@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 func TestQueryTypedBuilder_Contracts(t *testing.T) {
@@ -124,16 +124,6 @@ func TestQueryBuilder_UsageContracts(t *testing.T) {
 }
 
 func TestQueryBuilder_BaselineContracts(t *testing.T) {
-	t.Run("zero value builders are usage errors", func(t *testing.T) {
-		var builder QueryParam
-		_, err := builder.String().Get()
-		assertNotHTTPError(t, err)
-
-		var typed StringParam
-		_, err = typed.Get()
-		assertNotHTTPError(t, err)
-	})
-
 	t.Run("query fail open keeps reading requested key", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?bad=%zz&tag=a", nil)
 
@@ -164,76 +154,6 @@ func TestQueryBuilder_BaselineContracts(t *testing.T) {
 		if missing != nil {
 			t.Fatalf("missing values = %#v, want nil", missing)
 		}
-	})
-
-	t.Run("typed nil builders are usage errors", func(t *testing.T) {
-		t.Run("QueryParam entrypoints", func(t *testing.T) {
-			testCases := []struct {
-				name string
-				run  func(*QueryParam) error
-			}{
-				{name: "String", run: func(p *QueryParam) error { _, err := p.String().Get(); return err }},
-				{name: "Int", run: func(p *QueryParam) error { _, err := p.Int().Min(1).Get(); return err }},
-				{name: "Bool", run: func(p *QueryParam) error { _, err := p.Bool().Required().Get(); return err }},
-				{name: "Float64", run: func(p *QueryParam) error { _, err := p.Float64().Max(1).Get(); return err }},
-				{name: "Duration", run: func(p *QueryParam) error { _, err := p.Duration().Min(time.Second).Get(); return err }},
-				{name: "UUID", run: func(p *QueryParam) error { _, err := p.UUID().Required().Get(); return err }},
-				{name: "Time", run: func(p *QueryParam) error { _, err := p.Time().After(time.Time{}).Get(); return err }},
-				{name: "UnixTime", run: func(p *QueryParam) error { _, err := p.UnixTime().Before(time.Now()).Get(); return err }},
-				{name: "Values", run: func(p *QueryParam) error { _, err := p.Values().Required().Get(); return err }},
-			}
-
-			for _, tc := range testCases {
-				t.Run(tc.name, func(t *testing.T) {
-					var builder *QueryParam
-					assertNotHTTPError(t, tc.run(builder))
-				})
-			}
-		})
-
-		t.Run("typed builder families", func(t *testing.T) {
-			testCases := []struct {
-				name string
-				run  func() error
-			}{
-				{name: "StringParam direct Get", run: func() error {
-					var p *StringParam
-					_, err := p.Get()
-					return err
-				}},
-				{name: "StringParam chained methods", run: func() error {
-					var p *StringParam
-					_, err := p.Required().MinLen(1).MaxLen(3).Match(regexp.MustCompile(".")).Get()
-					return err
-				}},
-				{name: "ValueParam chain", run: func() error {
-					var p *ValueParam[bool]
-					_, err := p.Required().Check(func(bool) error { return nil }).Get()
-					return err
-				}},
-				{name: "OrderedParam chain", run: func() error {
-					var p *OrderedParam[int]
-					_, err := p.Min(1).Max(3).Check(func(int) error { return nil }).Get()
-					return err
-				}},
-				{name: "TimeParam chain", run: func() error {
-					var p *TimeParam
-					_, err := p.After(time.Time{}).Before(time.Now()).Check(func(time.Time) error { return nil }).Get()
-					return err
-				}},
-				{name: "MultiParam chain", run: func() error {
-					var p *MultiParam[string]
-					_, err := p.Required().Check(func([]string) error { return nil }).Get()
-					return err
-				}},
-			}
-
-			for _, tc := range testCases {
-				t.Run(tc.name, func(t *testing.T) {
-					assertNotHTTPError(t, tc.run())
-				})
-			}
-		})
 	})
 
 	t.Run("required is idempotent and later default wins", func(t *testing.T) {
@@ -517,6 +437,19 @@ func TestQueryDefaultContracts(t *testing.T) {
 			t.Fatalf("values = %#v, want nil", got)
 		}
 	})
+
+	t.Run("default check failure is usage error", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
+			Default(2).
+			Check(func(v int) error {
+				if v%2 == 0 {
+					return errors.New("want odd default")
+				}
+				return nil
+			}).
+			Get()
+		assertNotHTTPError(t, err)
+	})
 }
 
 func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
@@ -734,78 +667,56 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 	})
 }
 
-func TestQueryBuilder_NamedConstraintOverrideContracts(t *testing.T) {
-	t.Run("later min replaces earlier min", func(t *testing.T) {
-		order := []string{}
+func TestQueryBuilder_BuiltInConstraintsRunBeforeCustomChecks(t *testing.T) {
+	t.Run("later scalar constraint replaces earlier one before custom checks", func(t *testing.T) {
+		checkCalled := false
 
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=2", nil), "page").Int().
-			Min(3).
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?page=1", nil), "page").Int().
+			Min(0).
 			Check(func(int) error {
-				order = append(order, "between")
+				checkCalled = true
 				return nil
 			}).
-			Min(1).
-			Check(func(int) error {
-				order = append(order, "after")
-				return nil
-			}).
+			Min(2).
 			Get()
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		if got != 2 {
-			t.Fatalf("page = %d, want 2", got)
-		}
-		if !reflect.DeepEqual(order, []string{"between", "after"}) {
-			t.Fatalf("order = %#v, want []string{\"between\", \"after\"}", order)
+		assertInvalidViolationAt(t, err, "page", errx.InQuery)
+		if checkCalled {
+			t.Fatal("Check() ran after built-in min rejection")
 		}
 	})
 
-	t.Run("later max len keeps its last declaration position", func(t *testing.T) {
-		order := []string{}
+	t.Run("later string constraint replaces earlier one before custom checks", func(t *testing.T) {
+		checkCalled := false
 
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?mode=go", nil), "mode").String().
 			MaxLen(2).
 			Check(func(string) error {
-				order = append(order, "between")
+				checkCalled = true
 				return nil
 			}).
 			MaxLen(1).
-			Check(func(string) error {
-				order = append(order, "after")
-				return nil
-			}).
 			Get()
 		assertInvalidViolationAt(t, err, "mode", errx.InQuery)
-		if !reflect.DeepEqual(order, []string{"between"}) {
-			t.Fatalf("order = %#v, want []string{\"between\"}", order)
+		if checkCalled {
+			t.Fatal("Check() ran after built-in max length rejection")
 		}
 	})
 
-	t.Run("later after replaces earlier after", func(t *testing.T) {
+	t.Run("later time constraint replaces earlier one before custom checks", func(t *testing.T) {
 		boundary := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
-		order := []string{}
+		checkCalled := false
 
-		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?at=2026-04-13T10:30:00Z", nil), "at").Time().
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?at=2026-04-13T10:30:00Z", nil), "at").Time().
+			After(boundary.Add(-time.Hour)).
+			Check(func(time.Time) error {
+				checkCalled = true
+				return nil
+			}).
 			After(boundary.Add(time.Hour)).
-			Check(func(time.Time) error {
-				order = append(order, "between")
-				return nil
-			}).
-			After(boundary).
-			Check(func(time.Time) error {
-				order = append(order, "after")
-				return nil
-			}).
 			Get()
-		if err != nil {
-			t.Fatalf("Get() error = %v", err)
-		}
-		if got.UTC().Format(time.RFC3339) != "2026-04-13T10:30:00Z" {
-			t.Fatalf("time = %q, want 2026-04-13T10:30:00Z", got.UTC().Format(time.RFC3339))
-		}
-		if !reflect.DeepEqual(order, []string{"between", "after"}) {
-			t.Fatalf("order = %#v, want []string{\"between\", \"after\"}", order)
+		assertInvalidViolationAt(t, err, "at", errx.InQuery)
+		if checkCalled {
+			t.Fatal("Check() ran after built-in time rejection")
 		}
 	})
 }

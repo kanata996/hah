@@ -13,6 +13,21 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-04-20
+
+### Breaking
+
+- Moved `errx` and `resp` under `internal/`, making `hah` the default public error/response boundary. Callers should now use `hah.HTTPError`, `hah.Violation`, `hah.WriteError(...)`, `hah.JSON(...)`, and the root-package HTTP error helpers instead of importing `hah/errx` or `hah/resp`.
+- Removed `hah.RequireBody(...)` / `reqx.RequireBody(...)` from the public API. `BindBody(...)` keeps its zero-byte-body no-op behavior; callers that want to reject an empty body should now express that rule in their own post-bind validation.
+
+### Changed
+
+- Expanded the root `hah` facade to expose the common HTTP error helper constructors `BadRequest(...)`, `Unauthorized(...)`, `Forbidden(...)`, `NotFound(...)`, `MethodNotAllowed(...)`, `Conflict(...)`, `UnprocessableEntity(...)`, and `TooManyRequests(...)`, while keeping `Code*` / `In*` constants public without re-exporting the internal `ViolationCode` / `ViolationIn` types.
+
+### Documentation
+
+- Refreshed `README.md`, `REQUESTS.md`, package docs, examples, and the request/response design docs to reflect the new root-only public error/response surface and the internalization of `errx` / `resp`.
+
 ## [v0.6.4] - 2026-04-19
 
 ### Changed

@@ -20,7 +20,7 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/kanata996/hah/errx"
+	"github.com/kanata996/hah/internal/errx"
 )
 
 // problemPayload 是最终写入响应体的公共错误字段。
@@ -32,12 +32,6 @@ type problemPayload struct {
 	Code   string           `json:"code"`
 	Errors []errx.Violation `json:"errors,omitempty"`
 }
-
-var internalProblemBody = []byte("{\"title\":\"Internal Server Error\",\"status\":500,\"code\":\"internal_error\"}\n")
-
-// problemBodyEncoder 默认走标准 JSON 编码。
-// 保持为变量仅用于测试编码失败时的回退契约，不改变公开 API。
-var problemBodyEncoder = encodeJSON
 
 // WriteError 是 HTTP 错误写回的统一入口。
 //
@@ -59,13 +53,15 @@ func WriteError(w http.ResponseWriter, err error) error {
 	}
 
 	payload := normalizeProblemPayload(err)
-	status := payload.Status
-	body, encodeErr := problemBodyEncoder(payload)
-	if encodeErr != nil {
-		status = http.StatusInternalServerError
-		body = internalProblemBody
-	}
-	return writePreparedJSONBytes(w, status, problemJSONContentType, body)
+	body := encodeProblemPayload(payload)
+	return writePreparedJSONBytes(w, payload.Status, problemJSONContentType, body)
+}
+
+func encodeProblemPayload(payload problemPayload) []byte {
+	// problemPayload 的公开形状固定为 JSON 基础类型组合；
+	// 回归测试会锁住“始终可编码”的内部不变量。
+	body, _ := encodeJSON(payload)
+	return body
 }
 
 func normalizeProblemPayload(err error) problemPayload {

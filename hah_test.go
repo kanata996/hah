@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,36 +11,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/errx"
 )
 
 // 测试清单：
 // [✓] 根包 facade 会把 reqx / resp 的核心能力稳定透传出来
 // [✓] 根包 facade 会把 resp 的成功响应与错误响应 helper 稳定透传出来
 // [✓] 根包 facade 公开常用绑定入口：BindBody、BindQuery
-// [✓] 根包 facade 继续暴露 body-required helper 与统一错误响应写回
+// [✓] 根包 facade 继续暴露统一错误响应写回与 invalid_request helper
 
 type rootPayloadMap map[string]any
 
-type partialReadErrorCloser struct {
-	done bool
-	err  error
-}
-
-func (r *partialReadErrorCloser) Read(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	if r.done {
-		return 0, io.EOF
-	}
-	r.done = true
-	p[0] = '{'
-	return 1, r.err
-}
-
-func (r *partialReadErrorCloser) Close() error {
-	return nil
+type decodedRootViolation struct {
+	Field  string
+	In     string
+	Code   string
+	Detail string
 }
 
 // BindBody 只从 JSON body 绑定数据。
@@ -116,17 +100,6 @@ func TestQuery_ValuesDelegatesToReqx(t *testing.T) {
 	}
 }
 
-// RequireBody 会通过根包 facade 暴露 reqx 的 body-required 规则 helper。
-func TestRequireBody_DelegatesToReqx(t *testing.T) {
-	req := newJSONRequest(http.MethodPost, "/accounts", "")
-	req.ContentLength = -1
-
-	violation := assertSingleRootViolation(t, RequireBody(req))
-	if violation.Field != "body" || violation.In != errx.InBody || violation.Code != errx.CodeRequired || violation.Detail != "is required" {
-		t.Fatalf("violation = %#v", violation)
-	}
-}
-
 // InvalidRequest 会通过根包 facade 暴露统一的 invalid_request 错误构造。
 func TestInvalidRequest_DelegatesToReqx(t *testing.T) {
 	violation := assertSingleRootViolation(t, InvalidRequest(Violation{
@@ -135,7 +108,7 @@ func TestInvalidRequest_DelegatesToReqx(t *testing.T) {
 		Code:  CodeRequired,
 	}))
 
-	if violation.Field != "name" || violation.In != InBody || violation.Code != CodeRequired || violation.Detail != "is required" {
+	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Detail != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -162,7 +135,7 @@ func TestNewHTTPError_DelegatesToErrx(t *testing.T) {
 	}
 
 	violation := assertSingleRootViolation(t, err)
-	if violation.Field != "name" || violation.In != InBody || violation.Code != CodeInvalid || violation.Detail != "is invalid" {
+	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeInvalid) || violation.Detail != "is invalid" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -186,25 +159,60 @@ func TestNewHTTPErrorWithCause_DelegatesToErrx(t *testing.T) {
 	}
 }
 
-// 同一请求先经过 body-required 探测，再进入 body 绑定时，底层短读错误不能被后续探测掩盖。
-func TestRequireBodyThenBindBody_PreservesShortReadError(t *testing.T) {
-	wantErr := errors.New("short read")
-	req := newJSONRequest(http.MethodPost, "/accounts", "")
-	req.Body = &partialReadErrorCloser{err: wantErr}
-	req.ContentLength = -1
+// 根包也会直接暴露常用 HTTP 错误快捷构造器与 violation 常量。
+func TestRootErrorHelpersExposePublicViolationSurface(t *testing.T) {
+	err := UnprocessableEntity("invalid_account", "account is invalid").WithViolations([]Violation{
+		{
+			Field:  "name",
+			In:     InBody,
+			Code:   CodeRequired,
+			Detail: "is required",
+		},
+	})
 
-	if err := RequireBody(req); !errors.Is(err, wantErr) {
-		t.Fatalf("RequireBody() error = %v, want %v", err, wantErr)
+	if got := err.Status(); got != http.StatusUnprocessableEntity {
+		t.Fatalf("Status() = %d, want %d", got, http.StatusUnprocessableEntity)
+	}
+	if got := err.Code(); got != "invalid_account" {
+		t.Fatalf("Code() = %q, want invalid_account", got)
 	}
 
-	dst := struct {
-		Name string `json:"name"`
-	}{Name: "existing"}
-	if err := BindBody(req, &dst); !errors.Is(err, wantErr) {
-		t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+	violation := assertSingleRootViolation(t, err)
+	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Detail != "is required" {
+		t.Fatalf("violation = %#v", violation)
 	}
-	if dst.Name != "existing" {
-		t.Fatalf("name = %q, want existing value preserved on read error", dst.Name)
+}
+
+func TestRootErrorHelpers_CommonStatuses(t *testing.T) {
+	tests := []struct {
+		name       string
+		build      func(code, detail string) *HTTPError
+		wantStatus int
+	}{
+		{name: "bad request", build: BadRequest, wantStatus: http.StatusBadRequest},
+		{name: "unauthorized", build: Unauthorized, wantStatus: http.StatusUnauthorized},
+		{name: "forbidden", build: Forbidden, wantStatus: http.StatusForbidden},
+		{name: "not found", build: NotFound, wantStatus: http.StatusNotFound},
+		{name: "method not allowed", build: MethodNotAllowed, wantStatus: http.StatusMethodNotAllowed},
+		{name: "conflict", build: Conflict, wantStatus: http.StatusConflict},
+		{name: "unprocessable entity", build: UnprocessableEntity, wantStatus: http.StatusUnprocessableEntity},
+		{name: "too many requests", build: TooManyRequests, wantStatus: http.StatusTooManyRequests},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.build("custom_code", "custom detail")
+
+			if got := err.Status(); got != tt.wantStatus {
+				t.Fatalf("Status() = %d, want %d", got, tt.wantStatus)
+			}
+			if got := err.Code(); got != "custom_code" {
+				t.Fatalf("Code() = %q, want custom_code", got)
+			}
+			if got := err.Detail(); got != "custom detail" {
+				t.Fatalf("Detail() = %q, want custom detail", got)
+			}
+		})
 	}
 }
 
@@ -319,7 +327,7 @@ func decodeRootPayload(t *testing.T, body []byte) rootPayloadMap {
 	return payload
 }
 
-func assertSingleRootViolation(t *testing.T, err error) Violation {
+func assertSingleRootViolation(t *testing.T, err error) decodedRootViolation {
 	t.Helper()
 
 	payload := decodeRootPayload(t, mustWriteRootError(t, err))
@@ -333,10 +341,10 @@ func assertSingleRootViolation(t *testing.T, err error) Violation {
 		t.Fatalf("violation type = %T, want map[string]any", errorsValue[0])
 	}
 
-	return Violation{
+	return decodedRootViolation{
 		Field:  stringValue(violationMap["field"]),
-		In:     errx.ViolationIn(stringValue(violationMap["in"])),
-		Code:   errx.ViolationCode(stringValue(violationMap["code"])),
+		In:     stringValue(violationMap["in"]),
+		Code:   stringValue(violationMap["code"]),
 		Detail: stringValue(violationMap["detail"]),
 	}
 }
