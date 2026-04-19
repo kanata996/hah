@@ -13,6 +13,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-04-20
+
 ### Breaking
 
 - Moved `errx` and `resp` under `internal/`, making `hah` the default public error/response boundary. Callers should now use `hah.HTTPError`, `hah.Violation`, `hah.WriteError(...)`, `hah.JSON(...)`, and the root-package HTTP error helpers instead of importing `hah/errx` or `hah/resp`.
