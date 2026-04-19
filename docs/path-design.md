@@ -1,8 +1,8 @@
 # hah Path 设计方案
 
 - 状态：Locked
-- 版本：v6
-- 锁定日期：2026-04-19
+- 版本：v7
+- 锁定日期：2026-04-20
 - 适用范围：
   - `hah.Path(...)`
   - `reqx.Path(...)`
@@ -61,7 +61,7 @@
 - `name` 会先做 `strings.TrimSpace`
 - `r == nil` 不是构造期 panic，而是在 `Get()` 时返回普通 usage error
 - `name` 为空字符串时，在 `Get()` 时返回普通 usage error
-- 零值 builder 不是合法公开入口，`Get()` 时返回普通 usage error
+- builder 必须通过 `Path(...)` 创建；零值 builder 和 typed-nil builder 不属于公开契约
 
 ### 3.2 支持类型表
 
@@ -96,6 +96,8 @@
 - 未声明 `Required()` 且参数缺失时，若未配置 `Default(...)`，直接返回类型零值
 - 参数缺失且命中 `Default(v)` 时，以默认值进入后续约束与 `Check(...)`
 - 默认值仍然要经过后续全部约束与 `Check(...)`
+- 同类 built-in constraint 重复声明时，后一条覆盖前一条
+- built-in constraint 总在 `Check(...)` 之前执行，不跟随链式声明顺序重排
 - `Check(nil)` 返回普通 usage error
 - builder 一旦记录 usage error，后续链式调用不会清除该状态
 - `Get()` 返回首次记录的 usage error
@@ -124,7 +126,6 @@
 
 - `Path(nil, name)`
 - 参数名为空
-- 零值 builder 直接使用
 - 非法约束配置
 - 配置的 `Default(...)` 未通过后续约束或 `Check(...)`
 
@@ -162,8 +163,9 @@
 - `Path(r, name)` 会裁剪参数名空白
 - `nil request`
 - 空参数名
-- 零值 builder 与零值 typed builder 直接使用
 - 缺失 optional 返回各类型零值
+- 同类 built-in constraint 重复声明时以后一次为准
+- built-in constraint 总在 `Check(...)` 之前执行
 - `UUID()` 的代表性成功 / 失败路径
 - `request.PathValue(name)` 非空时被原样消费
 - `request.PathValue(name)` 为空字符串时按缺失处理

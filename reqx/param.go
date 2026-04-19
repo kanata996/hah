@@ -12,8 +12,7 @@ var errInvalidParamValue = errors.New("invalid param value")
 type paramLookupFunc func(r *http.Request, name string) ([]string, bool)
 
 type paramCheck[T any] struct {
-	name string
-	fn   func(T) error
+	fn func(T) error
 }
 
 type paramSpec struct {
@@ -108,26 +107,40 @@ func (p *paramValue[T]) addCheck(check func(T) error) {
 	p.checks = append(p.checks, paramCheck[T]{fn: check})
 }
 
-func (p *paramValue[T]) setNamedCheck(name string, check func(T) error) {
-	filtered := p.checks[:0]
-	for _, existing := range p.checks {
-		if existing.name == name {
-			continue
+func (p *paramValue[T]) validateDefault(value T, validateBuiltins func(T) error) error {
+	if validateBuiltins != nil {
+		if err := validateBuiltins(value); err != nil {
+			return usageErrorf("default value failed validation")
 		}
-		filtered = append(filtered, existing)
 	}
-	p.checks = append(filtered, paramCheck[T]{
-		name: name,
-		fn:   check,
-	})
+	for _, check := range p.checks {
+		if err := check.fn(value); err != nil {
+			return usageErrorf("default value failed validation")
+		}
+	}
+	return nil
 }
 
-func (p *paramValue[T]) resolveMissing() (T, error) {
+func (p *paramValue[T]) validateRequest(value T, validateBuiltins func(T) error) error {
+	if validateBuiltins != nil {
+		if err := validateBuiltins(value); err != nil {
+			return InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
+		}
+	}
+	for _, check := range p.checks {
+		if err := check.fn(value); err != nil {
+			return InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
+		}
+	}
+	return nil
+}
+
+func (p *paramValue[T]) resolveMissing(validateBuiltins func(T) error) (T, error) {
 	var zero T
 	switch {
 	case p.hasDefault:
 		value := p.cloneValue(p.defaultValue)
-		if err := p.runDefaultChecks(value); err != nil {
+		if err := p.validateDefault(value, validateBuiltins); err != nil {
 			return zero, err
 		}
 		return value, nil
@@ -138,25 +151,7 @@ func (p *paramValue[T]) resolveMissing() (T, error) {
 	}
 }
 
-func (p *paramValue[T]) runDefaultChecks(value T) error {
-	for _, check := range p.checks {
-		if err := check.fn(value); err != nil {
-			return usageErrorf("default value failed validation")
-		}
-	}
-	return nil
-}
-
-func (p *paramValue[T]) runRequestChecks(value T) (T, error) {
-	for _, check := range p.checks {
-		if err := check.fn(value); err != nil {
-			return value, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
-		}
-	}
-	return value, nil
-}
-
-func (p *paramValue[T]) resolve() (T, error) {
+func (p *paramValue[T]) resolve(validateBuiltins func(T) error) (T, error) {
 	var zero T
 	if p.usageErr != nil {
 		return zero, p.usageErr
@@ -167,7 +162,7 @@ func (p *paramValue[T]) resolve() (T, error) {
 		return zero, err
 	}
 	if !exists || len(values) == 0 {
-		return p.resolveMissing()
+		return p.resolveMissing(validateBuiltins)
 	}
 	if !p.allowMultiple && len(values) > 1 {
 		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeMultiple, ""))
@@ -177,6 +172,8 @@ func (p *paramValue[T]) resolve() (T, error) {
 	if err != nil {
 		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
 	}
-
-	return p.runRequestChecks(value)
+	if err := p.validateRequest(value, validateBuiltins); err != nil {
+		return zero, err
+	}
+	return value, nil
 }

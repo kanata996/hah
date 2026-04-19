@@ -77,6 +77,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 - `Required()`：参数缺失时返回 `required` violation
 - `Default(v)`：参数缺失时使用默认值；与 `Required()` 互斥
 - 常见快捷校验直接链式表达，例如 `Min`、`Max`、`MinLen`、`MaxLen`、`OneOf`、`Match`、`Before`、`After`
+- 同类 built-in constraint 重复声明时以后一次为准；built-in constraint 总在 `Check(...)` 之前执行
 - `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` violation
 - `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
 - `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
@@ -159,6 +160,7 @@ if err := hah.BindBody(r, &body); err != nil {
 - 顶层 `null`、array、string、number、boolean 返回 `invalid_json`
 - 同名 JSON object key 跟随标准库 `encoding/json` 语义，后值覆盖前值
 - 截断 JSON / `unexpected EOF` 返回 `invalid_json`
+- body 大小限制在读取阶段先执行；超大 body 返回 `request_too_large`
 - 非 JSON 语义的 body read failure 返回普通 error，不收敛成 `HTTPError`
 - 绑定先解码到临时值；成功后才一次性提交，因此 JSON 里缺失的字段不会继承 DTO 旧值
 - 如果返回错误，DTO 保持调用前状态，不应出现部分更新

@@ -1,8 +1,8 @@
 # hah BindBody 设计方案
 
 - 状态：Locked
-- 版本：v10
-- 锁定日期：2026-04-19
+- 版本：v11
+- 锁定日期：2026-04-20
 - 适用范围：
   - `hah.BindBody(...)`
   - `reqx.BindBody(...)`
@@ -21,12 +21,11 @@
 `BindBody(...)` 是面向 JSON API 的默认 body binder。
 它提供一条直接、稳定的 body 处理路径：
 
-1. 先探测当前 request 是否显式提交了 body
+1. 先读取当前 request body，并执行大小限制
 2. 对零字节 body 提前 no-op
-3. 对非空 body 先校验媒体类型
-4. 对非空 body 读取字节并执行大小限制
-5. 用标准库 `encoding/json` 解码到临时 DTO
-6. 成功后一次性提交到 target
+3. 对非空 body 校验媒体类型
+4. 用标准库 `encoding/json` 解码到临时 DTO
+5. 成功后一次性提交到 target
 
 这套设计的重点是：
 
@@ -102,7 +101,7 @@ body 存在性的规则固定为：
 - 该 `Content-Type` 的主媒体类型必须是 `application/json`
 - `charset=utf-8` 之类的媒体类型参数不影响匹配
 - 默认大小限制为 `1 MiB` 原始字节
-- 若同时命中错误媒体类型与超大 body，返回 `415 unsupported_media_type`
+- 大小限制在读取 body 时先执行；若 body 超过限制，返回 `413 request_too_large`
 - 顶层值必须是单个 JSON object
 - 文档前后允许空白
 - 未知字段默认拒绝
@@ -179,7 +178,7 @@ body 存在性的规则固定为：
 - 重复 `Content-Type` 返回 `415 unsupported_media_type`
 - 非空非 JSON `Content-Type` 返回 `415 unsupported_media_type`
 - 大于 `1 MiB` 的 body 返回 `413 request_too_large`
-- 非空非 JSON `Content-Type` 与超大 body 同时出现时，优先返回 `415 unsupported_media_type`
+- 非空非 JSON `Content-Type` 与超大 body 同时出现时，优先返回 `413 request_too_large`
 - 恰好 `1 MiB` 的 body 仍允许进入 JSON 解码
 - 空白 body、顶层 `null`、array、string、number、boolean 返回 `400 invalid_json`
 - 截断 JSON、尾随数据、多个 top-level 值返回 `400 invalid_json`

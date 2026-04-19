@@ -161,6 +161,7 @@ DTO binding 与显式规则：
 - `hah.BindBody(...)` 公开只支持非 `nil` 的 `*struct` DTO target
 - 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
 - 零字节 body 不要求 `Content-Type` 为 JSON
+- body 大小限制在读取阶段先执行；超大 body 返回稳定 `request_too_large`
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，未知字段默认拒绝
 - struct 字段解码直接跟随标准库 `encoding/json`；像 `json.RawMessage`、自定义 `UnmarshalJSON` / `UnmarshalText` 类型默认允许
 - 绑定先解到临时值，成功后才一次性提交，因此失败不会污染 target

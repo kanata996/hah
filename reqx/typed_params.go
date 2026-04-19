@@ -33,29 +33,10 @@ func newMultiParam[T any](spec paramSpec, parse func([]string) []T) *MultiParam[
 	}
 }
 
-func ensureBuilder[P any](p *P) *P {
-	if p == nil {
-		return new(P)
-	}
-	return p
-}
-
-type rangeConstraint int
-
-const (
-	rangeConstraintMin rangeConstraint = iota + 1
-	rangeConstraintMax
-	rangeConstraintAfter
-	rangeConstraintBefore
-	rangeConstraintMinLen
-	rangeConstraintMaxLen
-)
-
 type orderedRangeParam[T cmp.Ordered] struct {
-	value          paramValue[T]
-	min            *T
-	max            *T
-	lastConstraint rangeConstraint
+	value paramValue[T]
+	min   *T
+	max   *T
 }
 
 func newOrderedRangeParam[T cmp.Ordered](spec paramSpec, parse func(string) (T, error)) orderedRangeParam[T] {
@@ -82,47 +63,38 @@ func (p *orderedRangeParam[T]) resolve() (T, error) {
 	if err := p.constraintUsageErr(); err != nil {
 		return zero, err
 	}
-	return p.value.resolve()
+	return p.value.resolve(p.validateBuiltins)
 }
 
 func (p *orderedRangeParam[T]) setMin(value T) {
 	p.min = &value
-	p.lastConstraint = rangeConstraintMin
-	p.value.setNamedCheck("min", func(v T) error {
-		if v < value {
-			return errInvalidParamValue
-		}
-		return nil
-	})
 }
 
 func (p *orderedRangeParam[T]) setMax(value T) {
 	p.max = &value
-	p.lastConstraint = rangeConstraintMax
-	p.value.setNamedCheck("max", func(v T) error {
-		if v > value {
-			return errInvalidParamValue
-		}
-		return nil
-	})
+}
+
+func (p *orderedRangeParam[T]) validateBuiltins(value T) error {
+	if p.min != nil && value < *p.min {
+		return errInvalidParamValue
+	}
+	if p.max != nil && value > *p.max {
+		return errInvalidParamValue
+	}
+	return nil
 }
 
 func (p *orderedRangeParam[T]) constraintUsageErr() error {
 	if p.min == nil || p.max == nil || *p.min <= *p.max {
 		return nil
 	}
-
-	if p.lastConstraint == rangeConstraintMin {
-		return usageErrorf("minimum must be less than or equal to maximum")
-	}
-	return usageErrorf("maximum must be greater than or equal to minimum")
+	return usageErrorf("minimum must be less than or equal to maximum")
 }
 
 type timeRangeParam struct {
-	value          paramValue[time.Time]
-	after          *time.Time
-	before         *time.Time
-	lastConstraint rangeConstraint
+	value  paramValue[time.Time]
+	after  *time.Time
+	before *time.Time
 }
 
 func newTimeRangeParam(spec paramSpec, parse func(string) (time.Time, error)) timeRangeParam {
@@ -148,40 +120,32 @@ func (p *timeRangeParam) resolve() (time.Time, error) {
 	if err := p.constraintUsageErr(); err != nil {
 		return time.Time{}, err
 	}
-	return p.value.resolve()
+	return p.value.resolve(p.validateBuiltins)
 }
 
 func (p *timeRangeParam) setAfter(value time.Time) {
 	p.after = &value
-	p.lastConstraint = rangeConstraintAfter
-	p.value.setNamedCheck("after", func(v time.Time) error {
-		if !v.After(value) {
-			return errInvalidParamValue
-		}
-		return nil
-	})
 }
 
 func (p *timeRangeParam) setBefore(value time.Time) {
 	p.before = &value
-	p.lastConstraint = rangeConstraintBefore
-	p.value.setNamedCheck("before", func(v time.Time) error {
-		if !v.Before(value) {
-			return errInvalidParamValue
-		}
-		return nil
-	})
+}
+
+func (p *timeRangeParam) validateBuiltins(value time.Time) error {
+	if p.after != nil && !value.After(*p.after) {
+		return errInvalidParamValue
+	}
+	if p.before != nil && !value.Before(*p.before) {
+		return errInvalidParamValue
+	}
+	return nil
 }
 
 func (p *timeRangeParam) constraintUsageErr() error {
 	if p.after == nil || p.before == nil || p.after.Before(*p.before) {
 		return nil
 	}
-
-	if p.lastConstraint == rangeConstraintAfter {
-		return usageErrorf("after time must be earlier than before time")
-	}
-	return usageErrorf("before time must be later than after time")
+	return usageErrorf("after time must be earlier than before time")
 }
 
 // ValueParam 读取并校验通用单值参数。
@@ -196,10 +160,11 @@ type OrderedParam[T cmp.Ordered] struct {
 
 // StringParam 读取并校验 string 参数。
 type StringParam struct {
-	value          paramValue[string]
-	minLen         *int
-	maxLen         *int
-	lastConstraint rangeConstraint
+	value  paramValue[string]
+	minLen *int
+	maxLen *int
+	oneOf  map[string]struct{}
+	match  *regexp.Regexp
 }
 
 // TimeParam 读取并校验 time.Time 参数。
@@ -213,111 +178,82 @@ type MultiParam[T any] struct {
 }
 
 func (p *ValueParam[T]) Required() *ValueParam[T] {
-	p = ensureBuilder(p)
 	p.value.setRequired()
 	return p
 }
 
 func (p *ValueParam[T]) Default(value T) *ValueParam[T] {
-	p = ensureBuilder(p)
 	p.value.setDefault(value)
 	return p
 }
 
 func (p *ValueParam[T]) Check(check func(T) error) *ValueParam[T] {
-	p = ensureBuilder(p)
 	p.value.addCheck(check)
 	return p
 }
 
 func (p *ValueParam[T]) Get() (T, error) {
-	p = ensureBuilder(p)
-	return p.value.resolve()
+	return p.value.resolve(nil)
 }
 
 func (p *OrderedParam[T]) Required() *OrderedParam[T] {
-	p = ensureBuilder(p)
 	p.value.setRequired()
 	return p
 }
 
 func (p *OrderedParam[T]) Default(value T) *OrderedParam[T] {
-	p = ensureBuilder(p)
 	p.value.setDefault(value)
 	return p
 }
 
 func (p *OrderedParam[T]) Min(value T) *OrderedParam[T] {
-	p = ensureBuilder(p)
 	p.value.setMin(value)
 	return p
 }
 
 func (p *OrderedParam[T]) Max(value T) *OrderedParam[T] {
-	p = ensureBuilder(p)
 	p.value.setMax(value)
 	return p
 }
 
 func (p *OrderedParam[T]) Check(check func(T) error) *OrderedParam[T] {
-	p = ensureBuilder(p)
 	p.value.addCheck(check)
 	return p
 }
 
 func (p *OrderedParam[T]) Get() (T, error) {
-	p = ensureBuilder(p)
 	return p.value.resolve()
 }
 
 func (p *StringParam) Required() *StringParam {
-	p = ensureBuilder(p)
 	p.value.setRequired()
 	return p
 }
 
 func (p *StringParam) Default(value string) *StringParam {
-	p = ensureBuilder(p)
 	p.value.setDefault(value)
 	return p
 }
 
 func (p *StringParam) MinLen(n int) *StringParam {
-	p = ensureBuilder(p)
 	if n < 0 {
 		p.value.setUsageErr(usageErrorf("minimum length must be >= 0"))
 		return p
 	}
 	p.minLen = &n
-	p.lastConstraint = rangeConstraintMinLen
-	p.value.setNamedCheck("min_length", func(value string) error {
-		if utf8.RuneCountInString(value) < n {
-			return errInvalidParamValue
-		}
-		return nil
-	})
 	return p
 }
 
 func (p *StringParam) MaxLen(n int) *StringParam {
-	p = ensureBuilder(p)
 	if n < 0 {
 		p.value.setUsageErr(usageErrorf("maximum length must be >= 0"))
 		return p
 	}
 	p.maxLen = &n
-	p.lastConstraint = rangeConstraintMaxLen
-	p.value.setNamedCheck("max_length", func(value string) error {
-		if utf8.RuneCountInString(value) > n {
-			return errInvalidParamValue
-		}
-		return nil
-	})
 	return p
 }
 
 func (p *StringParam) OneOf(values ...string) *StringParam {
-	p = ensureBuilder(p)
 	if len(values) == 0 {
 		p.value.setUsageErr(usageErrorf("one-of values must not be empty"))
 		return p
@@ -326,114 +262,108 @@ func (p *StringParam) OneOf(values ...string) *StringParam {
 	for _, value := range values {
 		allowed[value] = struct{}{}
 	}
-	p.value.addCheck(func(value string) error {
-		if _, ok := allowed[value]; !ok {
-			return errInvalidParamValue
-		}
-		return nil
-	})
+	p.oneOf = allowed
 	return p
 }
 
 func (p *StringParam) Match(pattern *regexp.Regexp) *StringParam {
-	p = ensureBuilder(p)
 	if pattern == nil {
 		p.value.setUsageErr(usageErrorf("match pattern must not be nil"))
 		return p
 	}
-	p.value.addCheck(func(value string) error {
-		if !pattern.MatchString(value) {
-			return errInvalidParamValue
-		}
-		return nil
-	})
+	p.match = pattern
 	return p
 }
 
 func (p *StringParam) Check(check func(string) error) *StringParam {
-	p = ensureBuilder(p)
 	p.value.addCheck(check)
 	return p
 }
 
 func (p *StringParam) Get() (string, error) {
-	p = ensureBuilder(p)
 	if p.value.usageErr != nil {
 		return "", p.value.usageErr
 	}
 	if err := p.constraintUsageErr(); err != nil {
 		return "", err
 	}
-	return p.value.resolve()
+	return p.value.resolve(p.validateBuiltins)
+}
+
+func (p *StringParam) validateBuiltins(value string) error {
+	if p.minLen != nil || p.maxLen != nil {
+		length := utf8.RuneCountInString(value)
+		if p.minLen != nil && length < *p.minLen {
+			return errInvalidParamValue
+		}
+		if p.maxLen != nil && length > *p.maxLen {
+			return errInvalidParamValue
+		}
+	}
+	if p.oneOf != nil {
+		if _, ok := p.oneOf[value]; !ok {
+			return errInvalidParamValue
+		}
+	}
+	if p.match != nil && !p.match.MatchString(value) {
+		return errInvalidParamValue
+	}
+	return nil
 }
 
 func (p *StringParam) constraintUsageErr() error {
 	if p.minLen == nil || p.maxLen == nil || *p.minLen <= *p.maxLen {
 		return nil
 	}
-
-	if p.lastConstraint == rangeConstraintMinLen {
-		return usageErrorf("minimum length must be less than or equal to maximum length")
-	}
-	return usageErrorf("maximum length must be greater than or equal to minimum length")
+	return usageErrorf("minimum length must be less than or equal to maximum length")
 }
 
 func (p *TimeParam) Required() *TimeParam {
-	p = ensureBuilder(p)
 	p.value.setRequired()
 	return p
 }
 
 func (p *TimeParam) Default(value time.Time) *TimeParam {
-	p = ensureBuilder(p)
 	p.value.setDefault(value)
 	return p
 }
 
 func (p *TimeParam) After(value time.Time) *TimeParam {
-	p = ensureBuilder(p)
 	p.value.setAfter(value)
 	return p
 }
 
 func (p *TimeParam) Before(value time.Time) *TimeParam {
-	p = ensureBuilder(p)
 	p.value.setBefore(value)
 	return p
 }
 
 func (p *TimeParam) Check(check func(time.Time) error) *TimeParam {
-	p = ensureBuilder(p)
 	p.value.addCheck(check)
 	return p
 }
 
 func (p *TimeParam) Get() (time.Time, error) {
-	p = ensureBuilder(p)
 	return p.value.resolve()
 }
 
 func (p *MultiParam[T]) Required() *MultiParam[T] {
-	p = ensureBuilder(p)
 	p.value.setRequired()
 	return p
 }
 
 func (p *MultiParam[T]) Default(value []T) *MultiParam[T] {
-	p = ensureBuilder(p)
 	p.value.setDefault(value)
 	return p
 }
 
 func (p *MultiParam[T]) Check(check func([]T) error) *MultiParam[T] {
-	p = ensureBuilder(p)
 	p.value.addCheck(check)
 	return p
 }
 
 func (p *MultiParam[T]) Get() ([]T, error) {
-	p = ensureBuilder(p)
-	return p.value.resolve()
+	return p.value.resolve(nil)
 }
 
 func parseStringValue(value string) (string, error) {
