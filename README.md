@@ -129,7 +129,7 @@ func main() {
 请求输入：
 
 - `hah.Path(...)` 面向 path segment 中的资源标识，只保留 `String()`、`UUID()`、`Int()`、`Int64()`、`Uint()`、`Uint64()`
-- `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`
+- `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`；其中 `Time()` 要求严格 RFC3339 时间戳语法
 - `hah.Query(...).String()` / `Int()` / `UUID()` 等单值 helper 在重复 query key 上会返回稳定 `invalid_request`
 - `hah.Query(...).Values()` 可直接读取同名 query 参数的全部解析后值；如果你需要批量结构化解码，优先用 `hah.BindQuery(...)`
 
@@ -156,6 +156,7 @@ DTO binding 与显式规则：
 
 - `hah.BindQuery(...)` 的目标必须是 `*struct` 或 `*map[string]string`
 - 对于 struct，只有显式 `query` tag 的顶层字段会参与绑定；`BindQuery(...)` 不展开嵌套 DTO
+- `hah.Query(...).Time()` 以及 `BindQuery(...)` 中的 `time.Time` / `*time.Time` 字段都要求严格 RFC3339 时间戳语法
 - `hah.BindQuery(...)` 默认忽略未知 query key；同名 query key 只要出现多个值就返回稳定 `400 bad_request`
 - malformed raw query 返回稳定 `400 bad_request` 且不修改 target；DTO 或 tag 形状非法时，先返回普通错误且不修改 target
 - `hah.BindBody(...)` 公开只支持非 `nil` 的 `*struct` DTO target
