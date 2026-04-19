@@ -13,6 +13,7 @@
 //   - 使用 WithViolations 绑定公开 violation 列表
 //   - 使用 BadRequest、NotFound、UnprocessableEntity 等快捷构造复用常见错误
 //   - 大多数 handler 也可以直接使用根包 hah 暴露的常用错误模型入口
+//   - 如果某个更深层已经明确要返回稳定公共 HTTP 错误，也可以直接返回 errx.HTTPError
 //   - BadRequest、NotFound、UnprocessableEntity 等状态快捷构造器仍直接使用 errx
 //
 // 公开 API：

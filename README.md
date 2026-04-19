@@ -158,6 +158,7 @@ DTO binding 与显式规则：
 错误与响应：
 
 - `hah.Violation`、`hah.HTTPError`、`hah.NewHTTPError(...)`、`hah.NewHTTPErrorWithCause(...)` 是根包暴露的常见公共错误模型入口
+- 如果某个更深层已经明确要向客户端暴露稳定公共 HTTP 错误，可以直接返回 `errx.xx`；如果仍是内部业务错误，继续返回普通 error 并在 HTTP 边界再映射
 - `hah.WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成 `application/problem+json`
 - `hah.JSON(...)` 写回调用方指定状态的 JSON 响应；`hah.OK(...)`、`hah.Created(...)`、`hah.NoContent(...)` 是成功响应快捷入口
 - `hah.WriteError(...)` 的返回值表示响应边界自身异常，例如响应写出失败；生产代码通常至少要记录这个错误
@@ -201,8 +202,8 @@ tags, err := hah.Query(r, "tag").Values().Get()
 仓库分成四个包：
 
 - `hah`：根包 facade，聚合常用 request helper、绑定、显式请求规则、公共错误模型入口与响应写回入口
-- `reqx`：输入侧核心包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`RequireBody`、`InvalidRequest` 和公开 violations
-- `errx`：共享公共 HTTP 错误模型
+- `reqx`：输入侧核心包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`RequireBody`、`InvalidRequest` 以及 request-side violation 规范化
+- `errx`：共享公共 HTTP 错误模型，负责 `HTTPError`、`Violation` 和共享 violation 常量
 - `resp`：响应侧能力，负责 JSON 成功响应和结构化错误响应
 
 ## 深入文档

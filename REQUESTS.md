@@ -195,7 +195,7 @@ if err := hah.BindBody(r, &body); err != nil {
 ## 绑定后的显式校验
 
 `hah` 不预设 DTO 的校验方式。绑定完成后，调用方自己决定下一步是手写校验、接入第三方库，还是映射到应用层命令再校验。
-多数 handler 直接用 `hah.InvalidRequest(...)`、`hah.Violation{...}` 就够了；如果你需要更完整的错误构造器族，再导入 `errx`。
+多数 handler 直接用 `hah.InvalidRequest(...)`、`hah.Violation{...}` 就够了；如果你需要更完整的错误构造器族，或某个更深层已经明确要返回稳定公共 HTTP 错误，再导入 `errx`。
 
 ### 1. 手写校验
 
