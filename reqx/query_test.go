@@ -103,6 +103,13 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 		assertInvalidViolationAt(t, err, "at", errx.InQuery)
 	})
 
+	t.Run("time rejects strict rfc3339 values with invalid calendar fields", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?at=2026-13-13T10:00:00Z", nil)
+
+		_, err := Query(req, "at").Time().Get()
+		assertInvalidViolationAt(t, err, "at", errx.InQuery)
+	})
+
 }
 
 func TestQueryBuilder_UsageContracts(t *testing.T) {
