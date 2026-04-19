@@ -33,12 +33,6 @@ type problemPayload struct {
 	Errors []errx.Violation `json:"errors,omitempty"`
 }
 
-var internalProblemBody = []byte("{\"title\":\"Internal Server Error\",\"status\":500,\"code\":\"internal_error\"}\n")
-
-// problemBodyEncoder 默认走标准 JSON 编码。
-// 保持为变量仅用于测试编码失败时的回退契约，不改变公开 API。
-var problemBodyEncoder = encodeJSON
-
 // WriteError 是 HTTP 错误写回的统一入口。
 //
 // 职责分为两步：
@@ -59,13 +53,11 @@ func WriteError(w http.ResponseWriter, err error) error {
 	}
 
 	payload := normalizeProblemPayload(err)
-	status := payload.Status
-	body, encodeErr := problemBodyEncoder(payload)
+	body, encodeErr := encodeJSON(payload)
 	if encodeErr != nil {
-		status = http.StatusInternalServerError
-		body = internalProblemBody
+		return encodeErr
 	}
-	return writePreparedJSONBytes(w, status, problemJSONContentType, body)
+	return writePreparedJSONBytes(w, payload.Status, problemJSONContentType, body)
 }
 
 func normalizeProblemPayload(err error) problemPayload {

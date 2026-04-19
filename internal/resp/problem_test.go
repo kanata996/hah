@@ -365,7 +365,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 	})
 }
 
-func TestWriteErrorWriteFailureAndFallback(t *testing.T) {
+func TestWriteErrorWriteFailure(t *testing.T) {
 	t.Run("returns write failure after first commit", func(t *testing.T) {
 		cause := errors.New("socket closed")
 		w := &failingWriter{cause: cause}
@@ -381,45 +381,6 @@ func TestWriteErrorWriteFailureAndFallback(t *testing.T) {
 		}
 		if w.writes != 1 {
 			t.Fatalf("writes = %d, want 1", w.writes)
-		}
-	})
-
-	t.Run("falls back to internal error when problem encoding fails", func(t *testing.T) {
-		t.Cleanup(func() {
-			problemBodyEncoder = encodeJSON
-		})
-		problemBodyEncoder = func(any) ([]byte, error) {
-			return nil, errors.New("encode payload failed")
-		}
-
-		rr := httptest.NewRecorder()
-		err := WriteError(rr, errx.NewHTTPError(
-			http.StatusBadRequest,
-			"invalid_json",
-			"payload invalid",
-		).WithViolations([]errx.Violation{
-			{Field: "name", Code: "required", Detail: "is required"},
-		}))
-		if err != nil {
-			t.Fatalf("WriteError() error = %v, want nil after fallback write", err)
-		}
-
-		if rr.Code != http.StatusInternalServerError {
-			t.Fatalf("status = %d, want %d", rr.Code, http.StatusInternalServerError)
-		}
-		if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
-			t.Fatalf("Content-Type = %q, want application/problem+json", got)
-		}
-
-		payload := decodePayload(t, rr.Body.Bytes())
-		if got := payload["code"]; got != "internal_error" {
-			t.Fatalf("code = %#v, want internal_error", got)
-		}
-		if _, exists := payload["detail"]; exists {
-			t.Fatalf("detail unexpectedly present: %#v", payload["detail"])
-		}
-		if _, exists := payload["errors"]; exists {
-			t.Fatalf("errors unexpectedly present: %#v", payload["errors"])
 		}
 	})
 
