@@ -437,6 +437,19 @@ func TestQueryDefaultContracts(t *testing.T) {
 			t.Fatalf("values = %#v, want nil", got)
 		}
 	})
+
+	t.Run("default check failure is usage error", func(t *testing.T) {
+		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
+			Default(2).
+			Check(func(v int) error {
+				if v%2 == 0 {
+					return errors.New("want odd default")
+				}
+				return nil
+			}).
+			Get()
+		assertNotHTTPError(t, err)
+	})
 }
 
 func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {

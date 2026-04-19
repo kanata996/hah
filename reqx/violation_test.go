@@ -37,6 +37,11 @@ func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
 			in:   errx.Violation{Field: "X-Trace-Id", In: errx.InHeader, Code: errx.CodeMultiple},
 			want: errx.Violation{Field: "X-Trace-Id", In: errx.InHeader, Code: errx.CodeMultiple, Detail: "must appear only once"},
 		},
+		{
+			name: "custom detail is preserved",
+			in:   errx.Violation{Field: "name", Detail: "must be unique"},
+			want: errx.Violation{Field: "name", Code: errx.CodeInvalid, Detail: "must be unique"},
+		},
 	}
 
 	for _, tc := range testCases {

@@ -331,3 +331,28 @@ func TestBodyMediaType_InternalBranches(t *testing.T) {
 		}
 	})
 }
+
+func TestReadRequestBody_InternalBranches(t *testing.T) {
+	t.Run("nil request returns nil body without error", func(t *testing.T) {
+		body, err := readRequestBody(nil)
+		if err != nil {
+			t.Fatalf("readRequestBody() error = %v, want nil", err)
+		}
+		if body != nil {
+			t.Fatalf("body = %v, want nil", body)
+		}
+	})
+
+	t.Run("nil request body returns nil body without error", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Body = nil
+
+		body, err := readRequestBody(req)
+		if err != nil {
+			t.Fatalf("readRequestBody() error = %v, want nil", err)
+		}
+		if body != nil {
+			t.Fatalf("body = %v, want nil", body)
+		}
+	})
+}
