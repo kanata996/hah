@@ -3,6 +3,7 @@ package resp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -290,6 +291,41 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 			t.Fatalf("body leaked internal cause: %q", rr.Body.String())
 		}
 	})
+}
+
+func TestProblemPayloadsStayJSONEncodable(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "http error with violations",
+			err: errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid").WithViolations([]errx.Violation{
+				{Field: "name", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
+			}),
+		},
+		{
+			name: "context canceled",
+			err:  context.Canceled,
+		},
+		{
+			name: "context deadline exceeded",
+			err:  context.DeadlineExceeded,
+		},
+		{
+			name: "plain error",
+			err:  errors.New("db timeout"),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := encodeProblemPayload(normalizeProblemPayload(tc.err))
+			if !json.Valid(body) {
+				t.Fatalf("encodeProblemPayload() produced invalid JSON: %q", string(body))
+			}
+		})
+	}
 }
 
 func TestWriteErrorResponseBoundaries(t *testing.T) {

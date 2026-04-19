@@ -180,7 +180,7 @@ JSON/成功写回契约固定为：
 - `WriteError(context.DeadlineExceeded)` 写出 `504`、`Gateway Timeout`、`code=timeout`，且不写 `detail` / `errors`
 - `WriteError` 对普通错误写出最小 `500` Problem，且不写 `detail` / `errors`
 - `WriteError(nil)` 是 no-op
-- Problem payload 无法编码时，`WriteError` 可回退为最小内部错误 Problem
+- Problem payload 形状固定且必须保持可 JSON 编码；`WriteError` 不暴露单独的 problem 编码失败分支
 - 错误链同时匹配 `*hah.HTTPError` 与 `context` 错误时，优先按 `*hah.HTTPError` 收敛
 - 任一失败场景都不得产生“前半段成功 JSON、后半段错误 JSON”的混杂响应
 - 首次提交后的底层写失败只要求返回错误，不要求响应可回退
