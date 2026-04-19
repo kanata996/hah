@@ -283,6 +283,22 @@ func TestQueryStringAndMultiValueContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("one of snapshots configured candidates", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?mode=go", nil)
+		allowed := []string{"go", "rust"}
+
+		builder := Query(req, "mode").String().OneOf(allowed...)
+		allowed[0] = "python"
+
+		got, err := builder.Get()
+		if err != nil {
+			t.Fatalf("String().OneOf().Get() error = %v", err)
+		}
+		if got != "go" {
+			t.Fatalf("mode = %q, want go", got)
+		}
+	})
+
 	t.Run("string accepts explicit empty value and required treats it as present", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?mode=", nil)
 

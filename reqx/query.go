@@ -83,7 +83,11 @@ func (p *QueryParam) UnixTime() *TimeParam {
 
 // Values 读取 query 参数的全部解析后值。
 func (p *QueryParam) Values() *MultiParam[string] {
-	return newMultiParam(p.spec, cloneSlice[string])
+	return newMultiParam(
+		p.spec,
+		func(values []string) []string { return values },
+		cloneSlice[string],
+	)
 }
 
 func queryParamValues(r *http.Request, name string) ([]string, bool) {
