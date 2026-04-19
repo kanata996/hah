@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 )
 
+var strictRFC3339Pattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$`)
+
 func newStringParam(spec paramSpec) *StringParam {
 	return &StringParam{value: newParamValue(spec, parseStringValue)}
 }
@@ -349,8 +351,11 @@ func parseUUIDValue(value string) (uuid.UUID, error) {
 }
 
 func parseRFC3339Time(value string) (time.Time, error) {
-	var parsed time.Time
-	if err := parsed.UnmarshalText([]byte(value)); err != nil {
+	if !strictRFC3339Pattern.MatchString(value) {
+		return time.Time{}, errors.New("timestamp is not strict RFC3339")
+	}
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
 		return time.Time{}, err
 	}
 	return parsed, nil

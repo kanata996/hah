@@ -96,6 +96,13 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 		assertInvalidViolationAt(t, err, "sec", errx.InQuery)
 	})
 
+	t.Run("time rejects non strict rfc3339 syntax", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?at=2026-04-13T10:00:00,123Z", nil)
+
+		_, err := Query(req, "at").Time().Get()
+		assertInvalidViolationAt(t, err, "at", errx.InQuery)
+	})
+
 }
 
 func TestQueryBuilder_UsageContracts(t *testing.T) {
@@ -847,6 +854,39 @@ func TestQueryValues_RequestResultIsDefensiveCopy(t *testing.T) {
 	if !reflect.DeepEqual(again, []string{"a", "b"}) {
 		t.Fatalf("values second = %#v, want []string{\"a\", \"b\"}", again)
 	}
+}
+
+func TestQueryValues_CheckCannotMutateReturnedValue(t *testing.T) {
+	t.Run("request values", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items?tag=a&tag=b", nil), "tag").Values().
+			Check(func(values []string) error {
+				values[0] = "mutated"
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("Values().Get() error = %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{"a", "b"}) {
+			t.Fatalf("values = %#v, want []string{\"a\", \"b\"}", got)
+		}
+	})
+
+	t.Run("default values", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().
+			Default([]string{"a", "b"}).
+			Check(func(values []string) error {
+				values[0] = "mutated"
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("Values().Get() error = %v", err)
+		}
+		if !reflect.DeepEqual(got, []string{"a", "b"}) {
+			t.Fatalf("values = %#v, want []string{\"a\", \"b\"}", got)
+		}
+	})
 }
 
 func TestQueryValues_ReReadsCurrentRequest(t *testing.T) {

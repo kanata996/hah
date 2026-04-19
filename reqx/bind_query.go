@@ -222,7 +222,7 @@ func setBindQueryLeaf(field reflect.Value, raw string) error {
 		return nil
 	}
 	if field.Type() == queryTimeType {
-		value, err := time.Parse(time.RFC3339, raw)
+		value, err := parseRFC3339Time(raw)
 		if err != nil {
 			return errx.NewHTTPError(http.StatusBadRequest, "bad_request", "Bad Request")
 		}

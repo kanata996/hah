@@ -105,12 +105,12 @@ func (p *paramValue[T]) addCheck(check func(T) error) {
 
 func (p *paramValue[T]) validateDefault(value T, validateBuiltins func(T) error) error {
 	if validateBuiltins != nil {
-		if err := validateBuiltins(value); err != nil {
+		if err := validateBuiltins(p.cloneValue(value)); err != nil {
 			return usageErrorf("default value failed validation")
 		}
 	}
 	for _, check := range p.checks {
-		if err := check(value); err != nil {
+		if err := check(p.cloneValue(value)); err != nil {
 			return usageErrorf("default value failed validation")
 		}
 	}
@@ -119,12 +119,12 @@ func (p *paramValue[T]) validateDefault(value T, validateBuiltins func(T) error)
 
 func (p *paramValue[T]) validateRequest(value T, validateBuiltins func(T) error) error {
 	if validateBuiltins != nil {
-		if err := validateBuiltins(value); err != nil {
+		if err := validateBuiltins(p.cloneValue(value)); err != nil {
 			return InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
 		}
 	}
 	for _, check := range p.checks {
-		if err := check(value); err != nil {
+		if err := check(p.cloneValue(value)); err != nil {
 			return InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
 		}
 	}
@@ -171,5 +171,5 @@ func (p *paramValue[T]) resolve(validateBuiltins func(T) error) (T, error) {
 	if err := p.validateRequest(value, validateBuiltins); err != nil {
 		return zero, err
 	}
-	return value, nil
+	return p.cloneValue(value), nil
 }
