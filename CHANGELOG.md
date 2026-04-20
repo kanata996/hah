@@ -13,6 +13,22 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.8.1] - 2026-04-20
+
+### Changed
+
+- Refined the default error envelope contract so `hah.WriteError(...)` now exposes the stable error type as `error.reason` instead of the older `error.code` / `error.title` pair. The top-level `message` now maps directly from `hah.HTTPError.Detail()`, and blank public details are normalized from the public error code (for example `internal_error` -> `internal error`) instead of falling back to HTTP status text.
+- Tightened the default top-level error-code contract to fixed five-digit business codes. `hah.WriteError(w, err)` now derives the default top-level code as `status * 100`, while explicit codes passed through `WriteError(w, err, code)` must satisfy `10000 <= code <= 99999` or fail as usage errors before the response is committed.
+- Aligned malformed raw-query `bad_request` responses with the shared HTTP error model's normalized detail wording so request-side binding failures stay consistent with the updated default error envelope.
+
+### Documentation
+
+- Refreshed `README.md`, `AGENTS.md`, and the response/error design docs to document the `error.reason` field, five-digit top-level error-code rules, the direct `detail -> message` mapping, and the current public/internal package boundaries.
+
+### Testing
+
+- Expanded `hah`, `internal/errx`, `internal/resp`, fuzz, and example smoke coverage around the new reason/message mapping, five-digit top-level error codes, explicit-detail preservation, and context-derived timeout/cancel error envelopes.
+
 ## [v0.8.0] - 2026-04-20
 
 ### Breaking

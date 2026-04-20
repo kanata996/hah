@@ -8,10 +8,10 @@
 
 ## 包边界
 
-- `hah`：根包 facade，对外行为需与底层契约一致。
+- `hah`：根包 facade，也是默认公开 HTTP 边界；对外行为需与底层契约一致。
 - `reqx`：request helper、query/body binding、请求级规则和输入错误建模。
-- `errx`：公共 HTTP 错误模型。
-- `resp`：JSON 成功响应和 `application/problem+json` 错误响应。
+- `internal/errx`：内部共享 HTTP 错误模型实现；不属于公开 API。
+- `internal/resp`：内部默认 JSON success/error envelope 写回实现；不属于公开 API。
 
 ## 工程规则
 
