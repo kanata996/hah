@@ -160,6 +160,37 @@ func TestQueryDefaultContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("values empty default stays non nil empty slice", func(t *testing.T) {
+		defaults := []string{}
+		checkCalled := false
+
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().
+			Default(defaults).
+			Check(func(values []string) error {
+				checkCalled = true
+				if values == nil {
+					return errors.New("want non-nil values")
+				}
+				if len(values) != 0 {
+					return errors.New("want empty values")
+				}
+				return nil
+			}).
+			Get()
+		if err != nil {
+			t.Fatalf("Values().Get() error = %v", err)
+		}
+		if !checkCalled {
+			t.Fatal("Check() was not called")
+		}
+		if got == nil {
+			t.Fatal("values = nil, want non-nil empty slice")
+		}
+		if len(got) != 0 {
+			t.Fatalf("values = %#v, want empty slice", got)
+		}
+	})
+
 	t.Run("default check failure is usage error", func(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
 			Default(2).

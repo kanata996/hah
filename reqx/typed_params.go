@@ -442,7 +442,9 @@ func cloneSlice[T any](values []T) []T {
 	if values == nil {
 		return nil
 	}
-	return append([]T(nil), values...)
+	cloned := make([]T, len(values))
+	copy(cloned, values)
+	return cloned
 }
 
 func containsString(values []string, target string) bool {
