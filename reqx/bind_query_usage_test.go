@@ -183,6 +183,14 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?count=7", nil), &request{}))
 	})
 
+	t.Run("pointer to unsupported leaf is usage error", func(t *testing.T) {
+		type request struct {
+			Value *bindQueryTextValue `query:"value"`
+		}
+
+		assertNotHTTPError(t, BindQuery(httptest.NewRequest(http.MethodGet, "/?value=x", nil), &request{}))
+	})
+
 	t.Run("query dash fields are ignored before type validation", func(t *testing.T) {
 		type request struct {
 			Name    string              `query:"name"`
