@@ -116,7 +116,7 @@ func bodyMediaType(r *http.Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(mediaType), nil
+	return mediaType, nil
 }
 
 // 统一构造非 JSON body 的稳定客户端输入错误。

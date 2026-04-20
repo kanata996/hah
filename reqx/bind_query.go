@@ -171,10 +171,6 @@ func parseBindQueryTag(field reflect.StructField) (name string, ok bool, err err
 	return raw, true, nil
 }
 
-func isExplicitBindQuerySpecialType(t reflect.Type) bool {
-	return t == queryDurationType || t == queryTimeType || t == queryUUIDType
-}
-
 func disallowedBindQueryDecoder(t reflect.Type) bool {
 	ptr := reflect.PointerTo(t)
 	if t != queryTimeType && t != queryUUIDType {
@@ -214,36 +210,34 @@ func buildBindQueryFieldSetter(t reflect.Type) (func(reflect.Value, string) erro
 // 这里是受支持叶子类型的唯一分派点：
 // 它同时决定“该类型是否支持”以及“原始字符串如何解码并写入字段”。
 func buildBindQueryLeafSetter(t reflect.Type) (func(reflect.Value, string) error, error) {
-	if isExplicitBindQuerySpecialType(t) {
-		switch t {
-		case queryDurationType:
-			return func(field reflect.Value, raw string) error {
-				value, err := time.ParseDuration(raw)
-				if err != nil {
-					return bindQueryBadRequestError()
-				}
-				field.SetInt(int64(value))
-				return nil
-			}, nil
-		case queryTimeType:
-			return func(field reflect.Value, raw string) error {
-				value, err := parseRFC3339Time(raw)
-				if err != nil {
-					return bindQueryBadRequestError()
-				}
-				field.Set(reflect.ValueOf(value))
-				return nil
-			}, nil
-		case queryUUIDType:
-			return func(field reflect.Value, raw string) error {
-				value, err := uuid.Parse(raw)
-				if err != nil {
-					return bindQueryBadRequestError()
-				}
-				field.Set(reflect.ValueOf(value))
-				return nil
-			}, nil
-		}
+	switch t {
+	case queryDurationType:
+		return func(field reflect.Value, raw string) error {
+			value, err := time.ParseDuration(raw)
+			if err != nil {
+				return bindQueryBadRequestError()
+			}
+			field.SetInt(int64(value))
+			return nil
+		}, nil
+	case queryTimeType:
+		return func(field reflect.Value, raw string) error {
+			value, err := parseRFC3339Time(raw)
+			if err != nil {
+				return bindQueryBadRequestError()
+			}
+			field.Set(reflect.ValueOf(value))
+			return nil
+		}, nil
+	case queryUUIDType:
+		return func(field reflect.Value, raw string) error {
+			value, err := uuid.Parse(raw)
+			if err != nil {
+				return bindQueryBadRequestError()
+			}
+			field.Set(reflect.ValueOf(value))
+			return nil
+		}, nil
 	}
 	if disallowedBindQueryDecoder(t) {
 		return nil, unsupportedBindQueryFieldTypeError()
