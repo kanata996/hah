@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 
 type httpErrorAsCarrier struct {
 	httpErr *errx.HTTPError
+	child   error
 }
 
 func (e httpErrorAsCarrier) Error() string {
@@ -27,6 +29,10 @@ func (e httpErrorAsCarrier) As(target any) bool {
 	}
 	*httpErr = e.httpErr
 	return true
+}
+
+func (e httpErrorAsCarrier) Unwrap() error {
+	return e.child
 }
 
 func TestWriteErrorWritesDefaultEnvelope(t *testing.T) {
@@ -166,6 +172,66 @@ func TestWriteErrorUsesCustomAsHTTPError(t *testing.T) {
 		"title":  http.StatusText(http.StatusUnauthorized),
 		"status": float64(http.StatusUnauthorized),
 		"code":   "unauthorized",
+	})
+}
+
+func TestWriteErrorSkipsTypedNilHTTPErrorAndKeepsScanningChain(t *testing.T) {
+	var typedNil *errx.HTTPError
+
+	input := fmt.Errorf("wrapped: %w", errors.Join(
+		typedNil,
+		errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid"),
+	))
+	rr := httptest.NewRecorder()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			t.Fatalf("WriteError() panicked: %v", recovered)
+		}
+	}()
+
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	assertErrorEnvelopeBasics(t, rr, http.StatusBadRequest, 400000, "payload invalid")
+
+	body := decodePayload(t, rr.Body.Bytes())
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
+	}
+	assertPublicErrorObject(t, errorValue, map[string]any{
+		"title":  http.StatusText(http.StatusBadRequest),
+		"status": float64(http.StatusBadRequest),
+		"code":   "invalid_json",
+	})
+}
+
+func TestWriteErrorSkipsTypedNilCustomAsHTTPErrorAndKeepsScanningChain(t *testing.T) {
+	var typedNil *errx.HTTPError
+
+	rr := httptest.NewRecorder()
+	input := httpErrorAsCarrier{
+		httpErr: typedNil,
+		child:   errx.NewHTTPError(http.StatusForbidden, "forbidden", "access denied"),
+	}
+
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	assertErrorEnvelopeBasics(t, rr, http.StatusForbidden, 403000, "access denied")
+
+	body := decodePayload(t, rr.Body.Bytes())
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
+	}
+	assertPublicErrorObject(t, errorValue, map[string]any{
+		"title":  http.StatusText(http.StatusForbidden),
+		"status": float64(http.StatusForbidden),
+		"code":   "forbidden",
 	})
 }
 

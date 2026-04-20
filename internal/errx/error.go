@@ -56,6 +56,9 @@ func (e *HTTPError) Error() string {
 
 // Unwrap 暴露底层 cause，便于调用方继续使用 errors.Is / errors.As。
 func (e *HTTPError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
 	return e.cause
 }
 

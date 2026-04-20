@@ -72,8 +72,7 @@ func normalizeTopCode(code []int) (value int, ok bool, err error) {
 }
 
 func normalizeHTTPError(err error) *errx.HTTPError {
-	var httpErr *errx.HTTPError
-	if errors.As(err, &httpErr) && httpErr != nil {
+	if httpErr := findHTTPError(err); httpErr != nil {
 		return httpErr
 	}
 
@@ -86,6 +85,30 @@ func normalizeHTTPError(err error) *errx.HTTPError {
 	}
 
 	return errx.NewHTTPError(status, "", "")
+}
+
+func findHTTPError(err error) *errx.HTTPError {
+	if err == nil {
+		return nil
+	}
+
+	var httpErr *errx.HTTPError
+	if errors.As(err, &httpErr) && httpErr != nil {
+		return httpErr
+	}
+
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		for _, child := range wrapped.Unwrap() {
+			if httpErr := findHTTPError(child); httpErr != nil {
+				return httpErr
+			}
+		}
+	case interface{ Unwrap() error }:
+		return findHTTPError(wrapped.Unwrap())
+	}
+
+	return nil
 }
 
 func deriveErrorMessage(httpErr *errx.HTTPError) string {
