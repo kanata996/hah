@@ -320,9 +320,12 @@ func TestProblemPayloadsStayJSONEncodable(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			body := encodeProblemPayload(normalizeProblemPayload(tc.err))
+			body, err := encodeJSON(normalizeProblemPayload(tc.err))
+			if err != nil {
+				t.Fatalf("encodeJSON() error = %v", err)
+			}
 			if !json.Valid(body) {
-				t.Fatalf("encodeProblemPayload() produced invalid JSON: %q", string(body))
+				t.Fatalf("encodeJSON() produced invalid JSON: %q", string(body))
 			}
 		})
 	}

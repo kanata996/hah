@@ -1,7 +1,7 @@
 # hah Query 设计方案
 
 - 状态：Locked
-- 版本：v8
+- 版本：v9
 - 锁定日期：2026-04-20
 - 适用范围：
   - `hah.Query(...)`
@@ -25,10 +25,10 @@
 
 1. 读取一个命名 query key
 2. 按调用方显式选择的类型入口解析
-3. 执行少量通用约束
+3. 执行必要的值约束
 4. 把客户端输入错误收敛为稳定公开错误
 
-它是一个 typed parser，不是 query DSL。
+它是一个 typed parser，不是 query DSL，也不是通用规则编排器。
 
 ## 2. 心智模型
 
@@ -98,11 +98,11 @@ limit, err := Query(r, "limit").Int().Get()
 - `Int` / `Int64`：`strconv.ParseInt(..., 10, bits)`
 - `Uint` / `Uint64`：`strconv.ParseUint(..., 10, bits)`
 - `Bool`：`strconv.ParseBool`
-- `Float64`：`strconv.ParseFloat(..., 64)`
+- `Float64`：`strconv.ParseFloat(..., 64)`，且只接受有限值
 - `Duration`：`time.ParseDuration`
 - `UUID`：`uuid.Parse`
-- `Time`：RFC3339，不额外归一化时区
-- `UnixTime`：按 10 位秒级 Unix 时间戳解析，并归一化到 UTC
+- `Time`：严格 RFC3339，且时区 offset 必须合法；不额外归一化时区
+- `UnixTime`：按恰好 10 个十进制数字的秒级 Unix 时间戳解析，不接受符号位，并归一化到 UTC
 - `Values()`：返回该 key 的全部解析后值副本，而不是 raw query 子串
 
 ### 3.3 重复 key 与空值
@@ -121,53 +121,38 @@ limit, err := Query(r, "limit").Int().Get()
 - 保留重复值
 - 保留空字符串
 
-### 3.4 通用 builder 规则
+### 3.4 通用规则
 
 通用规则固定为：
 
 - `Required()` 表示参数必须存在
 - `Default(v)` 只在参数缺失时生效
 - `Required()` 与 `Default(...)` 互斥
-- 重复 `Required()` 幂等
-- 未声明 `Required()` 时，重复 `Default(...)` 以后一次为准
 - 未声明 `Required()` 且参数缺失时，若未配置 `Default(...)`，直接返回类型零值
 - 参数缺失且命中 `Default(v)` 时，以默认值进入后续约束与 `Check(...)`
 - 默认值仍然要经过后续全部约束与 `Check(...)`
-- 同类 built-in constraint 重复声明时，后一条覆盖前一条
-- built-in constraint 总在 `Check(...)` 之前执行，不跟随链式声明顺序重排
 - `Check(nil)` 返回普通 usage error
-- builder 一旦记录 usage error，后续链式调用不会清除该状态
-- `Get()` 返回首次记录的 usage error
+- built-in constraint 与 `Check(...)` 都只面向单个已解析值，不承担跨字段或全局 query 校验
 
-### 3.5 约束能力
+链式调用的目标是声明“这个值要满足什么条件”，而不是暴露一套可编排的规则系统。
+对重复声明、覆盖顺序或内部错误记录方式，调用方不应建立额外依赖。
 
-所有 builder 都支持：
+### 3.5 可用约束
 
-- `Required()`
-- `Default(...)`
-- `Check(...)`
-- `Get()`
-
-`String()` 额外支持：
-
-- `MinLen(n)` / `MaxLen(n)`
-- `OneOf(values...)`
-- `Match(re)`
-
-`Int` / `Int64` / `Uint` / `Uint64` / `Float64` / `Duration` 额外支持：
-
-- `Min(v)` / `Max(v)`
-
-`Time()` / `UnixTime()` 额外支持：
-
-- `After(t)` / `Before(t)`
-
-`Values()` 支持：
+所有入口都支持：
 
 - `Required()`
 - `Default(...)`
 - `Check(...)`
 - `Get()`
+
+单值入口的类型专属约束为：
+
+- `String()`：`MinLen(n)` / `MaxLen(n)`、`OneOf(values...)`、`Match(re)`
+- `Int` / `Int64` / `Uint` / `Uint64` / `Float64` / `Duration`：`Min(v)` / `Max(v)`
+- `Time()` / `UnixTime()`：`After(t)` / `Before(t)`
+
+`Values()` 不提供类型专属 built-in constraint；需要额外规则时，通过 `Check(...)` 表达。
 
 ## 4. 错误模型
 
@@ -177,7 +162,7 @@ limit, err := Query(r, "limit").Int().Get()
 
 - `Query(nil, name)`
 - 参数名为空
-- 非法约束配置
+- 非法约束配置（例如 `Required()` 与 `Default(...)` 同时使用，或 `Check(nil)`）
 - 配置的 `Default(...)` 未通过后续约束或 `Check(...)`
 
 ### 4.2 客户端输入错误
@@ -211,29 +196,13 @@ limit, err := Query(r, "limit").Int().Get()
 
 ## 6. 测试基线
 
-后续实现或重构至少应锁住：
+后续实现或重构至少应覆盖以下维度：
 
-- `Query(r, name)` 会裁剪参数名空白
-- `nil request`
-- 空参数名
-- `request.URL == nil` 视为空输入
-- typed builder 命中重复 key 时返回单个 `multiple` violation
-- `Values()` 返回全部解析后值并保留顺序
-- `Values()` 保留重复值
-- `Values()` 跟随 `net/url` 的解码语义
-- `Values()` 保留空字符串；缺失时返回 `nil`
-- `Values()` 支持 `Required()`、`Default(...)`、`Check(...)`
-- typed builder 缺失时返回零值
-- `Required()` 缺失时返回单个 `required` violation
-- 重复 `Required()` 幂等
-- `Default(...)` 与 `Required()` 互斥
-- 重复 `Default(...)` 以后一次为准
-- default 值仍然经过后续校验
-- `Check(nil)` usage error
-- 同类 built-in constraint 重复声明时以后一次为准
-- built-in constraint 总在 `Check(...)` 之前执行
-- `String().MinLen()` / `MaxLen()` 的成功、失败路径
-- 数值类型 `Min()` / `Max()` 的成功、失败路径
-- `Duration()`、`UUID()`、`Time()`、`UnixTime()` 的代表性成功 / 失败路径
-- 空字符串只有 `String()` 接受，其他类型按解析失败处理
-- `Check(...)` 失败时公开 detail 仍保持稳定 `is invalid`
+- builder 创建与输入来源：参数名裁剪、`nil request`、空参数名、`request.URL == nil`、`net/url` 解码语义
+- 单值入口的存在性模型：缺失、恰好一个值、重复 key；其中重复 key 需要稳定收敛为单个 `multiple` violation
+- 空字符串语义：只有 `String()` 接受 `?x=`；其他类型把空字符串当作解析失败
+- 多值入口语义：`Values()` 缺失时返回 `nil`，存在时返回全部值，并保留顺序、重复值和空字符串
+- 缺失参数路径：optional 返回零值，`Required()` 返回单个 `required` violation，`Default(...)` 只在缺失时生效
+- 约束路径：代表性覆盖 `String()`、数值类型、时间类型和 `Check(...)` 的成功/失败分支，并验证默认值也会经过后续校验
+- 类型解析路径：至少覆盖 `Duration()`、`UUID()`、`Time()`、`UnixTime()` 的代表性成功/失败用例，其中 `Time()` 需要拒绝非法 RFC3339 offset，`UnixTime()` 只接受恰好 10 个十进制数字
+- 错误收敛：客户端输入错误稳定返回 `422 invalid_request`，并正确标记 query violation 的 `Field`、`In` 和 `Code`

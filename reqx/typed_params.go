@@ -3,6 +3,7 @@ package reqx
 import (
 	"cmp"
 	"errors"
+	"math"
 	"regexp"
 	"strconv"
 	"time"
@@ -42,9 +43,11 @@ type ValueParam[T any] struct {
 
 // OrderedParam 读取并校验可比较范围的单值参数。
 type OrderedParam[T cmp.Ordered] struct {
-	value paramValue[T]
-	min   *T
-	max   *T
+	value          paramValue[T]
+	min            *T
+	max            *T
+	valueValidator func(T) error
+	boundValidator func(T) error
 }
 
 // StringParam 读取并校验 string 参数。
@@ -98,11 +101,19 @@ func (p *OrderedParam[T]) Default(value T) *OrderedParam[T] {
 }
 
 func (p *OrderedParam[T]) Min(value T) *OrderedParam[T] {
+	if err := p.validateBound(value, "minimum"); err != nil {
+		p.value.setUsageErr(err)
+		return p
+	}
 	p.min = &value
 	return p
 }
 
 func (p *OrderedParam[T]) Max(value T) *OrderedParam[T] {
+	if err := p.validateBound(value, "maximum"); err != nil {
+		p.value.setUsageErr(err)
+		return p
+	}
 	p.max = &value
 	return p
 }
@@ -124,6 +135,11 @@ func (p *OrderedParam[T]) Get() (T, error) {
 }
 
 func (p *OrderedParam[T]) validateBuiltins(value T) error {
+	if p.valueValidator != nil {
+		if err := p.valueValidator(value); err != nil {
+			return err
+		}
+	}
 	if p.min != nil && value < *p.min {
 		return errInvalidParamValue
 	}
@@ -138,6 +154,16 @@ func (p *OrderedParam[T]) constraintUsageErr() error {
 		return nil
 	}
 	return usageErrorf("minimum must be less than or equal to maximum")
+}
+
+func (p *OrderedParam[T]) validateBound(value T, name string) error {
+	if p.boundValidator == nil {
+		return nil
+	}
+	if err := p.boundValidator(value); err != nil {
+		return usageErrorf("%s must be finite", name)
+	}
+	return nil
 }
 
 func (p *StringParam) Required() *StringParam {
@@ -313,7 +339,21 @@ func parseUintBits(value string, bits int) (uint64, error) {
 }
 
 func parseFloatBits(value string, bits int) (float64, error) {
-	return strconv.ParseFloat(value, bits)
+	parsed, err := strconv.ParseFloat(value, bits)
+	if err != nil {
+		return 0, err
+	}
+	if err := validateFiniteFloat64(parsed); err != nil {
+		return 0, errors.New("float must be finite")
+	}
+	return parsed, nil
+}
+
+func validateFiniteFloat64(value float64) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return errInvalidParamValue
+	}
+	return nil
 }
 
 func parseIntValue(value string) (int, error) {
@@ -354,6 +394,9 @@ func parseRFC3339Time(value string) (time.Time, error) {
 	if !strictRFC3339Pattern.MatchString(value) {
 		return time.Time{}, errors.New("timestamp is not strict RFC3339")
 	}
+	if err := validateRFC3339Offset(value); err != nil {
+		return time.Time{}, err
+	}
 	parsed, err := time.Parse(time.RFC3339, value)
 	if err != nil {
 		return time.Time{}, err
@@ -373,7 +416,26 @@ func parseFixedWidthTimestamp(value string, digits int) (int64, error) {
 	if len(value) != digits {
 		return 0, errors.New("timestamp has invalid width")
 	}
+	for _, ch := range value {
+		if ch < '0' || ch > '9' {
+			return 0, errors.New("timestamp must contain digits only")
+		}
+	}
 	return strconv.ParseInt(value, 10, 64)
+}
+
+func validateRFC3339Offset(value string) error {
+	if len(value) == 0 || value[len(value)-1] == 'Z' {
+		return nil
+	}
+
+	offset := value[len(value)-6:]
+	hours := int(offset[1]-'0')*10 + int(offset[2]-'0')
+	minutes := int(offset[4]-'0')*10 + int(offset[5]-'0')
+	if hours > 23 || minutes > 59 {
+		return errors.New("timestamp has invalid timezone offset")
+	}
+	return nil
 }
 
 func cloneSlice[T any](values []T) []T {

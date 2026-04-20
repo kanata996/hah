@@ -13,6 +13,24 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.7.2] - 2026-04-20
+
+### Fixed
+
+- Fixed `reqx.BindQuery(...)` / `hah.BindQuery(...)` so named scalar DTO fields backed by `bool`, `int*`, `uint*`, and `float*` underlying kinds now bind according to their scalar family rules, matching the documented `BindQuery(...)` contract for named scalar query fields.
+- Fixed `reqx.BindQuery(...)` / `hah.BindQuery(...)` struct-target commits so only planned `query:"..."` fields are rebuilt from the current request. Ignored `query:"-"` fields and untagged fields now preserve their existing caller-owned values on successful binds instead of being zeroed as an unintended side effect.
+- Fixed `reqx.BindQuery(...)` / `hah.BindQuery(...)` and `reqx.Query(...).Float64()` / `hah.Query(...).Float64()` so non-finite float inputs such as `NaN`, `+Inf`, and `-Inf` are rejected as invalid request input instead of being accepted as ordinary scalar values. Non-finite `Default(...)`, `Min(...)`, and `Max(...)` float builder values are now rejected as usage errors as well.
+- Tightened `reqx.Query(...).Time()` / `hah.Query(...).Time()` and `reqx.BindQuery(...)` / `hah.BindQuery(...)` `time.Time` field decoding so RFC3339 timestamps with illegal timezone offsets are rejected as invalid request input. `reqx.Query(...).UnixTime()` / `hah.Query(...).UnixTime()` now also require exactly 10 decimal digits.
+- Fixed `reqx.BindBody(...)` / `hah.BindBody(...)` target validation so root DTOs that implement `json.Unmarshaler` are rejected as usage errors before body inspection, matching the documented top-level `*struct` request-body contract.
+
+### Documentation
+
+- Refreshed `README.md`, `REQUESTS.md`, and the request/error design docs to clarify the top-level `BindBody(...)` target contract, `BindQuery(...)` planned-field commit semantics, strict query timestamp parsing, finite-float query parsing, and that nil `*HTTPError` receivers remain outside the supported public surface.
+
+### Testing
+
+- Expanded regression coverage across `reqx` and `errx`, including named-scalar, timestamp, and finite-float query decoding, `BindQuery(...)` non-planned field preservation, root-DTO `UnmarshalJSON` usage errors in `BindBody(...)`, and `reqx` usage-error wrapping behavior.
+
 ## [v0.7.1] - 2026-04-20
 
 ### Fixed

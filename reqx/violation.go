@@ -26,16 +26,14 @@ const (
 
 // InvalidRequest 生成统一的 invalid_request 错误包络。
 func InvalidRequest(violations ...errx.Violation) error {
-	details := make([]errx.Violation, len(violations))
-	for i, violation := range violations {
-		details[i] = normalizeViolation(violation)
+	for i := range violations {
+		violations[i] = normalizeViolation(violations[i])
 	}
-
 	return errx.NewHTTPError(
 		http.StatusUnprocessableEntity,
 		invalidRequestCode,
 		invalidRequestDetail,
-	).WithViolations(details)
+	).WithViolations(violations)
 }
 
 func newViolation(field string, input errx.ViolationIn, code errx.ViolationCode, detail string) errx.Violation {

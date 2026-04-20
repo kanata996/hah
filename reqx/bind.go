@@ -21,8 +21,11 @@ func validateBindingDestination(target any) error {
 		return usageErrorf("destination must not be nil")
 	}
 	value := reflect.ValueOf(target)
-	if value.Kind() != reflect.Pointer || value.IsNil() {
-		return usageErrorf("destination must not be nil")
+	if value.Kind() != reflect.Pointer {
+		return usageErrorf("destination must be a non-nil pointer")
+	}
+	if value.IsNil() {
+		return usageErrorf("destination must be a non-nil pointer")
 	}
 	return nil
 }

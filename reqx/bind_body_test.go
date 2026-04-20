@@ -9,11 +9,6 @@ import (
 	"testing"
 )
 
-type bindBodyReadErrorCloser struct{ err error }
-
-func (r bindBodyReadErrorCloser) Read([]byte) (int, error) { return 0, r.err }
-func (r bindBodyReadErrorCloser) Close() error             { return nil }
-
 type bindBodyJSONValue struct {
 	Value string
 }
@@ -26,6 +21,18 @@ func (v *bindBodyJSONValue) UnmarshalJSON(data []byte) error {
 	v.Value = "json:" + decoded
 	return nil
 }
+
+type bindBodyRootJSONPointerTarget struct {
+	Name string `json:"name"`
+}
+
+func (*bindBodyRootJSONPointerTarget) UnmarshalJSON([]byte) error { return nil }
+
+type bindBodyRootJSONValueTarget struct {
+	Name string `json:"name"`
+}
+
+func (bindBodyRootJSONValueTarget) UnmarshalJSON([]byte) error { return nil }
 
 func TestBindBody_BasicContracts(t *testing.T) {
 	t.Run("zero byte body is noop and does not require json content type", func(t *testing.T) {
@@ -213,6 +220,25 @@ func TestBindBody_BoundariesAndUsageErrors(t *testing.T) {
 		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &unsupported))
 	})
 
+	t.Run("rejects root dto implementing unmarshal json", func(t *testing.T) {
+		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{"extra":1}`), &bindBodyRootJSONPointerTarget{}))
+		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{"extra":1}`), &bindBodyRootJSONValueTarget{}))
+	})
+
+	t.Run("root dto unmarshal json usage error wins before body read", func(t *testing.T) {
+		wantErr := errors.New("read failed")
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = bindBodyReadErrorCloser{err: wantErr}
+		req.ContentLength = -1
+
+		err := BindBody(req, &bindBodyRootJSONPointerTarget{})
+		assertNotHTTPError(t, err)
+		if errors.Is(err, wantErr) {
+			t.Fatalf("BindBody() error = %v, want usage error before body inspection", err)
+		}
+	})
+
 	t.Run("too large body returns request too large and preserves target", func(t *testing.T) {
 		type request struct {
 			Name string `json:"name"`
@@ -333,16 +359,6 @@ func TestBodyMediaType_InternalBranches(t *testing.T) {
 }
 
 func TestReadRequestBody_InternalBranches(t *testing.T) {
-	t.Run("nil request returns nil body without error", func(t *testing.T) {
-		body, err := readRequestBody(nil)
-		if err != nil {
-			t.Fatalf("readRequestBody() error = %v, want nil", err)
-		}
-		if body != nil {
-			t.Fatalf("body = %v, want nil", body)
-		}
-	})
-
 	t.Run("nil request body returns nil body without error", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req.Body = nil

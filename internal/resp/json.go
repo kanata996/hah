@@ -17,11 +17,6 @@ var errNilResponseWriter = errors.New("resp: response writer is nil")
 
 // JSON 写出 JSON 响应。
 func JSON(w http.ResponseWriter, status int, data any) error {
-	return writeJSON(w, status, data)
-}
-
-// writeJSON 校验响应边界，编码 payload，并写出 JSON 响应。
-func writeJSON(w http.ResponseWriter, status int, data any) error {
 	if w == nil {
 		return errNilResponseWriter
 	}

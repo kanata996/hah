@@ -1,4 +1,4 @@
-# hah errx 设计方案
+# hah 共享 HTTP 错误模型设计方案
 
 - 状态：Locked
 - 版本：v3
@@ -6,8 +6,8 @@
 - 适用范围：
   - `hah.HTTPError`
   - `hah.Violation`
-  - `reqx` 对共享错误模型的错误生产依赖
-  - 响应写回入口对共享错误模型的错误消费依赖
+  - `hah` 暴露的错误构造器、快捷构造器与共享常量
+  - `reqx` / `resp` 对 `internal/errx` 的仓库内协作依赖
 - 不覆盖：
   - 请求输入规则
   - 业务错误分类
@@ -19,24 +19,28 @@
   - `docs/query-design.md`
   - `docs/path-design.md`
   - `docs/resp-design.md`
-- 变更规则：任何公开行为变化，必须先改本文档并补黑盒测试。
+- 变更规则：任何根包公开行为变化，必须先改本文档并补黑盒测试；若调整 `internal/errx` 的仓库内协作依赖，也必须先更新本文档并补相关包测试。
 
 ## 1. 包定位
 
-当前仓库通过根包 `hah` 暴露共享的公共 HTTP 错误模型，内部实现位于 `internal/errx`。
-它只负责表达稳定、可公开返回、可组合的 HTTP 错误语义。
+当前仓库通过根包 `hah` 暴露共享的公共 HTTP 错误模型，`internal/errx` 只是该模型的内部实现与仓库内协作载体。
+本文档优先锁定根包 `hah` 的公开契约；只有当 `reqx` / `resp` 明确依赖某些 `internal/errx` 行为时，才额外记录为仓库内协作约束。
+除 `hah.go` 明确暴露的符号外，`internal/errx` 的导出项不构成对外公开 API。
+
+这里提到的 `HTTPError` / `Violation`，如无特殊说明，均指根包 `hah` 暴露给调用方的公开类型。
 它不限定错误必须在 handler 层构造；只要某一层已经明确决定该错误可以直接公开给客户端，就可以返回 `hah.HTTPError`。
 如果错误仍属于内部业务语义，则应继续保留普通 error 或内部错误类型，并在 HTTP 边界再映射。
 
-该错误模型负责：
+该错误模型对外负责：
 
 - 定义 `HTTPError`
 - 定义 `Violation`
 - 标准化 `status`、`code`、`title`、`detail`
 - 提供可保留或不保留 `cause` 的基础构造器
+- 提供一组常用状态的快捷构造器
 - 提供项目级共享 violation 常量
 
-该错误模型不负责：
+该错误模型对外不负责：
 
 - request-side 默认文案
 - `invalid_request` 包络
@@ -44,11 +48,17 @@
 - 内部业务错误到公共 HTTP 错误的映射时机
 - Problem JSON 写回
 
-## 2. 稳定公开 API
+仓库内另外约束：
 
-### 2.1 公开类型与构造器
+- `reqx` 会依赖 `internal/errx` 的共享错误模型生成 request-side 错误
+- `resp` 会依赖共享错误模型消费 `status` / `code` / `title` / `detail` / `errors`
+- 这些依赖属于仓库内协作约束，不等同于对外公开 API
 
-必须导出：
+## 2. 根包 `hah` 的稳定公开契约
+
+### 2.1 公开类型、构造器与常量
+
+根包 `hah` 必须公开：
 
 - `HTTPError`
 - `Violation`
@@ -62,12 +72,26 @@
 - `Conflict(code, detail string) *HTTPError`
 - `UnprocessableEntity(code, detail string) *HTTPError`
 - `TooManyRequests(code, detail string) *HTTPError`
+- `CodeInvalid`
+- `CodeRequired`
+- `CodeUnknown`
+- `CodeType`
+- `CodeMultiple`
+- `InBody`
+- `InQuery`
+- `InPath`
+- `InHeader`
 
 两种构造器的公共字段标准化必须完全一致，差别只在是否保留 `cause`。
 
-### 2.2 `HTTPError` 公开方法
+`hah` 不公开：
 
-`HTTPError` 必须公开：
+- `ViolationCode`
+- `ViolationIn`
+
+### 2.2 `hah.HTTPError` 公开方法
+
+`hah.HTTPError` 必须公开：
 
 - `Error() string`
 - `Unwrap() error`
@@ -77,23 +101,6 @@
 - `Detail() string`
 - `Errors() []Violation`
 - `WithViolations([]Violation) *HTTPError`
-
-### 2.3 共享常量
-
-必须导出以下 violation code 常量：
-
-- `CodeInvalid`
-- `CodeRequired`
-- `CodeUnknown`
-- `CodeType`
-- `CodeMultiple`
-
-必须导出以下 violation in 常量：
-
-- `InBody`
-- `InQuery`
-- `InPath`
-- `InHeader`
 
 ## 3. `HTTPError` 公开语义
 
@@ -191,6 +198,7 @@
 - `Error() == "Internal Server Error"`
 
 `nil` 的 `*HTTPError` receiver 不属于公开契约。
+调用方不得依赖其任何方法行为；实现可以直接 panic。
 
 ## 4. `Violation` 与 `WithViolations(...)`
 
@@ -203,10 +211,10 @@
 - `Code`
 - `Detail`
 
-`errx` 只定义 `Violation` 的公开字段和值承载语义；
+共享错误模型只定义 `Violation` 的公开字段和值承载语义；
 若这些字段被写入 Problem JSON，由 `resp` 契约定义输出字段与包络。
 
-`errx` 对 `Violation` 只做承载，不负责：
+共享错误模型对 `Violation` 只做承载，不负责：
 
 - 自动补默认 `Code`
 - 自动补默认 `Detail`
@@ -214,54 +222,32 @@
 
 ### 4.2 `WithViolations(...)`
 
-`WithViolations(...)` 的规则固定为：
+`WithViolations(...)` 的固定公开结果为：
 
-- 返回新的 `*HTTPError`
-- 不修改 receiver
+- receiver 必须是非 `nil` 的 `*HTTPError`
+- 返回新的 `*HTTPError`，且不修改 receiver
 - 除 `violations` 外，必须保留 receiver 的 `Status()` / `Code()` / `Title()` / `Detail()` / `Unwrap()` 公开语义
 - 返回值中的 violations 必须完全替换 receiver 当前的 violations；不得 merge、append 或保留 receiver 的旧 violations
-- 立即拷贝入参切片
-- `Errors()` 必须返回 defensive copy
-- `nil` 或空切片输入都统一表现为 `nil`
-- 保留输入顺序
-- 保留重复项
-- 不排序、不去重、不过滤、不重写单个 `Violation`
+- `nil` 或空切片输入表示“无 violations”，即 `Errors() == nil`
+- `Errors()` 按提供顺序暴露 violation 列表，不排序、不去重、不重写单个 `Violation`
+- 后续对入参切片或 `Errors()` 返回结果的修改，都不得影响错误对象内部保存的 violations
 
-## 5. 与其他包的关系
+## 5. 仓库内协作约束
 
 - `reqx` 负责决定 request-side 的默认 detail、包络和 violation 内容。
-- `resp` 只能通过 `Status()` / `Code()` / `Title()` / `Detail()` / `Errors()` 消费 `errx`，并可把 `Code()` 暴露为顶层 Problem JSON 的 `code` 字段。
+- `reqx` 当前会直接使用 `internal/errx.ViolationCode` 与 `internal/errx.ViolationIn` 组装内部错误；这是仓库内协作细节，不是对外公开 API。
+- `resp` 只能通过 `Status()` / `Code()` / `Title()` / `Detail()` / `Errors()` 消费共享错误模型，并可把 `Code()` 暴露为顶层 Problem JSON 的 `code` 字段。
 - `resp` 若需要参与错误链，只能用 `errors.Is` / `errors.As`，不能读内部字段。
 
 ## 6. 测试基线
 
-后续实现或重构至少应锁住：
+黑盒测试应直接覆盖第 2 到第 4 节定义的根包公开契约，不在本节重复写一份完整规格。
+第 5 节的仓库内协作约束由相关包测试和集成测试覆盖，不作为对外黑盒契约。
 
-- `HTTPError`、`Violation` 类型存在
-- 两个构造器存在
-- 八个快捷构造器存在
-- `HTTPError` 的八个公开方法存在
-- 全部 `Code*` / `In*` 常量存在
-- 非错误状态码统一回落到 `500`
-- `499` 原样保留
-- 默认 `title` 规则与表格一致
-- 默认 `code` 规则与表格一致
-- 空白 `detail` 回落到 `Title()`
-- 显式 `code` / `detail` 只做 trim
-- `NewHTTPError(...)` 不保留 `cause`
-- `NewHTTPErrorWithCause(...)` 保留 `cause`
-- `Unwrap()` 除 typed-nil 归一化外原样返回原始 `cause`
-- `Error()` 始终等于 `Detail()`
-- `Error()` 不泄漏 `cause` 文本
-- `errors.Is` / `errors.As` 能通过 `Unwrap()` 正常工作
-- typed-nil `cause` 被归一化为 `nil`
-- `WithViolations(...)` 不修改 receiver
-- `WithViolations(...)` 返回值会保留 receiver 的 `Status()` / `Code()` / `Title()` / `Detail()` / `Unwrap()` 公开语义
-- `WithViolations(...)` 会替换而不是追加 receiver 的旧 violations
-- 传入切片被修改时，错误对象不受影响
-- `Errors()` 返回结果被修改时，错误对象不受影响
-- `nil` / 空切片统一表现为 `nil`
-- 输入顺序保持不变
-- 重复项被原样保留
-- `WithViolations(...)` 不会重写单个 violation 的字段
+至少额外锁住以下容易回归的边界：
+
+- 根包公开面存在：`HTTPError`、`Violation`、两个基础构造器、八个快捷构造器、`HTTPError` 的公开方法、全部 `Code*` / `In*` 常量
+- 状态码与默认文案收敛规则：非错误状态码统一回落到 `500`，`499` 原样保留，默认 `title` / `code` / `detail` 与表格一致
+- `cause` 语义：`NewHTTPError(...)` 不保留 `cause`，`NewHTTPErrorWithCause(...)` 保留 `cause`，typed-nil `cause` 归一化为 `nil`，`Error()` 不泄漏 `cause` 文本，`errors.Is` / `errors.As` 能通过 `Unwrap()` 正常工作
+- `WithViolations(...)` 语义：不修改 receiver、替换而不是追加旧 violations、且不受入参切片和 `Errors()` 返回结果后续修改影响
 - 零值 `HTTPError` 的全部 getter 与 `Error()` 语义

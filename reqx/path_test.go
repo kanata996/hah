@@ -140,16 +140,6 @@ func TestPathBuilder_ServeMuxPathValueContracts(t *testing.T) {
 }
 
 func TestPathBuilder_InternalLookupContracts(t *testing.T) {
-	t.Run("nil request returns missing path lookup", func(t *testing.T) {
-		got, ok := pathParamValues(nil, "id")
-		if ok {
-			t.Fatal("pathParamValues(nil, id) reported present")
-		}
-		if got != nil {
-			t.Fatalf("pathParamValues(nil, id) = %v, want nil", got)
-		}
-	})
-
 	t.Run("empty path value is missing", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.SetPathValue("id", "")

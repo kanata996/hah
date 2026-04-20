@@ -58,7 +58,10 @@ func (p *QueryParam) Bool() *ValueParam[bool] {
 
 // Float64 读取 float64 参数。
 func (p *QueryParam) Float64() *OrderedParam[float64] {
-	return newOrderedParam(p.spec, parseFloat64Value)
+	param := newOrderedParam(p.spec, parseFloat64Value)
+	param.valueValidator = validateFiniteFloat64
+	param.boundValidator = validateFiniteFloat64
+	return param
 }
 
 // Duration 读取 time.Duration 参数。
@@ -71,12 +74,12 @@ func (p *QueryParam) UUID() *ValueParam[uuid.UUID] {
 	return newValueParam(p.spec, parseUUIDValue)
 }
 
-// Time 按 RFC3339 读取 time.Time 参数。
+// Time 按严格 RFC3339 读取 time.Time 参数。
 func (p *QueryParam) Time() *TimeParam {
 	return newTimeParam(p.spec, parseRFC3339Time)
 }
 
-// UnixTime 按 10 位秒级 Unix 时间戳读取 time.Time 参数。
+// UnixTime 按恰好 10 个十进制数字的秒级 Unix 时间戳读取 time.Time 参数。
 func (p *QueryParam) UnixTime() *TimeParam {
 	return newTimeParam(p.spec, parseUnixTime)
 }
@@ -91,7 +94,7 @@ func (p *QueryParam) Values() *MultiParam[string] {
 }
 
 func queryParamValues(r *http.Request, name string) ([]string, bool) {
-	if r == nil || r.URL == nil {
+	if r.URL == nil {
 		return nil, false
 	}
 	values, exists := r.URL.Query()[name]

@@ -293,7 +293,7 @@ func TestNewHTTPErrorWithCauseTreatsTypedNilCauseAsNoCause(t *testing.T) {
 	}
 }
 
-// WithViolations 会立刻拷贝入参，Errors 也会返回独立副本；有无 cause 时契约一致。
+// WithViolations 的结果不应受入参切片或 Errors() 返回结果后续修改影响；有无 cause 时契约一致。
 func TestHTTPErrorWithViolationsClonesInputAndReturnedSlices(t *testing.T) {
 	testCases := []struct {
 		name  string
@@ -402,23 +402,6 @@ func TestHTTPErrorWithViolationsNilAndEmptyInputReplaceExistingViolations(t *tes
 			assertHTTPErrorErrors(t, base, baseWant...)
 		})
 	}
-}
-
-func TestNilHTTPErrorWithViolationsUsesDefaultContract(t *testing.T) {
-	var base *HTTPError
-
-	err := base.WithViolations([]Violation{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}})
-
-	assertHTTPErrorPublicFields(
-		t,
-		err,
-		http.StatusInternalServerError,
-		"internal_error",
-		http.StatusText(http.StatusInternalServerError),
-		http.StatusText(http.StatusInternalServerError),
-	)
-	assertHTTPErrorHasNoCause(t, err, http.StatusText(http.StatusInternalServerError))
-	assertHTTPErrorErrors(t, err, Violation{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"})
 }
 
 // 即使 detail 为空，Error 也应与公开 Detail 保持一致，不返回空串。
