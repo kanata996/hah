@@ -14,7 +14,7 @@
 - 以 `hah.Path(...)` / `hah.Query(...)` 作为默认请求侧 API，直接读取 path/query 参数
 - 支持把 query、body 绑定到 DTO，再由调用方显式做后续校验
 - 把常见请求违规收敛为稳定的公开 HTTP 错误
-- 内置 JSON 成功响应与 `application/problem+json` 错误响应
+- 内置统一 JSON envelope 成功响应与错误响应
 - 根包提供默认且完整的公开 HTTP 边界
 - 适合渐进接入现有服务，不要求整体迁移
 
@@ -113,7 +113,7 @@ func main() {
 }
 ```
 
-这个例子展示的是 `hah` 的默认使用路径：读取 path 参数，绑定 body，显式补充输入规则，然后统一写回 JSON 成功响应或 `problem+json` 错误响应。
+这个例子展示的是 `hah` 的默认使用路径：读取 path 参数，绑定 body，显式补充输入规则，然后统一写回默认 JSON envelope。
 
 ## 上手路径
 
@@ -122,7 +122,7 @@ func main() {
 - 用 `hah.Path(...)` / `hah.Query(...)` 读取单字段 path/query 参数
 - 用 `hah.BindQuery(...)` / `hah.BindBody(...)` 绑定 DTO
 - 用 `hah.InvalidRequest(...)` 补充显式请求规则
-- 用 `hah.WriteError(...)` / `hah.OK(...)` / `hah.Created(...)` / `hah.NoContent(...)` 写回响应
+- 用 `hah.WriteError(...)` / `hah.OK(...)` / `hah.Created(...)` 写回响应
 
 ## 公开 API 速览
 
@@ -144,8 +144,10 @@ DTO binding 与显式规则：
 
 - `hah.Violation`、`hah.HTTPError`、`hah.NewHTTPError(...)`、`hah.NewHTTPErrorWithCause(...)` 是根包暴露的公共错误模型入口
 - `hah.BadRequest(...)`、`hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)` 等快捷构造器适合在已明确公开错误语义的更深层直接返回
-- `hah.WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成 `application/problem+json`
-- `hah.JSON(...)` 写回调用方指定状态的 JSON 响应；`hah.OK(...)`、`hah.Created(...)`、`hah.NoContent(...)` 是成功响应快捷入口
+- `hah.WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成统一 JSON error envelope
+- `hah.OK(...)` / `hah.Created(...)` 会写默认成功 envelope：顶层固定 `code = 0`、`message = "success"`，业务数据放在可选 `data`
+- `hah.WriteError(...)` 会写默认错误 envelope：顶层固定 `code` / `message`，错误细节放在 `error`
+- `hah.JSON(...)` 仍是调用方指定状态码与原始 JSON body 的 escape hatch，不参与默认 envelope 协议
 - `hah.WriteError(...)` 的返回值表示响应边界自身异常，例如响应写出失败；生产代码通常至少要记录这个错误
 
 ## 公开契约要点
@@ -173,6 +175,7 @@ DTO binding 与显式规则：
 
 - `WriteError(...)` 只负责错误标准化与响应写回，不内建独立错误日志
 - 如果你需要统一的日志或指标策略，在调用方基于原始 error 和业务上下文自行处理
+- 默认成功协议只提供 `OK(...)` 与 `Created(...)`；无 payload 成功也会返回 envelope，而不是 `204 No Content`
 - `HEAD` 场景沿用 `net/http` 默认语义：handler 正常写回，对外是否发送响应体由底层决定
 - 调用方应在开始写出响应前调用 `WriteError(...)`
 

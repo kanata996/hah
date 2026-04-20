@@ -284,7 +284,7 @@ func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := hah.NoContent(w); err != nil {
+	if err := hah.OK(w, nil); err != nil {
 		writeError(w, r, err)
 	}
 }

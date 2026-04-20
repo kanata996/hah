@@ -44,16 +44,16 @@ func fuzzJSONWriterContracts(t *testing.T, variant uint8, value string) {
 	switch variant % 4 {
 	case 0:
 		err := JSON(rr, http.StatusAccepted, payload)
-		assertRecorderJSONSuccess(t, rr, err, http.StatusAccepted, payload)
+		assertRecorderRawJSONSuccess(t, rr, err, http.StatusAccepted, payload)
 	case 1:
 		err := JSON(rr, http.StatusOK, nil)
 		assertJSONNullWriterResult(t, rr, err, http.StatusOK)
 	case 2:
 		err := OK(rr, payload)
-		assertRecorderJSONSuccess(t, rr, err, http.StatusOK, payload)
+		assertRecorderEnvelopeSuccess(t, rr, err, http.StatusOK, payload)
 	default:
 		err := Created(rr, payload)
-		assertRecorderJSONSuccess(t, rr, err, http.StatusCreated, payload)
+		assertRecorderEnvelopeSuccess(t, rr, err, http.StatusCreated, payload)
 	}
 }
 
@@ -74,7 +74,7 @@ func assertJSONNullWriterResult(t *testing.T, rr *httptest.ResponseRecorder, err
 	}
 }
 
-func assertRecorderJSONSuccess(t *testing.T, rr *httptest.ResponseRecorder, err error, status int, payload map[string]string) {
+func assertRecorderRawJSONSuccess(t *testing.T, rr *httptest.ResponseRecorder, err error, status int, payload map[string]string) {
 	t.Helper()
 
 	if err != nil {
@@ -93,27 +93,56 @@ func assertRecorderJSONSuccess(t *testing.T, rr *httptest.ResponseRecorder, err 
 	}
 }
 
+func assertRecorderEnvelopeSuccess(t *testing.T, rr *httptest.ResponseRecorder, err error, status int, payload map[string]string) {
+	t.Helper()
+
+	if err != nil {
+		t.Fatalf("writer error = %v", err)
+	}
+	if rr.Code != status {
+		t.Fatalf("status = %d, want %d", rr.Code, status)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+
+	body := decodePayload(t, rr.Body.Bytes())
+	if got := body["code"]; got != float64(0) {
+		t.Fatalf("code = %#v, want 0", got)
+	}
+	if got := body["message"]; got != "success" {
+		t.Fatalf("message = %#v, want success", got)
+	}
+
+	data, ok := body["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data = %#v, want object", body["data"])
+	}
+	if got := data["value"]; got != jsonSafeString(payload["value"]) {
+		t.Fatalf("data.value = %#v, want %#v", got, jsonSafeString(payload["value"]))
+	}
+}
+
 func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, field string) {
 	t.Helper()
 
 	rr := httptest.NewRecorder()
 
 	hiddenCause := "internal cause sentinel"
-	wantErrors := map[string]any{
-		"code":   string(errx.CodeInvalid),
-		"detail": "is invalid",
-	}
-	if normalizedField := jsonSafeString(field); normalizedField != "" {
-		wantErrors["field"] = normalizedField
+	wantField := map[string]any{
+		"field":   jsonSafeString(field),
+		"code":    string(errx.CodeInvalid),
+		"message": "is invalid",
 	}
 	httpErr := errx.NewHTTPErrorWithCause(status, "", detail, errors.New(hiddenCause)).WithViolations([]errx.Violation{
 		{Field: field, Code: errx.CodeInvalid, Detail: "is invalid"},
 	})
 	input := fmt.Errorf("wrapped: %w", httpErr)
 	wantStatus := httpErr.Status()
-	wantCode := httpErr.Code()
+	wantTopCode := wantStatus * 1000
+	wantErrorCode := httpErr.Code()
 	wantTitle := httpErr.Title()
-	wantDetail := jsonSafeString(httpErr.Detail())
+	wantMessage := jsonSafeString(httpErr.Detail())
 
 	if err := WriteError(rr, input); err != nil {
 		t.Fatalf("WriteError() error = %v", err)
@@ -121,29 +150,39 @@ func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, f
 	if rr.Code != wantStatus {
 		t.Fatalf("status = %d, want %d", rr.Code, wantStatus)
 	}
-	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
-		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
 	}
 
 	body := decodePayload(t, rr.Body.Bytes())
-	if got := body["status"]; got != float64(wantStatus) {
-		t.Fatalf("status = %#v, want %d", got, wantStatus)
+	if got := body["code"]; got != float64(wantTopCode) {
+		t.Fatalf("code = %#v, want %d", got, wantTopCode)
 	}
-	if got := body["code"]; got != wantCode {
-		t.Fatalf("code = %#v, want %q", got, wantCode)
+	if got := body["message"]; got != wantMessage {
+		t.Fatalf("message = %#v, want %q", got, wantMessage)
 	}
-	if got := body["title"]; got != wantTitle {
-		t.Fatalf("title = %#v, want %q", got, wantTitle)
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
 	}
-	if got := body["detail"]; got != wantDetail {
-		t.Fatalf("detail = %#v, want %q", got, wantDetail)
+	if got := errorValue["status"]; got != float64(wantStatus) {
+		t.Fatalf("error.status = %#v, want %d", got, wantStatus)
+	}
+	if got := errorValue["code"]; got != wantErrorCode {
+		t.Fatalf("error.code = %#v, want %q", got, wantErrorCode)
+	}
+	if got := errorValue["title"]; got != wantTitle {
+		t.Fatalf("error.title = %#v, want %q", got, wantTitle)
+	}
+	if _, exists := errorValue["detail"]; exists {
+		t.Fatalf("error.detail unexpectedly present: %#v", errorValue["detail"])
 	}
 
-	errorsValue, ok := body["errors"].([]any)
-	if !ok || len(errorsValue) != 1 {
-		t.Fatalf("errors = %#v, want 1 item", body["errors"])
+	fields, ok := errorValue["fields"].([]any)
+	if !ok || len(fields) != 1 {
+		t.Fatalf("fields = %#v, want 1 item", errorValue["fields"])
 	}
-	assertPublicErrorObject(t, errorsValue[0], wantErrors)
+	assertPublicErrorObject(t, fields[0], wantField)
 
 	if bytes.Contains(rr.Body.Bytes(), []byte(hiddenCause)) {
 		t.Fatalf("body leaked internal cause: %q", rr.Body.String())
