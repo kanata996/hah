@@ -292,7 +292,7 @@ func buildBindQueryLeafSetter(t reflect.Type) (func(reflect.Value, string) error
 
 // 统一构造 BindQuery 的稳定客户端输入错误。
 func bindQueryBadRequestError() error {
-	return errx.NewHTTPError(http.StatusBadRequest, "bad_request", "Bad Request")
+	return errx.NewHTTPError(http.StatusBadRequest, "bad_request", "")
 }
 
 // 统一标记 DTO 字段形状不受支持的 usage error。

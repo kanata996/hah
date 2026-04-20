@@ -154,8 +154,8 @@ func TestNewHTTPErrorWithCause_DelegatesToErrx(t *testing.T) {
 	if got := err.Code(); got != "internal_error" {
 		t.Fatalf("Code() = %q, want internal_error", got)
 	}
-	if got := err.Error(); got != "Internal Server Error" {
-		t.Fatalf("Error() = %q, want Internal Server Error", got)
+	if got := err.Error(); got != "internal error" {
+		t.Fatalf("Error() = %q, want internal error", got)
 	}
 }
 
@@ -220,7 +220,7 @@ func TestRootErrorHelpers_CommonStatuses(t *testing.T) {
 func TestWriteError_DelegatesToResp(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	if err := WriteError(rr, context.DeadlineExceeded, 504123); err != nil {
+	if err := WriteError(rr, context.DeadlineExceeded, 50412); err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 	if rr.Code != http.StatusGatewayTimeout {
@@ -228,19 +228,19 @@ func TestWriteError_DelegatesToResp(t *testing.T) {
 	}
 
 	body := decodeRootPayload(t, rr.Body.Bytes())
-	if got := body["code"]; got != float64(504123) {
-		t.Fatalf("code = %#v, want 504123", got)
+	if got := body["code"]; got != float64(50412) {
+		t.Fatalf("code = %#v, want 50412", got)
 	}
-	if got := body["message"]; got != http.StatusText(http.StatusGatewayTimeout) {
-		t.Fatalf("message = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
+	if got := body["message"]; got != "timeout" {
+		t.Fatalf("message = %#v, want timeout", got)
 	}
 
 	errorValue, ok := body["error"].(map[string]any)
 	if !ok {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
-	if got := errorValue["code"]; got != "timeout" {
-		t.Fatalf("error.code = %#v, want timeout", got)
+	if got := errorValue["reason"]; got != "timeout" {
+		t.Fatalf("error.reason = %#v, want timeout", got)
 	}
 }
 

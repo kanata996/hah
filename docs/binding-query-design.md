@@ -194,7 +194,7 @@ type ListAccountsQuery struct {
 - `BindQuery(...)` 与 `Query(...)` 共享“空字符串视为已提交参数”“单值入口拒绝重复值”的输入方向
 - `BindQuery(...)` 是 DTO binder；`Query(...)` 是单字段 helper
 - `BindQuery(...)` 比 `Query(...)` 更严格，因为它还要处理 DTO 规则、整条 query source 和一次性提交语义
-- 顶层错误模型来自 `hah.HTTPError`；对外如何写成 Problem JSON 也由 `hah.WriteError(...)` 决定
+- 顶层错误模型来自 `hah.HTTPError`；对外如何写成默认错误 envelope 也由 `hah.WriteError(...)` 决定
 
 ## 6. 测试基线
 

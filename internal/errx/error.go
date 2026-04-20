@@ -33,10 +33,11 @@ func NewHTTPError(status int, code, detail string) *HTTPError {
 // 这里在入口一次性做标准化，保证后续使用时不会因为原始输入脏数据而漂移。
 func NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPError {
 	status = normalizeErrorStatus(status)
+	code = normalizeErrorCode(status, code)
 	return &HTTPError{
 		status: status,
-		code:   normalizeErrorCode(status, code),
-		detail: normalizeErrorDetail(status, detail),
+		code:   code,
+		detail: normalizeErrorDetail(code, detail),
 		cause:  normalizeErrorCause(cause),
 	}
 }
@@ -84,12 +85,12 @@ func (e *HTTPError) Title() string {
 }
 
 // Detail 返回公开错误详情。
-// 若构造时未显式提供，或零值 HTTPError 未设置 detail，则回退到 Title()。
+// 若构造时未显式提供，或零值 HTTPError 未设置 detail，则回退到 Code() 的可读化结果。
 func (e *HTTPError) Detail() string {
 	if e.detail != "" {
 		return e.detail
 	}
-	return e.Title()
+	return humanizeErrorDetail(e.Code())
 }
 
 // Errors 返回公开结构化错误详情列表的防御性浅拷贝。
@@ -234,11 +235,20 @@ func defaultErrorTitle(status int) string {
 	return "Client Error"
 }
 
-// normalizeErrorDetail 根据状态码补齐默认公共错误详情。
-// 显式 detail 优先；若为空白则与 Title 保持一致，避免对外语义出现空 detail。
-func normalizeErrorDetail(status int, detail string) string {
+// normalizeErrorDetail 根据 code 补齐默认公共错误详情。
+// 显式 detail 优先；若为空白则与 code 的可读化结果保持一致，避免对外语义出现空 detail。
+func normalizeErrorDetail(code, detail string) string {
 	if trimmed := strings.TrimSpace(detail); trimmed != "" {
 		return trimmed
 	}
-	return defaultErrorTitle(status)
+	return humanizeErrorDetail(code)
+}
+
+func humanizeErrorDetail(code string) string {
+	replaced := strings.NewReplacer("_", " ", "-", " ").Replace(code)
+	message := strings.ToLower(strings.Join(strings.Fields(replaced), " "))
+	if message != "" {
+		return message
+	}
+	return strings.ToLower(strings.TrimSpace(code))
 }

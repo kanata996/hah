@@ -9,12 +9,15 @@ import (
 	"github.com/kanata996/hah/internal/errx"
 )
 
-const errorCodeBase = 1000
+const (
+	defaultErrorCodeScale = 100
+	minExplicitErrorCode  = 10000
+	maxExplicitErrorCode  = 99999
+)
 
 type errorBody struct {
-	Title  string       `json:"title"`
 	Status int          `json:"status"`
-	Code   string       `json:"code"`
+	Reason string       `json:"reason"`
 	Fields []fieldError `json:"fields,omitempty"`
 }
 
@@ -46,7 +49,7 @@ func WriteError(w http.ResponseWriter, err error, code ...int) error {
 
 	httpErr := normalizeHTTPError(err)
 	if !topCodeSet {
-		topCode = httpErr.Status() * errorCodeBase
+		topCode = httpErr.Status() * defaultErrorCodeScale
 	}
 
 	body, encodeErr := encodeErrorEnvelope(responseEnvelope{
@@ -66,7 +69,7 @@ func normalizeTopCode(code []int) (value int, ok bool, err error) {
 	case 0:
 		return 0, false, nil
 	case 1:
-		if code[0] <= 0 {
+		if code[0] < minExplicitErrorCode || code[0] > maxExplicitErrorCode {
 			return 0, false, fmt.Errorf("resp: invalid top-level error code %d", code[0])
 		}
 		return code[0], true, nil
@@ -80,15 +83,14 @@ func normalizeHTTPError(err error) *errx.HTTPError {
 		return httpErr
 	}
 
-	status := http.StatusInternalServerError
 	switch {
 	case errors.Is(err, context.Canceled):
-		status = 499
+		return errx.NewHTTPError(499, "", "")
 	case errors.Is(err, context.DeadlineExceeded):
-		status = http.StatusGatewayTimeout
+		return errx.NewHTTPError(http.StatusGatewayTimeout, "", "")
+	default:
+		return errx.NewHTTPError(http.StatusInternalServerError, "", "")
 	}
-
-	return errx.NewHTTPError(status, "", "")
 }
 
 func findHTTPError(err error) *errx.HTTPError {
@@ -116,6 +118,9 @@ func findHTTPError(err error) *errx.HTTPError {
 }
 
 func deriveErrorMessage(httpErr *errx.HTTPError) string {
+	if httpErr == nil {
+		return ""
+	}
 	return httpErr.Detail()
 }
 
@@ -132,9 +137,8 @@ func newErrorBody(httpErr *errx.HTTPError) *errorBody {
 	}
 
 	return &errorBody{
-		Title:  httpErr.Title(),
 		Status: httpErr.Status(),
-		Code:   httpErr.Code(),
+		Reason: httpErr.Code(),
 		Fields: fields,
 	}
 }
