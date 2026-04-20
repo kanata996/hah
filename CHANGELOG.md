@@ -18,14 +18,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 ### Fixed
 
 - Fixed `reqx.BindQuery(...)` / `hah.BindQuery(...)` so named scalar DTO fields backed by `bool`, `int*`, `uint*`, and `float*` underlying kinds now bind according to their scalar family rules, matching the documented `BindQuery(...)` contract for named scalar query fields.
+- Fixed `reqx.BindQuery(...)` / `hah.BindQuery(...)` struct-target commits so only planned `query:"..."` fields are rebuilt from the current request. Ignored `query:"-"` fields and untagged fields now preserve their existing caller-owned values on successful binds instead of being zeroed as an unintended side effect.
+- Fixed `reqx.BindQuery(...)` / `hah.BindQuery(...)` and `reqx.Query(...).Float32()` / `Float64()` so non-finite float inputs such as `NaN`, `+Inf`, and `-Inf` are rejected as invalid request input instead of being accepted as ordinary scalar values.
+- Fixed `reqx.BindBody(...)` / `hah.BindBody(...)` target validation so root DTOs that implement `json.Unmarshaler` are rejected as usage errors before body inspection, matching the documented top-level `*struct` request-body contract.
 
 ### Documentation
 
-- Clarified the `hah.HTTPError` design contract so nil `*HTTPError` receivers remain outside the supported public surface, and `WithViolations(...)` requires a non-nil receiver.
+- Refreshed `README.md`, `REQUESTS.md`, and the request/error design docs to clarify the top-level `BindBody(...)` target contract, `BindQuery(...)` planned-field commit semantics, finite-float query parsing, and that nil `*HTTPError` receivers remain outside the supported public surface.
 
 ### Testing
 
-- Added regression coverage for named-scalar `BindQuery(...)` decoding and `reqx` usage-error wrapping behavior.
+- Expanded regression coverage across `reqx` and `errx`, including named-scalar and finite-float query decoding, `BindQuery(...)` non-planned field preservation, root-DTO `UnmarshalJSON` usage errors in `BindBody(...)`, and `reqx` usage-error wrapping behavior.
 
 ## [v0.7.1] - 2026-04-20
 
