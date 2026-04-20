@@ -191,6 +191,7 @@
 - `Error() == "Internal Server Error"`
 
 `nil` 的 `*HTTPError` receiver 不属于公开契约。
+调用方不得依赖其任何方法行为；实现可以直接 panic。
 
 ## 4. `Violation` 与 `WithViolations(...)`
 
@@ -217,6 +218,7 @@
 `WithViolations(...)` 的规则固定为：
 
 - 返回新的 `*HTTPError`
+- receiver 必须是非 `nil` 的 `*HTTPError`
 - 不修改 receiver
 - 除 `violations` 外，必须保留 receiver 的 `Status()` / `Code()` / `Title()` / `Detail()` / `Unwrap()` 公开语义
 - 返回值中的 violations 必须完全替换 receiver 当前的 violations；不得 merge、append 或保留 receiver 的旧 violations

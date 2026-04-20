@@ -44,9 +44,6 @@ func NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPEr
 // WithViolations 绑定公开 violation 列表。
 // 调用方后续修改传入切片时，不会影响已构造的 HTTPError。
 func (e *HTTPError) WithViolations(violations []Violation) *HTTPError {
-	if e == nil {
-		e = NewHTTPError(0, "", "")
-	}
 	cloned := *e
 	cloned.errors = cloneViolations(violations)
 	return &cloned
@@ -59,22 +56,19 @@ func (e *HTTPError) Error() string {
 
 // Unwrap 暴露底层 cause，便于调用方继续使用 errors.Is / errors.As。
 func (e *HTTPError) Unwrap() error {
-	if e == nil {
-		return nil
-	}
 	return e.cause
 }
 
 // Status 返回可公开返回的 HTTP 错误状态码。
-// 即使内部字段被错误写入，也会再次收敛到安全范围。
+// 零值 HTTPError 会回退到 500。
 func (e *HTTPError) Status() int {
 	return e.normalizedStatus()
 }
 
 // Code 返回机器可读错误码。
-// 若构造时未显式提供，或内部字段被写成空白值，会按最终状态码补齐默认值。
+// 若构造时未显式提供，或零值 HTTPError 未设置 code，会按最终状态码补齐默认值。
 func (e *HTTPError) Code() string {
-	if e != nil && e.code != "" {
+	if e.code != "" {
 		return e.code
 	}
 	return defaultErrorCode(e.normalizedStatus())
@@ -87,20 +81,17 @@ func (e *HTTPError) Title() string {
 }
 
 // Detail 返回公开错误详情。
-// 若 detail 为空白，则回退到与 Title 对齐的稳定默认文案。
+// 若构造时未显式提供，或零值 HTTPError 未设置 detail，则回退到 Title()。
 func (e *HTTPError) Detail() string {
-	if e != nil && e.detail != "" {
+	if e.detail != "" {
 		return e.detail
 	}
-	return defaultErrorTitle(e.normalizedStatus())
+	return e.Title()
 }
 
 // Errors 返回公开结构化错误详情列表的防御性浅拷贝。
 // 调用方修改返回切片时，不会影响已构造的 HTTPError。
 func (e *HTTPError) Errors() []Violation {
-	if e == nil {
-		return nil
-	}
 	return cloneViolations(e.errors)
 }
 
@@ -153,7 +144,7 @@ func cloneViolations(violations []Violation) []Violation {
 }
 
 func (e *HTTPError) normalizedStatus() int {
-	if e == nil || e.status == 0 {
+	if e.status == 0 {
 		return http.StatusInternalServerError
 	}
 	return e.status
