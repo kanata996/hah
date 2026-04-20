@@ -117,7 +117,7 @@ type ListAccountsQuery struct {
 | `bool`                                | 是       | 保持零值     | 按 `strconv.ParseBool` 解析        |
 | `int` / `int8` / `int16` / `int32` / `int64` | 是 | 保持零值     | 按十进制 `strconv.ParseInt` 解析   |
 | `uint` / `uint8` / `uint16` / `uint32` / `uint64` | 是 | 保持零值 | 按十进制 `strconv.ParseUint` 解析  |
-| `float32` / `float64`                 | 是       | 保持零值     | 按 `strconv.ParseFloat` 解析       |
+| `float32` / `float64`                 | 是       | 保持零值     | 按 `strconv.ParseFloat` 解析，且只接受有限值 |
 | 命名标量类型                          | 是       | 保持零值     | 按其底层标量家族规则解析后写入     |
 | `time.Duration`                       | 是       | 保持零值     | 按 `time.ParseDuration` 解析       |
 | `time.Time`                           | 是       | 保持零值     | 按 RFC3339 解析                    |

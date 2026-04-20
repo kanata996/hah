@@ -3,6 +3,7 @@ package reqx
 import (
 	"cmp"
 	"errors"
+	"math"
 	"regexp"
 	"strconv"
 	"time"
@@ -313,7 +314,14 @@ func parseUintBits(value string, bits int) (uint64, error) {
 }
 
 func parseFloatBits(value string, bits int) (float64, error) {
-	return strconv.ParseFloat(value, bits)
+	parsed, err := strconv.ParseFloat(value, bits)
+	if err != nil {
+		return 0, err
+	}
+	if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+		return 0, errors.New("float must be finite")
+	}
+	return parsed, nil
 }
 
 func parseIntValue(value string) (int, error) {

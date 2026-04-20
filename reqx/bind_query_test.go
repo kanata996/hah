@@ -3,6 +3,7 @@ package reqx
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"testing"
 	"time"
@@ -375,6 +376,19 @@ func TestBindQuery_Contracts(t *testing.T) {
 			_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
 			if dst != (request{Limit: 9, Ratio: 1.25}) {
 				t.Fatalf("dst = %#v, want unchanged", dst)
+			}
+		})
+
+		t.Run("non finite float", func(t *testing.T) {
+			for _, raw := range []string{"NaN", "+Inf", "-Inf"} {
+				t.Run(raw, func(t *testing.T) {
+					dst := request{Limit: 9, Ratio: 1.25}
+					err := BindQuery(httptest.NewRequest(http.MethodGet, "/?ratio="+url.QueryEscape(raw), nil), &dst)
+					_ = assertHTTPStatusCode(t, err, http.StatusBadRequest, "bad_request")
+					if dst != (request{Limit: 9, Ratio: 1.25}) {
+						t.Fatalf("dst = %#v, want unchanged", dst)
+					}
+				})
 			}
 		})
 	})

@@ -284,7 +284,7 @@ func buildBindQueryLeafSetter(t reflect.Type) (func(reflect.Value, string) error
 		}, nil
 	case reflect.Float32, reflect.Float64:
 		return func(field reflect.Value, raw string) error {
-			value, err := strconv.ParseFloat(raw, field.Type().Bits())
+			value, err := parseFloatBits(raw, field.Type().Bits())
 			if err != nil {
 				return bindQueryBadRequestError()
 			}

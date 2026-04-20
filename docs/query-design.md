@@ -98,7 +98,7 @@ limit, err := Query(r, "limit").Int().Get()
 - `Int` / `Int64`：`strconv.ParseInt(..., 10, bits)`
 - `Uint` / `Uint64`：`strconv.ParseUint(..., 10, bits)`
 - `Bool`：`strconv.ParseBool`
-- `Float64`：`strconv.ParseFloat(..., 64)`
+- `Float64`：`strconv.ParseFloat(..., 64)`，且只接受有限值
 - `Duration`：`time.ParseDuration`
 - `UUID`：`uuid.Parse`
 - `Time`：RFC3339，不额外归一化时区

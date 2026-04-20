@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strconv"
 	"testing"
@@ -86,6 +87,17 @@ func TestQueryTypedBuilder_ScalarParsersAndConstraints(t *testing.T) {
 	if got := gotTime.Format(time.RFC3339); got != "2026-04-13T18:00:00+08:00" {
 		t.Fatalf("when = %q, want 2026-04-13T18:00:00+08:00", got)
 	}
+
+	t.Run("float rejects non finite values", func(t *testing.T) {
+		for _, raw := range []string{"NaN", "+Inf", "-Inf"} {
+			t.Run(raw, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodGet, "/items?score="+url.QueryEscape(raw), nil)
+
+				_, err := Query(req, "score").Float64().Get()
+				assertInvalidViolationAt(t, err, "score", errx.InQuery)
+			})
+		}
+	})
 }
 
 func TestQueryDefaultContracts(t *testing.T) {
