@@ -159,12 +159,12 @@ DTO binding 与显式规则：
 - `hah.Query(...).Time()` 以及 `BindQuery(...)` 中的 `time.Time` / `*time.Time` 字段都要求严格 RFC3339 时间戳语法
 - `hah.BindQuery(...)` 默认忽略未知 query key；同名 query key 只要出现多个值就返回稳定 `400 bad_request`
 - malformed raw query 返回稳定 `400 bad_request` 且不修改 target；DTO 或 tag 形状非法时，先返回普通错误且不修改 target
-- `hah.BindBody(...)` 公开只支持非 `nil` 的 `*struct` DTO target
+- `hah.BindBody(...)` 公开只支持非 `nil`、且根 DTO 不自定义 `UnmarshalJSON` 的 `*struct` target
 - 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
 - 零字节 body 不要求 `Content-Type` 为 JSON
 - body 大小限制在读取阶段先执行；超大 body 返回稳定 `request_too_large`
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，未知字段默认拒绝
-- struct 字段解码直接跟随标准库 `encoding/json`；像 `json.RawMessage`、自定义 `UnmarshalJSON` / `UnmarshalText` 类型默认允许
+- struct 字段解码直接跟随标准库 `encoding/json`；像 `json.RawMessage`、字段级自定义 `UnmarshalJSON` / `UnmarshalText` 类型默认允许
 - 绑定先解到临时值，成功后才一次性提交，因此失败不会污染 target
 - 同名 JSON object key 跟随标准库 `encoding/json` 语义，后值覆盖前值
 - 零字节 body 对 `BindBody(...)` 是 no-op；仅空白字符 body 和顶层 `null` 对 `BindBody(...)` 视为 `invalid_json`

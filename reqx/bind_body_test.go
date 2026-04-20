@@ -22,6 +22,18 @@ func (v *bindBodyJSONValue) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+type bindBodyRootJSONPointerTarget struct {
+	Name string `json:"name"`
+}
+
+func (*bindBodyRootJSONPointerTarget) UnmarshalJSON([]byte) error { return nil }
+
+type bindBodyRootJSONValueTarget struct {
+	Name string `json:"name"`
+}
+
+func (bindBodyRootJSONValueTarget) UnmarshalJSON([]byte) error { return nil }
+
 func TestBindBody_BasicContracts(t *testing.T) {
 	t.Run("zero byte body is noop and does not require json content type", func(t *testing.T) {
 		type request struct {
@@ -206,6 +218,25 @@ func TestBindBody_BoundariesAndUsageErrors(t *testing.T) {
 
 		var unsupported map[string]string
 		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{}`), &unsupported))
+	})
+
+	t.Run("rejects root dto implementing unmarshal json", func(t *testing.T) {
+		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{"extra":1}`), &bindBodyRootJSONPointerTarget{}))
+		assertNotHTTPError(t, BindBody(newJSONRequest(http.MethodPost, "/", `{"extra":1}`), &bindBodyRootJSONValueTarget{}))
+	})
+
+	t.Run("root dto unmarshal json usage error wins before body read", func(t *testing.T) {
+		wantErr := errors.New("read failed")
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = bindBodyReadErrorCloser{err: wantErr}
+		req.ContentLength = -1
+
+		err := BindBody(req, &bindBodyRootJSONPointerTarget{})
+		assertNotHTTPError(t, err)
+		if errors.Is(err, wantErr) {
+			t.Fatalf("BindBody() error = %v, want usage error before body inspection", err)
+		}
 	})
 
 	t.Run("too large body returns request too large and preserves target", func(t *testing.T) {

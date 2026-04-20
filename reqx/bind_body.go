@@ -23,6 +23,8 @@ const (
 
 const mimeApplicationJSON = "application/json"
 
+var bindBodyJSONUnmarshalerType = reflect.TypeFor[json.Unmarshaler]()
+
 // 零字节 body 直接 no-op；非空 body 则按 JSON object 输入模型处理，
 // 全部成功后再一次性提交到零值临时对象对应的 target。
 func BindBody(r *http.Request, target any) error {
@@ -74,6 +76,9 @@ func BindBody(r *http.Request, target any) error {
 func validateBindBodyTarget(targetType reflect.Type) error {
 	if targetType.Kind() != reflect.Pointer || targetType.Elem().Kind() != reflect.Struct {
 		return usageErrorf("destination must point to struct")
+	}
+	if targetType.Implements(bindBodyJSONUnmarshalerType) {
+		return usageErrorf("destination must point to struct without custom UnmarshalJSON")
 	}
 	return nil
 }

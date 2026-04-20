@@ -47,7 +47,7 @@ body 是 request 级输入。
 
 ### 2.2 DTO 绑定模型
 
-`BindBody(...)` 的 target 固定为非 `nil` 的 `*struct`。
+`BindBody(...)` 的 target 固定为非 `nil` 的普通 `*struct`。
 
 绑定过程固定为：
 
@@ -78,6 +78,7 @@ body 是 request 级输入。
 - typed-nil target
 - 非指针 target
 - 指向非 `struct` 的指针
+- 根 DTO 自己实现 `UnmarshalJSON`
 
 ### 3.2 body 存在性
 
@@ -125,9 +126,14 @@ body 存在性的规则固定为：
 
 - 命名类型按标准库规则解码
 - `json.RawMessage` 按标准库规则解码
-- 自定义 `UnmarshalJSON` / `UnmarshalText` 按标准库规则解码
+- 字段级自定义 `UnmarshalJSON` / `UnmarshalText` 按标准库规则解码
 - 嵌入字段提升与遮蔽按标准库规则处理
 - 同名 JSON object key 按标准库语义处理，后值覆盖前值
+
+补充约束：
+
+- 根 DTO 不支持自定义 `UnmarshalJSON`
+- 自定义 JSON 解码只允许出现在字段层
 
 `BindBody(...)` 以标准库字段发现与解码语义作为唯一字段语义来源。
 
@@ -171,6 +177,7 @@ body 存在性的规则固定为：
 后续实现或重构至少应锁住：
 
 - 合法 target 仅限非 `nil` 的 `*struct`
+- 根 DTO 实现 `UnmarshalJSON` 返回 usage error，且优先于 body 读取
 - 非法 `request` / `target` 返回 usage error
 - 零字节 body 是 no-op，且不修改 target
 - `application/json`
