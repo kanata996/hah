@@ -148,28 +148,21 @@ if err := hah.BindBody(r, &body); err != nil {
 
 `hah.BindBody(...)` 当前的公开契约是：
 
-- 实际读取到零字节 body 时视为 no-op
 - 公开只支持非 `nil`、且根 DTO 不自定义 `UnmarshalJSON` 的 `*struct` target
 - 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
 - 零字节 body 不要求 `Content-Type` 为 JSON
+- 零字节 body 视为 no-op；仅空白字符 body 和顶层 `null` 返回 `invalid_json`
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，只允许前后空白
-- 默认使用标准库 `encoding/json`
-- 不接受 `application/*+json`
-- struct 字段解码直接跟随标准库 `encoding/json`；像 `json.RawMessage`、命名类型、字段级自定义 `UnmarshalJSON` / `UnmarshalText` 类型默认允许
+- body 超过 `1 MiB` 返回 `request_too_large`
 - 默认拒绝未知字段
-- 顶层 `null`、array、string、number、boolean 返回 `invalid_json`
+- 顶层 array、string、number、boolean 返回 `invalid_json`
+- struct 字段解码默认跟随标准库 `encoding/json`；像 `json.RawMessage`、命名类型、字段级自定义 `UnmarshalJSON` / `UnmarshalText` 类型默认允许
 - 同名 JSON object key 跟随标准库 `encoding/json` 语义，后值覆盖前值
-- 截断 JSON / `unexpected EOF` 返回 `invalid_json`
-- body 大小限制在读取阶段先执行；超大 body 返回 `request_too_large`
+- 截断 JSON、尾随数据、多个 top-level JSON 值都返回 `invalid_json`
 - 非 JSON 语义的 body read failure 返回普通 error，不收敛成 `HTTPError`
-- 绑定先解码到临时值；成功后才一次性提交，因此 JSON 里缺失的字段不会继承 DTO 旧值
-- 如果返回错误，DTO 保持调用前状态，不应出现部分更新
+- 绑定成功后才会提交到 target，因此 JSON 里缺失的字段不会继承 DTO 旧值；如果返回错误，DTO 保持调用前状态，不应出现部分更新
 
 `hah` 不内建独立的 body-required helper。是否把零字节 body 视为业务错误，由调用方在 `BindBody(...)` 之后自行决定。
-
-- 零字节 body 对 `BindBody(...)` 是 no-op
-- 仅空白字符 body 对 `BindBody(...)` 返回 `invalid_json`
-- 顶层 `null` 对 `BindBody(...)` 返回 `invalid_json`
 
 如果 body 非法，会返回稳定的公开错误，例如：
 
@@ -181,10 +174,10 @@ if err := hah.BindBody(r, &body); err != nil {
 
 ### 字段解码范围
 
-当前 `BindBody(...)` 不再维护额外的字段家族白名单。公开语义直接跟随标准库 `encoding/json`：
+除顶层 target 必须是受支持的 `*struct`、顶层值必须是单个 JSON object、未知字段默认拒绝外，`BindBody(...)` 的字段解码公开语义直接跟随标准库 `encoding/json`：
 
-- 未知字段继续默认拒绝
-- 根 DTO 不允许自定义 `UnmarshalJSON`；字段发现、嵌入字段遮蔽、命名类型、字段级自定义 decoder、`json.RawMessage`、slice / map / 指针 等行为按标准库处理
+- 根 DTO 不允许自定义 `UnmarshalJSON`
+- 字段发现、嵌入字段遮蔽、命名类型、字段级自定义 decoder、`json.RawMessage`、slice / map / 指针 等行为按标准库处理
 - 如果某个字段类型对当前 JSON 输入不可解码，返回 `invalid_json`
 
 如果你需要更克制、更稳定的 DTO 面，建议由调用方自己收窄 DTO 形状，而不是依赖 binder 内建白名单。

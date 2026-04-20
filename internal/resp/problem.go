@@ -35,14 +35,8 @@ type problemPayload struct {
 
 // WriteError 是 HTTP 错误写回的统一入口。
 //
-// 职责分为两步：
-//   - 先把任意 error 收敛为可稳定写回的 HTTPError；
-//   - 再按统一错误响应契约写回客户端。
-//
-// 约束：
-//   - 对 HEAD 等请求沿用 net/http 默认语义：handler 仍正常写回，最终 body 是否发出由底层决定；
-//   - 调用方应在开始写出响应前调用它；resp 不额外探测外部 ResponseWriter 的内部状态；
-//   - 日志策略留给调用方决定；WriteError(...) 本身不输出独立错误日志。
+// 它只负责把给定 error 收敛成稳定的 Problem JSON 并写回。
+// 对 HEAD 等请求沿用 net/http 默认语义；调用方应在开始写出响应前调用它。
 func WriteError(w http.ResponseWriter, err error) error {
 	if err == nil {
 		return nil

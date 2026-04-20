@@ -394,6 +394,9 @@ func parseRFC3339Time(value string) (time.Time, error) {
 	if !strictRFC3339Pattern.MatchString(value) {
 		return time.Time{}, errors.New("timestamp is not strict RFC3339")
 	}
+	if err := validateRFC3339Offset(value); err != nil {
+		return time.Time{}, err
+	}
 	parsed, err := time.Parse(time.RFC3339, value)
 	if err != nil {
 		return time.Time{}, err
@@ -413,7 +416,26 @@ func parseFixedWidthTimestamp(value string, digits int) (int64, error) {
 	if len(value) != digits {
 		return 0, errors.New("timestamp has invalid width")
 	}
+	for _, ch := range value {
+		if ch < '0' || ch > '9' {
+			return 0, errors.New("timestamp must contain digits only")
+		}
+	}
 	return strconv.ParseInt(value, 10, 64)
+}
+
+func validateRFC3339Offset(value string) error {
+	if len(value) == 0 || value[len(value)-1] == 'Z' {
+		return nil
+	}
+
+	offset := value[len(value)-6:]
+	hours := int(offset[1]-'0')*10 + int(offset[2]-'0')
+	minutes := int(offset[4]-'0')*10 + int(offset[5]-'0')
+	if hours > 23 || minutes > 59 {
+		return errors.New("timestamp has invalid timezone offset")
+	}
+	return nil
 }
 
 func cloneSlice[T any](values []T) []T {

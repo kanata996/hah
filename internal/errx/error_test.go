@@ -293,7 +293,7 @@ func TestNewHTTPErrorWithCauseTreatsTypedNilCauseAsNoCause(t *testing.T) {
 	}
 }
 
-// WithViolations 会立刻拷贝入参，Errors 也会返回独立副本；有无 cause 时契约一致。
+// WithViolations 的结果不应受入参切片或 Errors() 返回结果后续修改影响；有无 cause 时契约一致。
 func TestHTTPErrorWithViolationsClonesInputAndReturnedSlices(t *testing.T) {
 	testCases := []struct {
 		name  string

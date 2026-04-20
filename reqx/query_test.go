@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -95,11 +96,36 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 		assertInvalidViolationAt(t, err, "sec", errx.InQuery)
 	})
 
+	t.Run("unix time requires exactly 10 decimal digits", func(t *testing.T) {
+		for _, raw := range []string{"+123456789", "-123456789", "-1234567890"} {
+			t.Run(raw, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodGet, "/items?sec="+url.QueryEscape(raw), nil)
+
+				_, err := Query(req, "sec").UnixTime().Get()
+				assertInvalidViolationAt(t, err, "sec", errx.InQuery)
+			})
+		}
+	})
+
 	t.Run("time rejects non strict rfc3339 syntax", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?at=2026-04-13T10:00:00,123Z", nil)
 
 		_, err := Query(req, "at").Time().Get()
 		assertInvalidViolationAt(t, err, "at", errx.InQuery)
+	})
+
+	t.Run("time rejects invalid rfc3339 offsets", func(t *testing.T) {
+		for _, raw := range []string{
+			"2026-04-13T10:00:00+08:60",
+			"2026-04-13T10:00:00+24:00",
+		} {
+			t.Run(raw, func(t *testing.T) {
+				req := httptest.NewRequest(http.MethodGet, "/items?at="+url.QueryEscape(raw), nil)
+
+				_, err := Query(req, "at").Time().Get()
+				assertInvalidViolationAt(t, err, "at", errx.InQuery)
+			})
+		}
 	})
 
 	t.Run("time rejects strict rfc3339 values with invalid calendar fields", func(t *testing.T) {

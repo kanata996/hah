@@ -129,7 +129,7 @@ func main() {
 请求输入：
 
 - `hah.Path(...)` 面向 path segment 中的资源标识，只保留 `String()`、`UUID()`、`Int()`、`Int64()`、`Uint()`、`Uint64()`
-- `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`；其中 `Time()` 要求严格 RFC3339 时间戳语法
+- `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`；其中 `Time()` 要求严格 RFC3339 时间戳语法，`UnixTime()` 只接受恰好 10 个十进制数字
 - `hah.Query(...).String()` / `Int()` / `UUID()` 等单值 helper 在重复 query key 上会返回稳定 `invalid_request`
 - `hah.Query(...).Values()` 可直接读取同名 query 参数的全部解析后值；如果你需要批量结构化解码，优先用 `hah.BindQuery(...)`
 
@@ -156,13 +156,13 @@ DTO binding 与显式规则：
 
 - `hah.BindQuery(...)` 的目标必须是 `*struct` 或 `*map[string]string`
 - 对于 struct，只有显式 `query` tag 的顶层字段会参与绑定，其他字段保持原值；`BindQuery(...)` 不展开嵌套 DTO
-- `hah.Query(...).Time()` 以及 `BindQuery(...)` 中的 `time.Time` / `*time.Time` 字段都要求严格 RFC3339 时间戳语法
+- `hah.Query(...).Time()` 以及 `BindQuery(...)` 中的 `time.Time` / `*time.Time` 字段都要求严格 RFC3339 时间戳语法，且时区 offset 必须合法
 - `hah.BindQuery(...)` 默认忽略未知 query key；同名 query key 只要出现多个值就返回稳定 `400 bad_request`
 - malformed raw query 返回稳定 `400 bad_request` 且不修改 target；DTO 或 tag 形状非法时，先返回普通错误且不修改 target
 - `hah.BindBody(...)` 公开只支持非 `nil`、且根 DTO 不自定义 `UnmarshalJSON` 的 `*struct` target
 - 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
 - 零字节 body 不要求 `Content-Type` 为 JSON
-- body 大小限制在读取阶段先执行；超大 body 返回稳定 `request_too_large`
+- body 超过 `1 MiB` 返回稳定 `request_too_large`
 - 非空 body 必须恰好构成一个以 object 为顶层值的 JSON 文档，未知字段默认拒绝
 - struct 字段解码直接跟随标准库 `encoding/json`；像 `json.RawMessage`、字段级自定义 `UnmarshalJSON` / `UnmarshalText` 类型默认允许
 - 绑定先解到临时值，成功后才一次性提交，因此失败不会污染 target
