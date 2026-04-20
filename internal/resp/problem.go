@@ -54,7 +54,7 @@ func WriteError(w http.ResponseWriter, err error, code ...int) error {
 
 	body, encodeErr := encodeErrorEnvelope(responseEnvelope{
 		Code:    topCode,
-		Message: deriveErrorMessage(httpErr),
+		Message: httpErr.Detail(),
 		Error:   newErrorBody(httpErr),
 	})
 	if encodeErr != nil {
@@ -115,13 +115,6 @@ func findHTTPError(err error) *errx.HTTPError {
 	}
 
 	return nil
-}
-
-func deriveErrorMessage(httpErr *errx.HTTPError) string {
-	if httpErr == nil {
-		return ""
-	}
-	return httpErr.Detail()
 }
 
 func newErrorBody(httpErr *errx.HTTPError) *errorBody {

@@ -170,6 +170,15 @@ var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
 		wantTitle:  http.StatusText(http.StatusBadRequest),
 		wantDetail: "mixed code v1",
 	},
+	{
+		name:       "blank detail falls back to trimmed code when humanized explicit code is empty",
+		status:     http.StatusBadRequest,
+		code:       " _-_ ",
+		wantStatus: http.StatusBadRequest,
+		wantCode:   "_-_",
+		wantTitle:  http.StatusText(http.StatusBadRequest),
+		wantDetail: "_-_",
+	},
 }
 
 func assertHTTPErrorStatusAndCode(t *testing.T, err *HTTPError, wantStatus int, wantCode string) {

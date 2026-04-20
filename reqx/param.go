@@ -19,9 +19,6 @@ type paramSpec struct {
 }
 
 func (s paramSpec) values() ([]string, bool, error) {
-	if s.lookup == nil || s.input == "" {
-		return nil, false, usageErrorf("param builder must be created with Path or Query")
-	}
 	if s.r == nil {
 		return nil, false, usageErrorf("request must not be nil")
 	}
