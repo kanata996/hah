@@ -119,4 +119,32 @@ func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("does not mutate caller owned violation slice", func(t *testing.T) {
+		violations := []errx.Violation{
+			{Field: "page", In: errx.InQuery},
+			{Field: "body", In: errx.InBody, Code: errx.CodeRequired},
+		}
+		wantOriginal := append([]errx.Violation(nil), violations...)
+
+		got := assertViolations(t, InvalidRequest(violations...))
+
+		want := []errx.Violation{
+			{Field: "page", In: errx.InQuery, Code: errx.CodeInvalid, Detail: "is invalid"},
+			{Field: "body", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
+		}
+		if len(got) != len(want) {
+			t.Fatalf("violations len = %d, want %d", len(got), len(want))
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("violations[%d] = %#v, want %#v", i, got[i], want[i])
+			}
+		}
+		for i := range wantOriginal {
+			if violations[i] != wantOriginal[i] {
+				t.Fatalf("caller violations[%d] = %#v, want %#v", i, violations[i], wantOriginal[i])
+			}
+		}
+	})
 }

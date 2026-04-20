@@ -13,6 +13,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.8.2] - 2026-04-21
+
+### Fixed
+
+- Fixed `reqx.InvalidRequest(...)` / `hah.InvalidRequest(...)` so request-violation normalization no longer mutates caller-owned `Violation` slices in place. Default `code` / `detail` filling still applies to the emitted error envelope, but the original input slice now remains unchanged for caller reuse.
+- Fixed `reqx.Query(...).Values()` / `hah.Query(...).Values()` so caller-supplied empty-slice defaults remain observable as non-nil empty slices instead of collapsing to `nil` after the internal defensive clone path. `Default([]string{})`, downstream `Check(...)`, and final `Get()` results now preserve the documented empty-slice intent.
+
+### Testing
+
+- Added `reqx` regression coverage for caller-owned violation-slice preservation and non-nil empty-slice defaults in `Values()`, and removed stale response/body benchmark and obsolete fuzz-fixture files that no longer contributed to the active contract suite.
+
 ## [v0.8.1] - 2026-04-20
 
 ### Changed
