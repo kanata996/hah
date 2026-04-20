@@ -12,6 +12,10 @@ import (
 
 type bindQueryNamedString string
 type bindQueryNamedSlice []string
+type bindQueryNamedBool bool
+type bindQueryNamedInt int32
+type bindQueryNamedUint uint16
+type bindQueryNamedFloat float32
 
 type bindQueryTextValue string
 
@@ -40,6 +44,30 @@ func TestBindQuery_Contracts(t *testing.T) {
 		}
 		if got := dst.When.UTC().Format(time.RFC3339); got != "2026-04-13T10:00:00Z" {
 			t.Fatalf("when = %q, want 2026-04-13T10:00:00Z", got)
+		}
+	})
+
+	t.Run("named scalar families bind by underlying kind", func(t *testing.T) {
+		type request struct {
+			Enabled bindQueryNamedBool  `query:"enabled"`
+			Count   bindQueryNamedInt   `query:"count"`
+			Limit   bindQueryNamedUint  `query:"limit"`
+			Ratio   bindQueryNamedFloat `query:"ratio"`
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/?enabled=true&count=7&limit=9&ratio=1.25", nil)
+
+		var dst request
+		if err := BindQuery(req, &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst != (request{
+			Enabled: bindQueryNamedBool(true),
+			Count:   bindQueryNamedInt(7),
+			Limit:   bindQueryNamedUint(9),
+			Ratio:   bindQueryNamedFloat(1.25),
+		}) {
+			t.Fatalf("dst = %#v, want bound named scalar values", dst)
 		}
 	})
 
