@@ -293,6 +293,15 @@ func TestNewHTTPErrorWithCauseTreatsTypedNilCauseAsNoCause(t *testing.T) {
 	}
 }
 
+// nil receiver 的 Unwrap 必须安全返回 nil，避免 typed-nil *HTTPError 污染错误链扫描。
+func TestHTTPErrorUnwrapNilReceiverReturnsNil(t *testing.T) {
+	var err *HTTPError
+
+	if got := err.Unwrap(); got != nil {
+		t.Fatalf("Unwrap() = %v, want nil", got)
+	}
+}
+
 // WithViolations 的结果不应受入参切片或 Errors() 返回结果后续修改影响；有无 cause 时契约一致。
 func TestHTTPErrorWithViolationsClonesInputAndReturnedSlices(t *testing.T) {
 	testCases := []struct {

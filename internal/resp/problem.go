@@ -25,6 +25,10 @@ type fieldError struct {
 	Message string `json:"message"`
 }
 
+var encodeErrorEnvelope = func(env responseEnvelope) ([]byte, error) {
+	return encodeJSON(env)
+}
+
 // WriteError 是 HTTP 错误写回的统一入口。
 func WriteError(w http.ResponseWriter, err error, code ...int) error {
 	if err == nil {
@@ -45,7 +49,7 @@ func WriteError(w http.ResponseWriter, err error, code ...int) error {
 		topCode = httpErr.Status() * errorCodeBase
 	}
 
-	body, encodeErr := encodeJSON(responseEnvelope{
+	body, encodeErr := encodeErrorEnvelope(responseEnvelope{
 		Code:    topCode,
 		Message: deriveErrorMessage(httpErr),
 		Error:   newErrorBody(httpErr),

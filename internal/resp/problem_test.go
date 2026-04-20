@@ -422,6 +422,28 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 }
 
 func TestWriteErrorWriteFailure(t *testing.T) {
+	t.Run("returns encode failure before first commit", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		cause := errors.New("encode failed")
+
+		original := encodeErrorEnvelope
+		encodeErrorEnvelope = func(responseEnvelope) ([]byte, error) {
+			return nil, cause
+		}
+		t.Cleanup(func() {
+			encodeErrorEnvelope = original
+		})
+
+		err := WriteError(rr, errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid"))
+		if err == nil {
+			t.Fatal("expected encode error, got nil")
+		}
+		if !errors.Is(err, cause) {
+			t.Fatalf("errors.Is(err, cause) = false, want true")
+		}
+		assertRecorderHasNoBodyOrContentType(t, rr)
+	})
+
 	t.Run("returns write failure after first commit", func(t *testing.T) {
 		cause := errors.New("socket closed")
 		w := &failingWriter{cause: cause}
