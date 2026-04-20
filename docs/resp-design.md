@@ -22,9 +22,9 @@
 ## 1. 设计目标
 
 根包 `hah` 的响应入口只负责 HTTP 响应写回。
-它默认只提供两类输出：
+它默认只提供两类输出语义：
 
-- 成功响应：`application/json`
+- 成功写回：`application/json` 或 `204 No Content`
 - 错误响应：`application/problem+json`
 
 目标是保持响应边界简单、稳定、可预测：

@@ -1,8 +1,8 @@
 # hah BindQuery 设计方案
 
 - 状态：Locked
-- 版本：v9
-- 锁定日期：2026-04-19
+- 版本：v10
+- 锁定日期：2026-04-20
 - 适用范围：
   - `hah.BindQuery(...)`
   - `reqx.BindQuery(...)`
@@ -55,14 +55,12 @@ type ListAccountsQuery struct {
 - binder 不展开嵌套 DTO
 - binder 不引入 `inline`、命名空间或分组语义
 
-### 2.2 原子提交
+### 2.2 一次性提交语义
 
-对 `*struct` target，绑定过程固定为：
+对 `*struct` target，`BindQuery(...)` 的对外表现固定为：
 
-1. 创建与 target 同构的临时对象，并先复制调用前状态
-2. 把参与绑定的字段先重置为零值
-3. 把 query source 写入这些参与绑定的字段
-4. 全部成功后一次性提交到 target
+1. 先根据当前 query source 计算参与绑定字段的新值
+2. 全部成功后再一次性提交到 target
 
 因此：
 
@@ -101,10 +99,11 @@ type ListAccountsQuery struct {
 规则固定为：
 
 - 未标注字段一律忽略，并在成功绑定后保持原值
-- 未导出字段一律忽略；即使带 `query` tag，也不参与 tag 校验、绑定或冲突检测
-- `query:"-"` 一律显式忽略；不参与绑定、冲突检测或字段类型校验，且在成功绑定后保持原值
+- 未导出字段一律忽略；即使带 `query` tag，也不参与 tag 校验、绑定或重复 key 声明检测
+- `query:"-"` 一律显式忽略；不参与绑定、重复 key 声明检测或字段类型校验，且在成功绑定后保持原值
 - `query:"name"` 中的 `name` 必须非空，且不得包含前后空白
 - `query:"name"` 的 key 按 tag 字面值原样参与匹配；不做 trim、大小写归一化或额外解码
+- 两个导出字段不得声明同一个 `query:"name"` key；否则属于 usage error
 - 导出字段上的其他 tag 形式都属于 usage error
 
 ### 3.3 支持的字段形状
@@ -120,7 +119,7 @@ type ListAccountsQuery struct {
 | `float32` / `float64`                 | 是       | 保持零值     | 按 `strconv.ParseFloat` 解析，且只接受有限值 |
 | 命名标量类型                          | 是       | 保持零值     | 按其底层标量家族规则解析后写入     |
 | `time.Duration`                       | 是       | 保持零值     | 按 `time.ParseDuration` 解析       |
-| `time.Time`                           | 是       | 保持零值     | 按 RFC3339 解析                    |
+| `time.Time`                           | 是       | 保持零值     | 按严格 RFC3339 解析               |
 | `uuid.UUID`                           | 是       | 保持零值     | 按 `uuid.Parse` 解析               |
 | 指向上述受支持叶子类型的一级指针 `*T` | 是       | 保持 `nil`   | 先解码到临时值，成功后再分配或覆盖 |
 
@@ -139,12 +138,10 @@ type ListAccountsQuery struct {
 
 公开语义固定为：
 
-- binder 必须先解析 raw query，再进入字段写入
-- 当 `request.URL != nil` 时，source 阶段按 Go `1.25.9` `net/url` 的 query 解析语义解析 `request.URL.RawQuery`
+- `request.URL == nil` 视为空 query source
+- 当 `request.URL != nil` 时，query 解析语义跟随 Go `1.25.9` `net/url`
 - raw query 解析失败属于客户端输入错误，不是 usage error
 - raw query 解析失败时，返回稳定 `400 bad_request`，且 target 零修改
-- query key 与 value 都基于解析后的字符串，而不是 raw query 子串
-- `+`、百分号解码和 malformed escape 的处理都跟随标准库 `net/url`
 - `query:"name"` 的 tag key 必须与解析后的 query key 做精确字符串匹配
 - query source 采用默认单值模型：同名 key 出现多个值时，视为客户端输入错误
 - 对 `struct` 目标，未知 key 默认忽略
@@ -174,8 +171,8 @@ type ListAccountsQuery struct {
 - typed-nil target
 - 不支持的 target 形状
 - 非法 `query` tag
+- 两个导出字段声明同一个 query key
 - 不支持的字段类型
-- 冲突字段计划
 
 ### 4.2 客户端输入错误
 
@@ -196,46 +193,23 @@ type ListAccountsQuery struct {
 
 - `BindQuery(...)` 与 `Query(...)` 共享“空字符串视为已提交参数”“单值入口拒绝重复值”的输入方向
 - `BindQuery(...)` 是 DTO binder；`Query(...)` 是单字段 helper
-- `BindQuery(...)` 比 `Query(...)` 更严格，因为它还要处理 DTO 规划、整条 raw query 解析和原子提交
+- `BindQuery(...)` 比 `Query(...)` 更严格，因为它还要处理 DTO 规则、整条 query source 和一次性提交语义
 - 顶层错误模型来自 `hah.HTTPError`；对外如何写成 Problem JSON 也由 `hah.WriteError(...)` 决定
 
 ## 6. 测试基线
 
 后续实现或重构至少应锁住：
 
-- `nil request`
-- `nil target`
-- 非指针 target
-- typed-nil target
-- 指向不支持目标类型的指针
+- target 前置条件：`nil request`、`nil target`、typed-nil、非指针以及不支持的 target 形状都返回 usage error
 - `request.URL == nil` 视为空 query source
-- raw query 的解析与 key/value 解码语义跟随 Go `1.25.9` `net/url`
-- raw query 解析失败返回 `400 bad_request`
-- raw query 解析失败时 target 零修改
-- `map[string]string` 成功绑定后替换为当前请求解析后单值快照
-- `map[string]string` 在空 query 下得到空 map
-- `map[string]string` 成功绑定时清除旧项
-- query source 中任一重复 key 返回 `400 bad_request`
-- 客户端输入导致的重复 key 时 target 零修改
-- `query:"name"`
-- `query:"-"`
-- `query:",inline"` 返回 usage error
-- `query:"-"` 与未标注字段一样始终忽略
-- 未导出字段即使带 `query` tag 也始终忽略
-- 非法 `query` tag 形式
-- 带前后空白的 `query:"name"` key 返回 usage error
-- `query:"name"` 的 key 与解析后的 query key 精确匹配
-- 不支持字段类型在规划阶段返回 usage error
-- 命名标量类型、`uuid.UUID`、`time.Time`、`time.Duration` 及其一级指针的代表性成功 / 失败路径
-- 除受支持叶子类型外的其他字段形状返回 usage error
-- 规划阶段 usage error 时 target 零修改
-- 未知 query key 默认忽略
-- 缺失参数不会继承 target 旧值
-- 未标注字段和 `query:"-"` 字段在成功绑定后保持原值
-- 空字符串参数视为存在
-- 普通 pointer 字段命中时按成功结果分配或覆盖
-- `*struct` target 写入先进入零值临时对象，成功后一次性提交
-- `string` / `bool` / `int` / `uint` / `float` 的代表性成功 / 失败路径
-- `uuid.UUID` / `time.Time` / `time.Duration` 的代表性成功 / 失败路径
-- 受支持字段类型解码失败收敛为 `400 bad_request`
-- 客户端输入错误下 target 零修改
+- raw query 解析遵循 Go `1.25.9` `net/url` 的代表性语义；解析失败返回 `400 bad_request` 且 target 零修改
+- `*map[string]string` 成功绑定后替换为当前请求的解析后单值快照；空 query 得到空 map，且旧项会被清除
+- `struct` 目标只绑定顶层导出且显式标注 `query:"name"` 的字段；未标注字段、未导出字段和 `query:"-"` 字段始终忽略并保持原值
+- 非法 `query` tag、不支持字段类型以及两个导出字段声明同一个 query key 都返回 usage error
+- query key 按解析后字符串精确匹配；未知 key 默认忽略
+- query source 中任一重复 key 返回 `400 bad_request` 且 target 零修改
+- 缺失已绑定参数不会继承 target 旧值；成功绑定时只更新参与绑定的字段
+- 空字符串参数视为存在；只有字符串家族接受空字符串
+- 代表性覆盖基础标量、命名标量、`time.Duration`、`time.Time`、`uuid.UUID` 及其一级指针的成功 / 失败路径
+- `time.Time` 会拒绝非法 RFC3339 offset；`float` 只接受有限值
+- 客户端输入错误统一收敛为 `400 bad_request`，且 target 零修改
