@@ -58,7 +58,10 @@ func (p *QueryParam) Bool() *ValueParam[bool] {
 
 // Float64 读取 float64 参数。
 func (p *QueryParam) Float64() *OrderedParam[float64] {
-	return newOrderedParam(p.spec, parseFloat64Value)
+	param := newOrderedParam(p.spec, parseFloat64Value)
+	param.valueValidator = validateFiniteFloat64
+	param.boundValidator = validateFiniteFloat64
+	return param
 }
 
 // Duration 读取 time.Duration 参数。

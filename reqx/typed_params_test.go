@@ -2,6 +2,7 @@ package reqx
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -171,6 +172,27 @@ func TestQueryDefaultContracts(t *testing.T) {
 			Get()
 		assertNotHTTPError(t, err)
 	})
+
+	t.Run("float finite default returns configured value", func(t *testing.T) {
+		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "score").Float64().
+			Default(1.25).
+			Get()
+		if err != nil {
+			t.Fatalf("Float64().Get() error = %v", err)
+		}
+		if got != 1.25 {
+			t.Fatalf("score = %v, want 1.25", got)
+		}
+	})
+
+	t.Run("float non finite defaults are usage errors", func(t *testing.T) {
+		for _, value := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+			_, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "score").Float64().
+				Default(value).
+				Get()
+			assertNotHTTPError(t, err)
+		}
+	})
 }
 
 func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
@@ -229,6 +251,55 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 			MinLen(3).
 			Get()
 		assertNotHTTPError(t, err)
+	})
+
+	t.Run("float non finite min and max are usage errors", func(t *testing.T) {
+		for _, tc := range []struct {
+			name  string
+			build func(*OrderedParam[float64]) *OrderedParam[float64]
+		}{
+			{
+				name: "min nan",
+				build: func(p *OrderedParam[float64]) *OrderedParam[float64] {
+					return p.Min(math.NaN())
+				},
+			},
+			{
+				name: "min positive inf",
+				build: func(p *OrderedParam[float64]) *OrderedParam[float64] {
+					return p.Min(math.Inf(1))
+				},
+			},
+			{
+				name: "min negative inf",
+				build: func(p *OrderedParam[float64]) *OrderedParam[float64] {
+					return p.Min(math.Inf(-1))
+				},
+			},
+			{
+				name: "max nan",
+				build: func(p *OrderedParam[float64]) *OrderedParam[float64] {
+					return p.Max(math.NaN())
+				},
+			},
+			{
+				name: "max positive inf",
+				build: func(p *OrderedParam[float64]) *OrderedParam[float64] {
+					return p.Max(math.Inf(1))
+				},
+			},
+			{
+				name: "max negative inf",
+				build: func(p *OrderedParam[float64]) *OrderedParam[float64] {
+					return p.Max(math.Inf(-1))
+				},
+			},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := tc.build(Query(httptest.NewRequest(http.MethodGet, "/items?score=1.25", nil), "score").Float64()).Get()
+				assertNotHTTPError(t, err)
+			})
+		}
 	})
 
 	t.Run("time invalid builder configuration is usage error", func(t *testing.T) {

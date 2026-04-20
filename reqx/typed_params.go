@@ -43,9 +43,11 @@ type ValueParam[T any] struct {
 
 // OrderedParam 读取并校验可比较范围的单值参数。
 type OrderedParam[T cmp.Ordered] struct {
-	value paramValue[T]
-	min   *T
-	max   *T
+	value          paramValue[T]
+	min            *T
+	max            *T
+	valueValidator func(T) error
+	boundValidator func(T) error
 }
 
 // StringParam 读取并校验 string 参数。
@@ -99,11 +101,19 @@ func (p *OrderedParam[T]) Default(value T) *OrderedParam[T] {
 }
 
 func (p *OrderedParam[T]) Min(value T) *OrderedParam[T] {
+	if err := p.validateBound(value, "minimum"); err != nil {
+		p.value.setUsageErr(err)
+		return p
+	}
 	p.min = &value
 	return p
 }
 
 func (p *OrderedParam[T]) Max(value T) *OrderedParam[T] {
+	if err := p.validateBound(value, "maximum"); err != nil {
+		p.value.setUsageErr(err)
+		return p
+	}
 	p.max = &value
 	return p
 }
@@ -125,6 +135,11 @@ func (p *OrderedParam[T]) Get() (T, error) {
 }
 
 func (p *OrderedParam[T]) validateBuiltins(value T) error {
+	if p.valueValidator != nil {
+		if err := p.valueValidator(value); err != nil {
+			return err
+		}
+	}
 	if p.min != nil && value < *p.min {
 		return errInvalidParamValue
 	}
@@ -139,6 +154,16 @@ func (p *OrderedParam[T]) constraintUsageErr() error {
 		return nil
 	}
 	return usageErrorf("minimum must be less than or equal to maximum")
+}
+
+func (p *OrderedParam[T]) validateBound(value T, name string) error {
+	if p.boundValidator == nil {
+		return nil
+	}
+	if err := p.boundValidator(value); err != nil {
+		return usageErrorf("%s must be finite", name)
+	}
+	return nil
 }
 
 func (p *StringParam) Required() *StringParam {
@@ -318,10 +343,17 @@ func parseFloatBits(value string, bits int) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+	if err := validateFiniteFloat64(parsed); err != nil {
 		return 0, errors.New("float must be finite")
 	}
 	return parsed, nil
+}
+
+func validateFiniteFloat64(value float64) error {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return errInvalidParamValue
+	}
+	return nil
 }
 
 func parseIntValue(value string) (int, error) {
