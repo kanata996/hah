@@ -13,6 +13,25 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.8.0] - 2026-04-20
+
+### Breaking
+
+- Switched the default root-package response protocol from raw success JSON plus `application/problem+json` errors to a unified `application/json` envelope. `hah.OK(...)` and `hah.Created(...)` now write `{"code":0,"message":"success","data":...}`-style responses, while `hah.WriteError(...)` now writes `{"code":...,"message":...,"error":{...}}` envelopes. `hah.NoContent(...)` has been removed from the public API; callers that need no-body or raw JSON responses should now use standard `net/http` writes or `hah.JSON(...)` explicitly.
+- Expanded `hah.WriteError(...)` to accept an optional top-level integer business code via `WriteError(w, err, code...)`. When omitted, the default top-level error code now derives from `status * 1000`; invalid or multiple explicit codes fail as usage errors before the response is committed.
+
+### Changed
+
+- Refined the default error envelope contract so the public summary message is exposed at the top level, and field-level violations now serialize as `error.fields[].message` under the new envelope instead of the old Problem Details `detail` / `errors[].detail` shape. `hah.JSON(...)` remains available as the raw JSON escape hatch outside the default envelope protocol.
+
+### Documentation
+
+- Refreshed `README.md`, the response design doc, and the bundled `net/http` / `chi` examples to document the new default JSON envelope protocol, the removal of `NoContent(...)`, and the optional top-level error-code path in `WriteError(...)`.
+
+### Testing
+
+- Rebuilt the `hah` and `internal/resp` contract coverage around the new success/error envelope semantics, optional top-level error codes, no-payload success responses, and response-boundary header/write behavior, with corresponding fuzz coverage updates for the response path.
+
 ## [v0.7.2] - 2026-04-20
 
 ### Fixed
