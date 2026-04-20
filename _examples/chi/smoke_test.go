@@ -110,13 +110,13 @@ func TestDeleteRequiresActorHeader(t *testing.T) {
 	}
 
 	problem := decodeEnvelope(t, rr.Body.Bytes())
-	if got := problem["code"]; got != float64(422000) {
-		t.Fatalf("top code = %#v, want 422000", got)
+	if got := problem["code"]; got != float64(42200) {
+		t.Fatalf("top code = %#v, want 42200", got)
 	}
 
 	errorValue := mustErrorObject(t, problem)
-	if got := errorValue["code"]; got != "invalid_request" {
-		t.Fatalf("error.code = %#v, want invalid_request", got)
+	if got := errorValue["reason"]; got != "invalid_request" {
+		t.Fatalf("error.reason = %#v, want invalid_request", got)
 	}
 
 	fields, ok := errorValue["fields"].([]any)

@@ -1,8 +1,8 @@
 # hah 共享 HTTP 错误模型设计方案
 
 - 状态：Locked
-- 版本：v3
-- 锁定日期：2026-04-18
+- 版本：v4
+- 锁定日期：2026-04-20
 - 适用范围：
   - `hah.HTTPError`
   - `hah.Violation`
@@ -11,7 +11,7 @@
 - 不覆盖：
   - 请求输入规则
   - 业务错误分类
-  - Problem JSON 写回
+  - 默认错误 envelope 写回
 - 关联文档：
   - `docs/testing-standards.md`
   - `docs/binding-query-design.md`
@@ -46,7 +46,7 @@
 - `invalid_request` 包络
 - 业务错误枚举
 - 内部业务错误到公共 HTTP 错误的映射时机
-- Problem JSON 写回
+- 默认错误 envelope 写回
 
 仓库内另外约束：
 
@@ -168,11 +168,14 @@
 若调用方提供的 `detail` 经 trim 后非空，则 `Detail()` 返回该值。
 否则：
 
-- `Detail() == Title()`
+- `Detail()` 等于 `Code()` 的确定性可读化结果
 
 规则：
 
 - `detail` 只做 trim
+- 默认 `detail` 只允许基于公开、稳定、可对外暴露的 `code` 生成
+- 将 `snake_case` / `kebab-case` 中的 `_` / `-` 统一替换为空格
+- 合并连续分隔符并输出为小写短语
 - `detail` 不得从 `cause` 派生
 
 ### 3.6 `Error()` 与 `Unwrap()`
@@ -192,10 +195,10 @@
 - `Status() == 500`
 - `Code() == "internal_error"`
 - `Title() == "Internal Server Error"`
-- `Detail() == "Internal Server Error"`
+- `Detail() == "internal error"`
 - `Errors() == nil`
 - `Unwrap() == nil`
-- `Error() == "Internal Server Error"`
+- `Error() == "internal error"`
 
 `nil` 的 `*HTTPError` receiver 不属于公开契约。
 调用方不得依赖其任何方法行为；实现可以直接 panic。
@@ -212,7 +215,7 @@
 - `Detail`
 
 共享错误模型只定义 `Violation` 的公开字段和值承载语义；
-若这些字段被写入 Problem JSON，由 `resp` 契约定义输出字段与包络。
+若这些字段被写入默认错误 envelope，由 `resp` 契约定义输出字段与包络。
 
 共享错误模型对 `Violation` 只做承载，不负责：
 
@@ -236,7 +239,7 @@
 
 - `reqx` 负责决定 request-side 的默认 detail、包络和 violation 内容。
 - `reqx` 当前会直接使用 `internal/errx.ViolationCode` 与 `internal/errx.ViolationIn` 组装内部错误；这是仓库内协作细节，不是对外公开 API。
-- `resp` 只能通过 `Status()` / `Code()` / `Title()` / `Detail()` / `Errors()` 消费共享错误模型，并可把 `Code()` 暴露为顶层 Problem JSON 的 `code` 字段。
+- `resp` 只能通过 `Status()` / `Code()` / `Title()` / `Detail()` / `Errors()` 消费共享错误模型；其中 `Status()` / `Code()` / `Detail()` 会被直接映射到默认错误 envelope 的 `status` / `reason` / 顶层 `message`。
 - `resp` 若需要参与错误链，只能用 `errors.Is` / `errors.As`，不能读内部字段。
 
 ## 6. 测试基线

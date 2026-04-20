@@ -49,7 +49,7 @@ func TestWriteErrorWritesDefaultEnvelope(t *testing.T) {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 
-	assertErrorEnvelopeBasics(t, rr, http.StatusUnprocessableEntity, 422000, "Unprocessable Entity")
+	assertErrorEnvelopeBasics(t, rr, http.StatusUnprocessableEntity, 42200, "unprocessable entity")
 
 	body := decodePayload(t, rr.Body.Bytes())
 	if _, exists := body["data"]; exists {
@@ -61,9 +61,8 @@ func TestWriteErrorWritesDefaultEnvelope(t *testing.T) {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"title":  "Unprocessable Entity",
 		"status": float64(http.StatusUnprocessableEntity),
-		"code":   "unprocessable_entity",
+		"reason": "unprocessable_entity",
 		"fields": []any{
 			map[string]any{
 				"field":   "name",
@@ -84,11 +83,11 @@ func TestWriteErrorUsesExplicitTopCodeAndDetailDerivedMessage(t *testing.T) {
 			{Field: "name", Code: "required", Detail: "is required"},
 		}),
 	)
-	if err := WriteError(rr, input, 400001); err != nil {
+	if err := WriteError(rr, input, 40001); err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 
-	assertErrorEnvelopeBasics(t, rr, http.StatusBadRequest, 400001, "payload invalid")
+	assertErrorEnvelopeBasics(t, rr, http.StatusBadRequest, 40001, "payload invalid")
 
 	body := decodePayload(t, rr.Body.Bytes())
 	errorValue, ok := body["error"].(map[string]any)
@@ -98,6 +97,12 @@ func TestWriteErrorUsesExplicitTopCodeAndDetailDerivedMessage(t *testing.T) {
 	if _, exists := errorValue["detail"]; exists {
 		t.Fatalf("error.detail unexpectedly present: %#v", errorValue["detail"])
 	}
+	if _, exists := errorValue["title"]; exists {
+		t.Fatalf("error.title unexpectedly present: %#v", errorValue["title"])
+	}
+	if got := errorValue["reason"]; got != "invalid_json" {
+		t.Fatalf("error.reason = %#v, want invalid_json", got)
+	}
 	fields, ok := errorValue["fields"].([]any)
 	if !ok || len(fields) != 1 {
 		t.Fatalf("fields = %#v, want 1 item", errorValue["fields"])
@@ -106,6 +111,46 @@ func TestWriteErrorUsesExplicitTopCodeAndDetailDerivedMessage(t *testing.T) {
 		"field":   "name",
 		"code":    "required",
 		"message": "is required",
+	})
+}
+
+func TestWriteErrorUsesNormalizedDetailAsMessageWhenDetailIsAbsent(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := WriteError(rr, errx.NewHTTPError(http.StatusUnauthorized, "token-missing__forbidden", "")); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	assertErrorEnvelopeBasics(t, rr, http.StatusUnauthorized, 40100, "token missing forbidden")
+
+	body := decodePayload(t, rr.Body.Bytes())
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
+	}
+	assertPublicErrorObject(t, errorValue, map[string]any{
+		"status": float64(http.StatusUnauthorized),
+		"reason": "token-missing__forbidden",
+	})
+}
+
+func TestWriteErrorUsesExplicitDetailEvenWhenItMatchesTitle(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := WriteError(rr, errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "Bad Request")); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	assertErrorEnvelopeBasics(t, rr, http.StatusBadRequest, 40000, "Bad Request")
+
+	body := decodePayload(t, rr.Body.Bytes())
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
+	}
+	assertPublicErrorObject(t, errorValue, map[string]any{
+		"status": float64(http.StatusBadRequest),
+		"reason": "invalid_json",
 	})
 }
 
@@ -161,7 +206,7 @@ func TestWriteErrorUsesCustomAsHTTPError(t *testing.T) {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 
-	assertErrorEnvelopeBasics(t, rr, http.StatusUnauthorized, 401000, "token missing")
+	assertErrorEnvelopeBasics(t, rr, http.StatusUnauthorized, 40100, "token missing")
 
 	body := decodePayload(t, rr.Body.Bytes())
 	errorValue, ok := body["error"].(map[string]any)
@@ -169,9 +214,8 @@ func TestWriteErrorUsesCustomAsHTTPError(t *testing.T) {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"title":  http.StatusText(http.StatusUnauthorized),
 		"status": float64(http.StatusUnauthorized),
-		"code":   "unauthorized",
+		"reason": "unauthorized",
 	})
 }
 
@@ -194,7 +238,7 @@ func TestWriteErrorSkipsTypedNilHTTPErrorAndKeepsScanningChain(t *testing.T) {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 
-	assertErrorEnvelopeBasics(t, rr, http.StatusBadRequest, 400000, "payload invalid")
+	assertErrorEnvelopeBasics(t, rr, http.StatusBadRequest, 40000, "payload invalid")
 
 	body := decodePayload(t, rr.Body.Bytes())
 	errorValue, ok := body["error"].(map[string]any)
@@ -202,9 +246,8 @@ func TestWriteErrorSkipsTypedNilHTTPErrorAndKeepsScanningChain(t *testing.T) {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"title":  http.StatusText(http.StatusBadRequest),
 		"status": float64(http.StatusBadRequest),
-		"code":   "invalid_json",
+		"reason": "invalid_json",
 	})
 }
 
@@ -221,7 +264,7 @@ func TestWriteErrorSkipsTypedNilCustomAsHTTPErrorAndKeepsScanningChain(t *testin
 		t.Fatalf("WriteError() error = %v", err)
 	}
 
-	assertErrorEnvelopeBasics(t, rr, http.StatusForbidden, 403000, "access denied")
+	assertErrorEnvelopeBasics(t, rr, http.StatusForbidden, 40300, "access denied")
 
 	body := decodePayload(t, rr.Body.Bytes())
 	errorValue, ok := body["error"].(map[string]any)
@@ -229,9 +272,8 @@ func TestWriteErrorSkipsTypedNilCustomAsHTTPErrorAndKeepsScanningChain(t *testin
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"title":  http.StatusText(http.StatusForbidden),
 		"status": float64(http.StatusForbidden),
-		"code":   "forbidden",
+		"reason": "forbidden",
 	})
 }
 
@@ -243,14 +285,13 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 			t.Fatalf("WriteError() error = %v", err)
 		}
 
-		assertErrorEnvelopeBasics(t, rr, 499, 499000, "Client Closed Request")
+		assertErrorEnvelopeBasics(t, rr, 499, 49900, "client closed request")
 
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"title":  "Client Closed Request",
 			"status": float64(499),
-			"code":   "client_closed_request",
+			"reason": "client_closed_request",
 		})
 	})
 
@@ -261,14 +302,13 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 			t.Fatalf("WriteError() error = %v", err)
 		}
 
-		assertErrorEnvelopeBasics(t, rr, http.StatusGatewayTimeout, 504000, "Gateway Timeout")
+		assertErrorEnvelopeBasics(t, rr, http.StatusGatewayTimeout, 50400, "timeout")
 
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"title":  http.StatusText(http.StatusGatewayTimeout),
 			"status": float64(http.StatusGatewayTimeout),
-			"code":   "timeout",
+			"reason": "timeout",
 		})
 	})
 
@@ -283,14 +323,13 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 			t.Fatalf("WriteError() error = %v", err)
 		}
 
-		assertErrorEnvelopeBasics(t, rr, http.StatusForbidden, 403000, "access denied")
+		assertErrorEnvelopeBasics(t, rr, http.StatusForbidden, 40300, "access denied")
 
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"title":  http.StatusText(http.StatusForbidden),
 			"status": float64(http.StatusForbidden),
-			"code":   "forbidden",
+			"reason": "forbidden",
 		})
 	})
 
@@ -301,14 +340,13 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 			t.Fatalf("WriteError() error = %v", err)
 		}
 
-		assertErrorEnvelopeBasics(t, rr, http.StatusInternalServerError, 500000, "Internal Server Error")
+		assertErrorEnvelopeBasics(t, rr, http.StatusInternalServerError, 50000, "internal error")
 
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"title":  http.StatusText(http.StatusInternalServerError),
 			"status": float64(http.StatusInternalServerError),
-			"code":   "internal_error",
+			"reason": "internal_error",
 		})
 		if bytes.Contains(rr.Body.Bytes(), []byte("db timeout")) {
 			t.Fatalf("body leaked internal cause: %q", rr.Body.String())
@@ -334,7 +372,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 	t.Run("nil error ignores explicit code and stays noop", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 
-		if err := WriteError(rr, nil, 400001); err != nil {
+		if err := WriteError(rr, nil, 40001); err != nil {
 			t.Fatalf("WriteError() error = %v", err)
 		}
 		if rr.Code != http.StatusOK {
@@ -352,7 +390,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 	})
 
 	t.Run("nil writer and nil error is noop", func(t *testing.T) {
-		if err := WriteError(nil, nil, 400001); err != nil {
+		if err := WriteError(nil, nil, 40001); err != nil {
 			t.Fatalf("WriteError() error = %v, want nil", err)
 		}
 	})
@@ -366,10 +404,25 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 		assertRecorderHasNoBodyOrContentType(t, rr)
 	})
 
+	t.Run("rejects non five digit top code before commit", func(t *testing.T) {
+		cases := []int{9999, 100000}
+
+		for _, code := range cases {
+			t.Run(strconv.Itoa(code), func(t *testing.T) {
+				rr := httptest.NewRecorder()
+
+				if err := WriteError(rr, errx.BadRequest("", ""), code); err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				assertRecorderHasNoBodyOrContentType(t, rr)
+			})
+		}
+	})
+
 	t.Run("rejects multiple top codes before commit", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 
-		if err := WriteError(rr, errx.BadRequest("", ""), 400001, 400002); err == nil {
+		if err := WriteError(rr, errx.BadRequest("", ""), 40001, 40002); err == nil {
 			t.Fatal("expected error, got nil")
 		}
 		assertRecorderHasNoBodyOrContentType(t, rr)
@@ -447,7 +500,7 @@ func TestWriteErrorWriteFailure(t *testing.T) {
 	t.Run("returns write failure after first commit", func(t *testing.T) {
 		cause := errors.New("socket closed")
 		w := &failingWriter{cause: cause}
-		err := WriteError(w, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "Internal Server Error"))
+		err := WriteError(w, errx.NewHTTPError(http.StatusInternalServerError, "internal_error", "internal error"))
 		if err == nil {
 			t.Fatal("expected write error, got nil")
 		}

@@ -156,7 +156,7 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 至少验证：
 
 - 成功 JSON 写回
-- Problem JSON 错误写回
+- 默认错误 envelope 写回
 - 回退与写失败边界
 - 头部所有权
 

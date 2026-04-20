@@ -139,9 +139,8 @@ func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, f
 	})
 	input := fmt.Errorf("wrapped: %w", httpErr)
 	wantStatus := httpErr.Status()
-	wantTopCode := wantStatus * 1000
-	wantErrorCode := httpErr.Code()
-	wantTitle := httpErr.Title()
+	wantTopCode := wantStatus * 100
+	wantReason := httpErr.Code()
 	wantMessage := jsonSafeString(httpErr.Detail())
 
 	if err := WriteError(rr, input); err != nil {
@@ -168,11 +167,14 @@ func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, f
 	if got := errorValue["status"]; got != float64(wantStatus) {
 		t.Fatalf("error.status = %#v, want %d", got, wantStatus)
 	}
-	if got := errorValue["code"]; got != wantErrorCode {
-		t.Fatalf("error.code = %#v, want %q", got, wantErrorCode)
+	if got := errorValue["reason"]; got != wantReason {
+		t.Fatalf("error.reason = %#v, want %q", got, wantReason)
 	}
-	if got := errorValue["title"]; got != wantTitle {
-		t.Fatalf("error.title = %#v, want %q", got, wantTitle)
+	if _, exists := errorValue["code"]; exists {
+		t.Fatalf("error.code unexpectedly present: %#v", errorValue["code"])
+	}
+	if _, exists := errorValue["title"]; exists {
+		t.Fatalf("error.title unexpectedly present: %#v", errorValue["title"])
 	}
 	if _, exists := errorValue["detail"]; exists {
 		t.Fatalf("error.detail unexpectedly present: %#v", errorValue["detail"])

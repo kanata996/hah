@@ -33,11 +33,7 @@ func JSON(w http.ResponseWriter, status int, data any) error {
 		return fmt.Errorf("resp: JSON does not support status %d without a response body", status)
 	}
 
-	body, err := encodeJSON(data)
-	if err != nil {
-		return err
-	}
-	return writePreparedJSONBytes(w, status, jsonContentType, body)
+	return writeJSONResponse(w, status, data)
 }
 
 // encodeJSON 使用标准库编码 JSON。
@@ -62,4 +58,16 @@ func writePreparedJSONBytes(w http.ResponseWriter, status int, contentType strin
 		return fmt.Errorf("resp: write response failed: %w", err)
 	}
 	return nil
+}
+
+func writeJSONResponse(w http.ResponseWriter, status int, payload any) error {
+	if w == nil {
+		return errNilResponseWriter
+	}
+
+	body, err := encodeJSON(payload)
+	if err != nil {
+		return err
+	}
+	return writePreparedJSONBytes(w, status, jsonContentType, body)
 }

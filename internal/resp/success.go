@@ -18,18 +18,9 @@ func Created(w http.ResponseWriter, data any) error {
 }
 
 func writeSuccess(w http.ResponseWriter, status int, data any) error {
-	if w == nil {
-		return errNilResponseWriter
-	}
-
-	body, err := encodeJSON(responseEnvelope{
+	return writeJSONResponse(w, status, responseEnvelope{
 		Code:    successTopCode,
 		Message: successMessage,
 		Data:    data,
 	})
-	if err != nil {
-		return err
-	}
-
-	return writePreparedJSONBytes(w, status, jsonContentType, body)
 }

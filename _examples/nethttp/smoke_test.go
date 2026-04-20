@@ -89,12 +89,12 @@ func TestListAndDeleteAccountFlow(t *testing.T) {
 	}
 
 	problem := decodeEnvelope(t, getRR.Body.Bytes())
-	if got := problem["code"]; got != float64(404000) {
-		t.Fatalf("top code = %#v, want 404000", got)
+	if got := problem["code"]; got != float64(40400) {
+		t.Fatalf("top code = %#v, want 40400", got)
 	}
 	errorValue := mustErrorObject(t, problem)
-	if got := errorValue["code"]; got != "account_not_found" {
-		t.Fatalf("error.code = %#v, want account_not_found", got)
+	if got := errorValue["reason"]; got != "account_not_found" {
+		t.Fatalf("error.reason = %#v, want account_not_found", got)
 	}
 }
 
@@ -114,16 +114,16 @@ func TestValidationFailureReturnsErrorEnvelope(t *testing.T) {
 	}
 
 	problem := decodeEnvelope(t, rr.Body.Bytes())
-	if got := problem["code"]; got != float64(422000) {
-		t.Fatalf("top code = %#v, want 422000", got)
+	if got := problem["code"]; got != float64(42200) {
+		t.Fatalf("top code = %#v, want 42200", got)
 	}
 	if got := problem["message"]; got != "request contains invalid fields" {
 		t.Fatalf("message = %#v, want request contains invalid fields", got)
 	}
 
 	errorValue := mustErrorObject(t, problem)
-	if got := errorValue["code"]; got != "invalid_request" {
-		t.Fatalf("error.code = %#v, want invalid_request", got)
+	if got := errorValue["reason"]; got != "invalid_request" {
+		t.Fatalf("error.reason = %#v, want invalid_request", got)
 	}
 
 	fields, ok := errorValue["fields"].([]any)

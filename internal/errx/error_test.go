@@ -3,6 +3,7 @@ package errx
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -110,7 +111,7 @@ var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
 		wantStatus: http.StatusGatewayTimeout,
 		wantCode:   "timeout",
 		wantTitle:  http.StatusText(http.StatusGatewayTimeout),
-		wantDetail: http.StatusText(http.StatusGatewayTimeout),
+		wantDetail: "timeout",
 	},
 	{
 		name:       "service unavailable uses service unavailable code",
@@ -118,7 +119,7 @@ var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
 		wantStatus: http.StatusServiceUnavailable,
 		wantCode:   "service_unavailable",
 		wantTitle:  http.StatusText(http.StatusServiceUnavailable),
-		wantDetail: http.StatusText(http.StatusServiceUnavailable),
+		wantDetail: "service unavailable",
 	},
 	{
 		name:       "client closed request supports 499",
@@ -126,7 +127,7 @@ var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
 		wantStatus: 499,
 		wantCode:   "client_closed_request",
 		wantTitle:  "Client Closed Request",
-		wantDetail: "Client Closed Request",
+		wantDetail: "client closed request",
 	},
 	{
 		name:       "other client error falls back to client error code",
@@ -134,7 +135,7 @@ var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
 		wantStatus: http.StatusTeapot,
 		wantCode:   "client_error",
 		wantTitle:  http.StatusText(http.StatusTeapot),
-		wantDetail: http.StatusText(http.StatusTeapot),
+		wantDetail: "client error",
 	},
 	{
 		name:       "unknown client error without status text falls back to client error public message",
@@ -142,7 +143,7 @@ var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
 		wantStatus: 430,
 		wantCode:   "client_error",
 		wantTitle:  "Client Error",
-		wantDetail: "Client Error",
+		wantDetail: "client error",
 	},
 	{
 		name:       "invalid status falls back to internal server error",
@@ -150,7 +151,7 @@ var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
 		wantStatus: http.StatusInternalServerError,
 		wantCode:   "internal_error",
 		wantTitle:  http.StatusText(http.StatusInternalServerError),
-		wantDetail: http.StatusText(http.StatusInternalServerError),
+		wantDetail: "internal error",
 	},
 	{
 		name:       "unknown 5xx preserves status and falls back to internal error public message",
@@ -158,7 +159,25 @@ var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
 		wantStatus: 509,
 		wantCode:   "internal_error",
 		wantTitle:  http.StatusText(http.StatusInternalServerError),
-		wantDetail: http.StatusText(http.StatusInternalServerError),
+		wantDetail: "internal error",
+	},
+	{
+		name:       "blank detail falls back to humanized explicit code",
+		status:     http.StatusBadRequest,
+		code:       " Mixed_Code  V1 ",
+		wantStatus: http.StatusBadRequest,
+		wantCode:   "Mixed_Code  V1",
+		wantTitle:  http.StatusText(http.StatusBadRequest),
+		wantDetail: "mixed code v1",
+	},
+	{
+		name:       "blank detail falls back to trimmed code when humanized explicit code is empty",
+		status:     http.StatusBadRequest,
+		code:       " _-_ ",
+		wantStatus: http.StatusBadRequest,
+		wantCode:   "_-_",
+		wantTitle:  http.StatusText(http.StatusBadRequest),
+		wantDetail: "_-_",
 	},
 }
 
@@ -196,17 +215,18 @@ func assertHTTPErrorHasNoCause(t *testing.T, err *HTTPError, wantError string) {
 	}
 }
 
-func assertHTTPErrorUsesStatusTextPublicMessage(t *testing.T, err *HTTPError, wantStatus int) {
+func assertHTTPErrorUsesDefaultCodeDerivedDetail(t *testing.T, err *HTTPError, wantStatus int, wantCode string) {
 	t.Helper()
 
-	want := http.StatusText(wantStatus)
-	if got := err.Title(); got != want {
-		t.Fatalf("Title() = %q, want %q", got, want)
+	wantTitle := http.StatusText(wantStatus)
+	if got := err.Title(); got != wantTitle {
+		t.Fatalf("Title() = %q, want %q", got, wantTitle)
 	}
-	if got := err.Detail(); got != want {
-		t.Fatalf("Detail() = %q, want %q", got, want)
+	wantDetail := expectedHumanizedCode(wantCode)
+	if got := err.Detail(); got != wantDetail {
+		t.Fatalf("Detail() = %q, want %q", got, wantDetail)
 	}
-	assertHTTPErrorHasNoCause(t, err, want)
+	assertHTTPErrorHasNoCause(t, err, wantDetail)
 }
 
 func assertHTTPErrorPreservesCause(t *testing.T, err *HTTPError, wantDetail string, wantCause error) {
@@ -244,9 +264,9 @@ func TestHTTPErrorZeroValueUsesNormalizedPublicContract(t *testing.T) {
 		http.StatusInternalServerError,
 		"internal_error",
 		http.StatusText(http.StatusInternalServerError),
-		http.StatusText(http.StatusInternalServerError),
+		"internal error",
 	)
-	assertHTTPErrorHasNoCause(t, &err, http.StatusText(http.StatusInternalServerError))
+	assertHTTPErrorHasNoCause(t, &err, "internal error")
 	if got := err.Errors(); got != nil {
 		t.Fatalf("Errors() = %#v, want nil", got)
 	}
@@ -262,8 +282,8 @@ func TestHTTPErrorErrorIgnoresCauseWhenCausePanics(t *testing.T) {
 		}
 	}()
 
-	if got := err.Error(); got != http.StatusText(http.StatusBadRequest) {
-		t.Fatalf("Error() = %q, want %q", got, http.StatusText(http.StatusBadRequest))
+	if got := err.Error(); got != "bad request" {
+		t.Fatalf("Error() = %q, want %q", got, "bad request")
 	}
 }
 
@@ -271,8 +291,8 @@ func TestHTTPErrorErrorIgnoresCauseWhenCausePanics(t *testing.T) {
 func TestHTTPErrorErrorIgnoresBlankCauseMessage(t *testing.T) {
 	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", blankWriteCause{})
 
-	if got := err.Error(); got != http.StatusText(http.StatusBadRequest) {
-		t.Fatalf("Error() = %q, want %q", got, http.StatusText(http.StatusBadRequest))
+	if got := err.Error(); got != "bad request" {
+		t.Fatalf("Error() = %q, want %q", got, "bad request")
 	}
 }
 
@@ -282,7 +302,7 @@ func TestNewHTTPErrorWithCauseTreatsTypedNilCauseAsNoCause(t *testing.T) {
 
 	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", cause)
 
-	assertHTTPErrorHasNoCause(t, err, http.StatusText(http.StatusBadRequest))
+	assertHTTPErrorHasNoCause(t, err, "bad request")
 	if errors.Is(err, cause) {
 		t.Fatal("errors.Is should not match a typed-nil cause")
 	}
@@ -417,7 +437,21 @@ func TestHTTPErrorWithViolationsNilAndEmptyInputReplaceExistingViolations(t *tes
 func TestHTTPErrorErrorFallsBackToNormalizedDetail(t *testing.T) {
 	err := NewHTTPErrorWithCause(http.StatusBadRequest, "", "", nil)
 
-	assertHTTPErrorHasNoCause(t, err, http.StatusText(http.StatusBadRequest))
+	assertHTTPErrorHasNoCause(t, err, "bad request")
+}
+
+func TestHTTPErrorPreservesExplicitDetailEvenWhenItMatchesTitle(t *testing.T) {
+	err := NewHTTPError(http.StatusBadRequest, "invalid_json", "Bad Request")
+
+	assertHTTPErrorPublicFields(
+		t,
+		err,
+		http.StatusBadRequest,
+		"invalid_json",
+		http.StatusText(http.StatusBadRequest),
+		"Bad Request",
+	)
+	assertHTTPErrorHasNoCause(t, err, "Bad Request")
 }
 
 // 各个常用错误构造器都会生成稳定的公开契约，并透传显式 code/detail。
@@ -427,7 +461,7 @@ func TestHTTPErrorConstructorsExposeExpectedPublicContract(t *testing.T) {
 			t.Run("defaults", func(t *testing.T) {
 				err := tc.build("", "")
 				assertHTTPErrorStatusAndCode(t, err, tc.wantStatus, tc.wantCode)
-				assertHTTPErrorUsesStatusTextPublicMessage(t, err, tc.wantStatus)
+				assertHTTPErrorUsesDefaultCodeDerivedDetail(t, err, tc.wantStatus, tc.wantCode)
 				assertHTTPErrorErrors(t, err)
 			})
 
@@ -478,7 +512,7 @@ func TestHTTPErrorWorksWithErrorsIsAndAs(t *testing.T) {
 	cause := errors.New("db timeout")
 	err := NewHTTPErrorWithCause(http.StatusConflict, "", "", cause)
 
-	assertHTTPErrorPreservesCause(t, err, http.StatusText(http.StatusConflict), cause)
+	assertHTTPErrorPreservesCause(t, err, "conflict", cause)
 	if !errors.Is(err, cause) {
 		t.Fatal("errors.Is should find cause through Unwrap chain")
 	}
@@ -615,11 +649,17 @@ func TestHTTPErrorDefaultTitleTable(t *testing.T) {
 			if got := err.Title(); got != tc.wantTitle {
 				t.Fatalf("Title() = %q, want %q", got, tc.wantTitle)
 			}
-			if got := err.Detail(); got != tc.wantTitle {
-				t.Fatalf("Detail() = %q, want %q", got, tc.wantTitle)
+			wantDetail := expectedHumanizedCode(defaultErrorCode(tc.wantStatus))
+			if got := err.Detail(); got != wantDetail {
+				t.Fatalf("Detail() = %q, want %q", got, wantDetail)
 			}
 		})
 	}
+}
+
+func expectedHumanizedCode(code string) string {
+	replacer := strings.NewReplacer("_", " ", "-", " ")
+	return strings.ToLower(strings.Join(strings.Fields(replacer.Replace(code)), " "))
 }
 
 // 共享 violation 常量的 string 值属于公开可观察语义。
