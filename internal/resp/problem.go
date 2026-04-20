@@ -53,15 +53,10 @@ func WriteError(w http.ResponseWriter, err error) error {
 	}
 
 	payload := normalizeProblemPayload(err)
-	body := encodeProblemPayload(payload)
-	return writePreparedJSONBytes(w, payload.Status, problemJSONContentType, body)
-}
-
-func encodeProblemPayload(payload problemPayload) []byte {
 	// problemPayload 的公开形状固定为 JSON 基础类型组合；
 	// 回归测试会锁住“始终可编码”的内部不变量。
 	body, _ := encodeJSON(payload)
-	return body
+	return writePreparedJSONBytes(w, payload.Status, problemJSONContentType, body)
 }
 
 func normalizeProblemPayload(err error) problemPayload {

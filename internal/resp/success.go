@@ -4,12 +4,12 @@ import "net/http"
 
 // OK 写出 200 JSON 成功响应。
 func OK(w http.ResponseWriter, data any) error {
-	return writeJSON(w, http.StatusOK, data)
+	return JSON(w, http.StatusOK, data)
 }
 
 // Created 写出 201 JSON 成功响应。
 func Created(w http.ResponseWriter, data any) error {
-	return writeJSON(w, http.StatusCreated, data)
+	return JSON(w, http.StatusCreated, data)
 }
 
 // NoContent 写出 204 响应且不包含响应体。
