@@ -83,9 +83,9 @@ func validateBindBodyTarget(targetType reflect.Type) error {
 	return nil
 }
 
-// 对 nil request/body 走空输入语义，其余情况统一交给带大小限制的读取逻辑。
+// 对 nil body 走空输入语义，其余情况统一交给带大小限制的读取逻辑。
 func readRequestBody(r *http.Request) ([]byte, error) {
-	if r == nil || r.Body == nil {
+	if r.Body == nil {
 		return nil, nil
 	}
 	return readBody(r.Body)

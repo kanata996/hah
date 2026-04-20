@@ -94,7 +94,7 @@ func (p *QueryParam) Values() *MultiParam[string] {
 }
 
 func queryParamValues(r *http.Request, name string) ([]string, bool) {
-	if r == nil || r.URL == nil {
+	if r.URL == nil {
 		return nil, false
 	}
 	values, exists := r.URL.Query()[name]

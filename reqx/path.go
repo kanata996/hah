@@ -56,9 +56,6 @@ func (p *PathParam) UUID() *ValueParam[uuid.UUID] {
 }
 
 func pathParamValues(r *http.Request, name string) ([]string, bool) {
-	if r == nil {
-		return nil, false
-	}
 	value := r.PathValue(name)
 	if value == "" {
 		return nil, false
