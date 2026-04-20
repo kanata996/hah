@@ -59,15 +59,17 @@ type ListAccountsQuery struct {
 
 对 `*struct` target，绑定过程固定为：
 
-1. 创建与 target 同构的零值临时对象
-2. 把 query source 写入临时对象
-3. 全部成功后一次性提交到 target
+1. 创建与 target 同构的临时对象，并先复制调用前状态
+2. 把参与绑定的字段先重置为零值
+3. 把 query source 写入这些参与绑定的字段
+4. 全部成功后一次性提交到 target
 
 因此：
 
 - 失败时 target 保持调用前状态
-- 缺失字段不会继承 target 旧值
-- 成功时 target 表现为当前 query source 的完整投影结果
+- 缺失的已绑定字段不会继承 target 旧值
+- 未参与绑定的字段保持 target 原值
+- 成功时，只有显式参与绑定的字段表现为当前 query source 的投影结果
 
 ## 3. 公开契约
 
@@ -98,9 +100,9 @@ type ListAccountsQuery struct {
 
 规则固定为：
 
-- 未标注字段一律忽略
+- 未标注字段一律忽略，并在成功绑定后保持原值
 - 未导出字段一律忽略；即使带 `query` tag，也不参与 tag 校验、绑定或冲突检测
-- `query:"-"` 一律显式忽略；不参与绑定、冲突检测或字段类型校验
+- `query:"-"` 一律显式忽略；不参与绑定、冲突检测或字段类型校验，且在成功绑定后保持原值
 - `query:"name"` 中的 `name` 必须非空，且不得包含前后空白
 - `query:"name"` 的 key 按 tag 字面值原样参与匹配；不做 trim、大小写归一化或额外解码
 - 导出字段上的其他 tag 形式都属于 usage error
@@ -146,7 +148,7 @@ type ListAccountsQuery struct {
 - `query:"name"` 的 tag key 必须与解析后的 query key 做精确字符串匹配
 - query source 采用默认单值模型：同名 key 出现多个值时，视为客户端输入错误
 - 对 `struct` 目标，未知 key 默认忽略
-- 缺失 key 不会继承 target 旧值；对应字段保持零值临时对象中的默认状态
+- 缺失 key 不会继承已绑定字段的旧值；对应已绑定字段保持零值状态
 - 参数存在但首值为空字符串时，仍视为“已提交参数”
 - 只有 `string`、底层为 `string` 的命名标量及其一级指针接受空字符串；其他受支持类型把空字符串当解析失败处理
 
@@ -229,6 +231,7 @@ type ListAccountsQuery struct {
 - 规划阶段 usage error 时 target 零修改
 - 未知 query key 默认忽略
 - 缺失参数不会继承 target 旧值
+- 未标注字段和 `query:"-"` 字段在成功绑定后保持原值
 - 空字符串参数视为存在
 - 普通 pointer 字段命中时按成功结果分配或覆盖
 - `*struct` target 写入先进入零值临时对象，成功后一次性提交

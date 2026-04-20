@@ -119,6 +119,26 @@ func TestBindQuery_UsageAndPlanningContracts(t *testing.T) {
 		}
 	})
 
+	t.Run("successful bind preserves non planned fields", func(t *testing.T) {
+		type request struct {
+			Name     string `query:"name"`
+			Ignored  string `query:"-"`
+			Untagged string
+		}
+
+		dst := request{
+			Name:     "stale",
+			Ignored:  "keep-ignored",
+			Untagged: "keep-untagged",
+		}
+		if err := BindQuery(httptest.NewRequest(http.MethodGet, "/", nil), &dst); err != nil {
+			t.Fatalf("BindQuery() error = %v", err)
+		}
+		if dst != (request{Ignored: "keep-ignored", Untagged: "keep-untagged"}) {
+			t.Fatalf("dst = %#v, want planned fields reset and non planned fields preserved", dst)
+		}
+	})
+
 	t.Run("invalid tags are usage errors", func(t *testing.T) {
 		type emptyTag struct {
 			Name string `query:""`

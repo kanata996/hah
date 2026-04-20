@@ -118,16 +118,16 @@ if err := hah.BindQuery(r, &query); err != nil {
 当前 query binder 的公开语义：
 
 - 目标必须是 `*struct` 或 `*map[string]string`
-- 对于 struct，只绑定显式声明了 `query` tag 的字段
+- 对于 struct，只绑定显式声明了 `query` tag 的字段，不改写未参与绑定的其他字段
 - 只支持顶层平铺字段；不展开嵌套 DTO
 - 普通 `query:"name"` 字段支持常见内建标量、命名标量、`time.Time`、`time.Duration`、`uuid.UUID` 及其一级指针
 - query 名字按精确值匹配
 - malformed raw query 返回稳定 `400 bad_request`，并保证 target 零修改
 - 对于 struct target，未知 query key 默认忽略
 - 任一 query key 只要出现多个值就返回稳定 `400 bad_request`
-- 缺失参数不会继承 DTO 旧值，而是回到零值临时对象中的默认状态
+- 缺失参数不会继承已绑定字段的旧值，而是回到这些字段的零值状态
 - DTO/tag 形状本身非法时，先返回普通错误，并保证 target 零修改
-- 对 `struct` target，绑定先写入零值临时对象；客户端输入错误下不会部分污染 DTO
+- 对 `struct` target，绑定先在临时对象里重建参与绑定的字段；客户端输入错误下不会部分污染 DTO
 
 它适合“批量投影”，不适合表达请求级规则。像 `Required`、`Default`、`OneOf`、`Min/Max` 这类规则，仍然优先放在 `hah.Query(...)` 或绑定后的显式校验里。
 

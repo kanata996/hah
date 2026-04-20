@@ -95,7 +95,7 @@ func bindQueryIntoMap(dst reflect.Value, source url.Values) error {
 	return nil
 }
 
-// 先校验 source 满足单值模型，再写入零值临时对象并一次性提交。
+// 先校验 source 满足单值模型，再只重建参与绑定的字段并一次性提交。
 func bindQueryIntoStruct(dst reflect.Value, source url.Values, plans []bindQueryFieldPlan) error {
 	for _, values := range source {
 		if len(values) > 1 {
@@ -104,6 +104,10 @@ func bindQueryIntoStruct(dst reflect.Value, source url.Values, plans []bindQuery
 	}
 
 	temp := reflect.New(dst.Type()).Elem()
+	temp.Set(dst)
+	for _, plan := range plans {
+		temp.Field(plan.index).SetZero()
+	}
 	for _, plan := range plans {
 		values, ok := source[plan.key]
 		if !ok || len(values) == 0 {

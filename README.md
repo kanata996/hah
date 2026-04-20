@@ -155,7 +155,7 @@ DTO binding 与显式规则：
 请求输入的关键边界：
 
 - `hah.BindQuery(...)` 的目标必须是 `*struct` 或 `*map[string]string`
-- 对于 struct，只有显式 `query` tag 的顶层字段会参与绑定；`BindQuery(...)` 不展开嵌套 DTO
+- 对于 struct，只有显式 `query` tag 的顶层字段会参与绑定，其他字段保持原值；`BindQuery(...)` 不展开嵌套 DTO
 - `hah.Query(...).Time()` 以及 `BindQuery(...)` 中的 `time.Time` / `*time.Time` 字段都要求严格 RFC3339 时间戳语法
 - `hah.BindQuery(...)` 默认忽略未知 query key；同名 query key 只要出现多个值就返回稳定 `400 bad_request`
 - malformed raw query 返回稳定 `400 bad_request` 且不修改 target；DTO 或 tag 形状非法时，先返回普通错误且不修改 target
