@@ -1,17 +1,16 @@
-# hah resp 设计方案
+# hah 响应协议设计方案
 
-- 状态：Locked
-- 版本：v7
-- 锁定日期：2026-04-20
+- 状态：Draft
+- 版本：v15
+- 起草日期：2026-04-20
 - 适用范围：
-  - `hah.JSON`
+  - 根包 `hah` 面向业务 JSON API 的默认响应协议
   - `hah.OK`
   - `hah.Created`
-  - `hah.NoContent`
   - `hah.WriteError`
 - 不覆盖：
+  - `hah.JSON` 的底层 raw JSON escape hatch
   - router / handler 生命周期
-  - 业务 envelope
   - 内容协商
   - panic recover
 - 关联文档：
@@ -21,159 +20,364 @@
 
 ## 1. 设计目标
 
-根包 `hah` 的响应入口只负责 HTTP 响应写回。
-它默认只提供两类输出语义：
+根包 `hah` 对外的默认响应协议，目标从“只保证 HTTP-first 写回”调整为“HTTP 状态码 + 统一 JSON envelope”：
 
-- 成功写回：`application/json` 或 `204 No Content`
-- 错误响应：`application/problem+json`
+- 前端与 SDK 不再依赖成功响应的 body 形状判断结果
+- 所有默认响应都收敛为顶层 JSON 对象
+- 顶层固定暴露 `code` 与 `message`
+- 成功与失败分别通过 `data` / `error` 承载具体内容
+- HTTP 状态码仍保持正常语义，不采用“永远 200”
+- 默认协议不再提供 `204 No Content`
 
-目标是保持响应边界简单、稳定、可预测：
-
-- `JSON` 只按调用方给定状态写 JSON 响应
-- `OK` / `Created` / `NoContent` 只是成功写回快捷入口
-- `WriteError` 只把错误收敛成公开 Problem JSON
-- 不做内容协商
-- 不发明 envelope
-- 不承担业务错误分类
+本文档锁定的是默认业务协议，而不是最底层 JSON 写回能力。
+若最终继续保留 `hah.JSON`，它只应作为不带 envelope 的底层逃生口，不反向约束本文定义的默认协议。
+在 `v1` 之前，响应协议不承诺兼容旧设计；如有必要，可以直接删除与本文冲突的旧入口和旧行为。
+由于本文状态是 `Draft`，当前实现可以尚未完全对齐；只有当代码与黑盒测试一并切换后，本文才会升级为 `Locked` 契约。
 
 ## 2. 公开入口
 
-公开入口固定为五个：
+默认业务响应协议对外固定提供以下入口：
 
-- `JSON(w http.ResponseWriter, status int, data any) error`
 - `OK(w http.ResponseWriter, data any) error`
 - `Created(w http.ResponseWriter, data any) error`
-- `NoContent(w http.ResponseWriter) error`
-- `WriteError(w http.ResponseWriter, err error) error`
+- `WriteError(w http.ResponseWriter, err error, code ...int) error`
 
-## 3. 通用契约
+稳定规则：
 
-稳定规则固定为：
+- `OK` 固定写 `200 OK`
+- `Created` 固定写 `201 Created`
+- `WriteError` 根据最终公开错误模型写出对应 `4xx` / `5xx`
+- `WriteError` 在未传第三个参数时使用默认顶层 `code`
+- `WriteError` 在传入单个第三参数时使用显式顶层 `code`
+- `WriteError` 传入多个第三参数属于调用错误
 
-- 除 `WriteError(nil, nil)` 外，`w == nil` 时返回 error，且不得写出内容
-- `WriteError(nil, nil)` 是纯 no-op：返回 `nil` 且不得写出任何内容
-- `hah` 的响应写回入口只拥有 `Content-Type` 与 `Content-Length` 的所有权
+`hah.JSON` 如继续保留，只作为 raw JSON escape hatch，不属于本文定义的默认业务协议。
+
+## 3. 通用写回边界
+
+默认业务响应协议的公开入口都必须遵守以下通用边界：
+
+- `w == nil` 时必须返回 error，且不得写出任何内容
+- `HEAD` 请求沿用 `net/http` 默认语义
+- 默认协议拥有 `Content-Type` 与 `Content-Length` 的所有权
 - 无关自定义头部必须保留
 - 冲突的 `Content-Type` 必须覆盖
 - 预设的 `Content-Length` 不得原样穿透
-- `HEAD` 请求沿用 `net/http` 默认语义
-- 不负责恢复调用方自定义 `MarshalJSON`、`Error()` 或包装 `ResponseWriter` 实现中的 panic
-- 首次提交前必须完成所有可能失败的校验与编码；预提交失败不得写出半成品响应
-- 首次提交后若底层写失败，返回写失败 error，且不得尝试改写已开始的响应
+- 首次提交前必须完成全部校验与编码；预提交失败不得写出半成品响应
+- 首次提交后若底层写失败，只返回 error，不尝试回滚或改写已开始的响应
 
-## 4. 成功写回
+`WriteError` 额外固定以下规则：
 
-### 4.1 `JSON` / `OK` / `Created`
+- `WriteError(w, nil)` 是 no-op
+- `WriteError(w, nil, code)` 也是 no-op；可选 `code` 在 `err == nil` 时必须被忽略
+- `WriteError(w, err)` 使用默认顶层 `code` 规则
+- `WriteError(w, err, code)` 使用显式顶层 `code`
+- `WriteError(w, err, code1, code2, ...)` 必须在首次提交前返回 error
+- `WriteError(w, err, code)` 中 `code <= 0` 必须在首次提交前返回 error
 
-成功 JSON 写回契约固定为：
+## 4. 总体模型
 
-- `JSON` 接受常规 HTTP 语义下允许携带响应体的状态码
-- `OK` 固定写 `200`
-- `Created` 固定写 `201`
-- 主媒体类型必须是 `application/json`
-- 响应体是调用方提供值的直接 JSON 表达
-- `nil` payload 编码为 JSON `null`
-- JSON 序列化语义跟随 `encoding/json`
-- 不支持的状态码必须在首次提交前返回 error
-- payload 不可 JSON 编码时必须在首次提交前返回 error
-- `JSON` / 成功快捷入口不得隐式回退成 `500` Problem 响应
+默认响应协议固定为顶层 JSON 对象：
 
-这里的“不支持”固定包括：
+```go
+type Response[T any] struct {
+	Code    int        `json:"code"`
+	Message string     `json:"message"`
+	Data    *T         `json:"data,omitempty"`
+	Error   *ErrorBody `json:"error,omitempty"`
+}
 
-- `1xx` 状态码
-- `204 No Content`
-- `205 Reset Content`
-- `304 Not Modified`
+type ErrorBody struct {
+	Title  string       `json:"title"`
+	Status int          `json:"status"`
+	Code   string       `json:"code"`
+	Detail string       `json:"-"`
+	Fields []FieldError `json:"fields,omitempty"`
+}
 
-### 4.2 `NoContent`
+type FieldError struct {
+	Field   string `json:"field"`
+	In      string `json:"in,omitempty"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+```
 
-`NoContent()` 的契约固定为：
+上面的 Go 类型只表达逻辑形状，不锁定具体零值编码技巧。
+最终实现必须保证：
 
-- 写出 `204 No Content`
-- 不写响应体
-- 清除 `Content-Type`
-- 清除 `Content-Length`
-- 保留无关自定义头部
+- 成功时 `data` 是可选字段
+- 无 payload 的成功响应允许省略 `data`
+- 显式传入 `nil` payload 时允许写出 `"data": null`
+- 失败时不得写出 `data`
+- 成功时不得写出 `error`
 
-## 5. 错误写回
+稳定规则：
 
-### 5.1 `WriteError` 收敛规则
+- 所有带 body 的默认响应顶层都必须是 JSON object
+- 顶层固定字段为 `code` 与 `message`
+- 成功响应可写 `data`，且不得写 `error`
+- 失败响应写 `error`，不得写 `data`
+- 顶层 `code` 是整数业务码
+- 嵌套 `error.code` 是稳定字符串错误类型
+- `message` 是给人看的短摘要，不用于程序分支判断
+- 失败时顶层 `message` 是派生字段，不作为独立输入
+- `ErrorBody.Detail` 只用于内部派生 `message`，不属于公开 JSON 协议
+- `FieldError.Code` 是字段级规则码，例如 `required` / `invalid` / `type`
+- `FieldError.Message` 是字段级错误提示
 
-`WriteError` 只做一层简单收敛，优先级固定为：
+## 5. 成功响应
 
-1. `err == nil`：返回 `nil`，不写任何内容
-2. `w == nil`：返回 error，且不得写任何内容
-3. 若错误链里存在 `*hah.HTTPError`：直接按该公开错误写回
-4. `errors.Is(err, context.Canceled)`：写回 `499`
-5. `errors.Is(err, context.DeadlineExceeded)`：写回 `504`
-6. 其他情况：写回最小 `500` Problem
+成功响应的稳定协议为：
 
-这里只锁最终优先级，不锁内部解释步骤。
+- `OK` 固定使用 `200`
+- `Created` 固定使用 `201`
+- `Content-Type` 为 `application/json`
+- 顶层 `code` 固定为 `0`
+- 顶层 `message` 固定为 `"success"`
+- 有业务数据时写入 `data`
+- 不写 `error`
+- 无数据成功也必须写 envelope，不再使用 `204`
 
-### 5.2 Problem JSON
+示例：
 
-错误响应固定为：
+```json
+{
+  "code": 0,
+  "message": "success",
+  "data": {
+    "id": "u_1"
+  }
+}
+```
 
-- HTTP 状态码属于 `4xx` 或 `5xx`
-- 主媒体类型为 `application/problem+json`
-- 响应体是最小稳定 Problem JSON
+无数据成功也合法：
 
-稳定字段只有：
-
-- `title`
-- `status`
-- `detail`
-- `code`
-- `errors`
+```json
+{
+  "code": 0,
+  "message": "success"
+}
+```
 
 规则：
 
-- `code` 必须写出
-- `detail` 仅在公开错误对象本身提供非空 detail 时写出
-- `errors` 仅在公开错误对象本身提供非空 violations 时写出
-- `errors` 的稳定 JSON 字段固定为 `field` / `in` / `code` / `detail`
-- 响应写回入口不排序、不去重、不改写 `errors`
+- 成功时 `data` 是可选字段
+- `data` 若存在，可以是对象、数组、标量或 `null`
+- 无 payload 的成功响应默认省略 `data`
+- 显式 `nil` payload 编码为 JSON `null`
+- 具体 JSON 序列化语义仍跟随 `encoding/json`
+- `OK` 的无数据成功默认写 `200` + 不含 `data` 的 envelope
+- `Created` 的无数据成功默认写 `201` + 不含 `data` 的 envelope
+- 成功 envelope 不承担业务分页、trace、meta 等扩展字段；是否追加额外顶层字段，留待单独设计
 
-### 5.3 框架合成错误
+## 6. 失败响应
+
+失败响应的稳定协议为：
+
+- HTTP 状态码使用 `4xx` 或 `5xx`
+- `Content-Type` 为 `application/json`
+- 顶层 `code` 为非 `0` 整数
+- 顶层 `message` 为错误摘要，且由内部 `detail -> error.title` 派生
+- 不写 `data`
+- 具体错误内容写入 `error`
+
+示例：
+
+```json
+{
+  "code": 422000,
+  "message": "request validation failed",
+  "error": {
+    "title": "Unprocessable Entity",
+    "status": 422,
+    "code": "unprocessable_entity",
+    "fields": [
+      {
+        "field": "email",
+        "in": "body",
+        "code": "invalid",
+        "message": "must be a valid email"
+      }
+    ]
+  }
+}
+```
+
+`error` 对象的字段职责固定为：
+
+- `title`：短标题，由公开错误模型决定
+- `status`：最终 HTTP 状态码
+- `code`：稳定字符串错误类型，例如 `unprocessable_entity`、`timeout`、`not_found`
+- `fields`：字段级错误列表；仅在有 violations 时写出
+
+`detail` 仍允许保留在内部错误承载结构中，但只用于派生顶层 `message`，不作为公开 `error` JSON 字段输出。
+
+`fields` 的稳定 JSON 字段固定为：
+
+- `field`
+- `in`
+- `code`
+- `message`
+
+规则：
+
+- `error.code` 与顶层 `code` 语义不同，不得混用
+- 顶层 `code` 负责业务分支
+- `error.code` 负责稳定错误类型
+- `fields` 不排序、不去重、不改写顺序
+
+## 7. 顶层 `code` / `message` 规则
+
+### 7.1 成功默认值
+
+成功时固定为：
+
+- `code = 0`
+- `message = "success"`
+
+该规则不允许调用方覆盖。
+
+### 7.2 失败 `code` 传入方式
+
+失败时，调用方若要显式指定顶层 `code`，必须使用：
+
+- `WriteError(w, err, code)`
+
+约束：
+
+- 显式失败 `code` 必须是正整数
+- 显式失败 `code` 不得为 `0`
+- 顶层 `message` 不允许作为独立输入
+- `WriteError` 的第三参数只改变顶层 `code` 选择规则，不改变 HTTP 状态码、顶层 `message` 派生规则和 `error` payload 结构
+- `WriteError(w, err)` 表示“不显式传入顶层 `code`，使用默认规则”
+- `WriteError(w, err, code)` 表示“显式指定顶层 `code`”
+- `WriteError(w, err, code1, code2, ...)` 必须在首次提交前返回 error
+
+该 variadic 入口只用于承载单个可选顶层 `code`，不允许借此扩展其他可选参数。
+
+### 7.3 失败 `message` 派生规则
+
+失败时，顶层 `message` 固定按以下优先级派生：
+
+1. 内部 `detail`
+2. `error.title`
+
+调用方若要影响失败 `message`，应通过公开错误模型提供 `detail`；若未提供 detail，则回退为 `title`。
+
+内部 `detail` 允许由调用方通过公开错误模型定义，但不作为公开 JSON 字段输出。
+
+### 7.4 失败默认 `code`
+
+若调用方使用 `WriteError(w, err)`，即未显式提供顶层 `code`，默认规则固定为：
+
+- `code = status * 1000`
+
+示例：
+
+| HTTP status | 默认顶层 `code` | 顶层 `message` 优先级  |
+| ----------- | --------------- | ---------------------- |
+| `400`       | `400000`        | `detail`，否则 `title` |
+| `401`       | `401000`        | `detail`，否则 `title` |
+| `404`       | `404000`        | `detail`，否则 `title` |
+| `422`       | `422000`        | `detail`，否则 `title` |
+| `500`       | `500000`        | `detail`，否则 `title` |
+
+该规则只定义默认值，不限制业务方在此基础上自行细分，例如：
+
+- `401001` 表示 token missing
+- `401002` 表示 token invalid
+- `422001` 表示 invalid json
+
+### 7.5 顶层 `code` 保留约定
+
+顶层 `code` 的保留规则固定为：
+
+- `0` 保留给成功响应
+- `400000` 到 `599999` 保留给默认 HTTP 错误映射
+- 其他正整数可由业务方通过 `WriteError(w, err, code)` 显式传入使用
+
+业务方若显式传入 `400000` 到 `599999` 区间内的值，应自行保证语义一致，不得制造与默认 HTTP 错误映射相冲突的歧义。
+
+## 8. 与现有 `hah` 错误模型的映射
+
+默认失败 envelope 复用 `hah` 已有公开错误模型，不重新发明第二套底层错误对象。
+
+映射规则固定为：
+
+- `error.title` 对应 `hah.HTTPError.Title()`
+- `error.status` 对应 `hah.HTTPError.Status()`
+- `error.code` 对应 `hah.HTTPError.Code()`
+- 内部 `detail` 对应 `hah.HTTPError.Detail()`，仅用于派生顶层 `message`
+- `error.fields` 对应 `hah.HTTPError.Errors()`
+
+字段级映射固定为：
+
+- `Violation.Field -> FieldError.Field`
+- `Violation.In -> FieldError.In`
+- `Violation.Code -> FieldError.Code`
+- `Violation.Detail -> FieldError.Message`
 
 对 `context.Canceled`、`context.DeadlineExceeded` 与普通 `error` 这类框架合成错误：
 
-- `title` 由最终状态码决定
-- `code` 使用 `hah` 公开错误模型的默认 `code`
-- 不写 `detail`
-- 不写 `errors`
-- 不得泄漏原始 `err.Error()` 文本
+- 仍先按 `hah` 公开错误模型收敛出 `title` / `status` / `code`
+- 顶层 `message` 固定按 `detail -> title` 派生
+- 不得泄漏原始内部错误文本
 
-## 6. 测试基线
+## 9. HTTP 语义
 
-后续实现或重构至少覆盖以下代表性黑盒基线；其余细节直接跟随上文稳定契约，不再重复列举：
+默认协议仍遵循正常 HTTP 语义：
 
-### 6.1 成功写回
+- `OK` 使用 `200`
+- `Created` 使用 `201`
+- 失败使用 `4xx` 或 `5xx`
+- 不采用“所有业务错误都返回 `200`”
+- 默认协议不使用 `204 No Content`
+- 无数据成功仍返回 JSON envelope；`OK` 默认使用 `200`，`Created` 默认使用 `201`
+- 失败时的顶层 `message` 只是 `error` 的摘要投影，不是额外独立错误源
+- 内部 `detail` 可以保留，但对外 `error` JSON 不输出 `detail`
+- 失败时顶层 `code` 要么显式来自 `WriteError` 的单个第三参数，要么默认来自 `WriteError` 的 `status * 1000` 规则
 
-- `JSON(..., 200, obj)`、`OK(...)`、`Created(...)` 的基本成功路径
-- `JSON(..., 203, obj)` 与 `JSON(..., 302, obj)` 这类允许携带 body 的非常规状态
-- 数组、布尔值、数字、字符串和 `nil` 的直接 JSON 表达
-- `NoContent()` 写出 `204`、空响应体、空 `Content-Type`、空 `Content-Length`
+## 10. 前端判断规则
 
-### 6.2 失败与边界
+前端与 SDK 的默认判断规则固定为：
 
-- `JSON` 拒绝 `1xx`、`204`、`205`、`304` 与非法状态码
-- payload 不可序列化时，`JSON` / 成功快捷入口返回 error 且不得发生首次提交
-- 除 `WriteError(nil, nil)` 外，任一公开入口在 `w == nil` 时都返回 error 且不写内容
-- 无关自定义头部会保留，冲突的 `Content-Type` 会被覆盖，预设的 `Content-Length` 不会原样穿透
+1. 先看 HTTP 状态码
+2. `2xx` 视为成功；若存在 `data`，则读取 `data`
+3. 非 `2xx` 视为失败，读取 `error`
+4. 业务分支优先看顶层 `code`
+5. 细分错误类型看 `error.code`
+6. 字段级提示看 `error.fields`
 
-### 6.3 错误收敛
+禁止：
 
-- `WriteError(hahHTTPError404)` 按公开错误模型写回，并保留 `detail`、`code` 与 violations 顺序
-- `errors[]` 的稳定 JSON 字段固定为 `field` / `in` / `code` / `detail`
-- `WriteError(context.Canceled)` 写出 `499`，且不写 `detail` / `errors`
-- `WriteError(context.DeadlineExceeded)` 写出 `504`，且不写 `detail` / `errors`
-- `WriteError` 对普通错误写出最小 `500` Problem，且不写 `detail` / `errors`
-- 错误链同时匹配 `*hah.HTTPError` 与 `context` 错误时，优先按 `*hah.HTTPError` 收敛
+- 依赖 `message` 做稳定程序分支
+- 依赖成功 `data` 的 JSON 形状判断“请求是否成功”
 
-### 6.4 写回失败
+## 11. 测试基线
 
-- `WriteError(nil)` 是 no-op
-- Problem payload 形状固定且必须保持可 JSON 编码；`WriteError` 不暴露单独的 problem 编码失败分支
-- 任一失败场景都不得产生“前半段成功 JSON、后半段错误 JSON”的混杂响应
-- 首次提交后的底层写失败只要求返回错误，不要求响应可回退
+后续实现或重构至少覆盖以下代表性黑盒基线：
+
+- 成功响应固定写出 `code = 0` 与 `message = "success"`
+- `OK` 固定写 `200`，`Created` 固定写 `201`
+- 成功有 payload 时写 `data`；无 payload 时允许省略 `data`
+- 成功 `data` 若存在，支持对象、数组、标量与 `null`
+- 任一公开入口在 `w == nil` 时都返回 error，且不得写内容
+- `HEAD` 请求沿用 `net/http` 默认语义
+- 默认协议拥有 `Content-Type` / `Content-Length` 所有权；无关头部保留，冲突 `Content-Type` 覆盖，预设 `Content-Length` 不原样穿透
+- 首次提交前必须完成校验与编码；预提交失败不得写半成品响应
+- 首次提交后底层写失败只返回 error，不回滚响应
+- 失败响应固定写出非 `0` 顶层 `code`、顶层 `message` 与 `error`
+- 失败 `message` 固定按内部 `detail -> error.title` 派生，不接受独立传入
+- 未显式提供失败 `code` 时，按 `status * 1000` 生成默认值
+- `WriteError` 显式提供单个失败 `code` 时，优先使用调用方传入值
+- `WriteError` 对 `code <= 0` 必须在首次提交前返回 error
+- `WriteError` 传入多个 `code` 参数时，必须在首次提交前返回 error
+- `WriteError(w, nil)` 与 `WriteError(w, nil, code)` 都是 no-op
+- `error` 固定包含 `title` / `status` / `code`，并按需包含 `fields`
+- `error.fields` 的稳定 JSON 字段固定为 `field` / `in` / `code` / `message`
+- 调用方显式提供公开 `detail` 时，顶层 `message` 必须与之保持一致
+- 对外 `error` JSON 不输出 `detail`
+- `context.Canceled`、`context.DeadlineExceeded` 与普通 `error` 不得泄漏内部错误文本
+- 无数据成功固定返回 envelope，而不是 `204`
+- 显式 `nil` payload 与“无 payload”必须可区分：前者可写 `data: null`，后者可省略 `data`

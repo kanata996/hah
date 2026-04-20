@@ -1,68 +1,79 @@
 package resp
 
-// 本文件负责“统一错误响应写回”。
-//
-// 定位：
-//   - 这里承载 error 语义到 HTTP 错误响应的主入口。
-//   - 它关注的是把任意 error 收敛成稳定的 HTTP 错误响应并写回客户端。
-//
-// 职责：
-//   - 统一错误 JSON 对象的编码与写回。
-//   - 处理错误响应写出等边界。
-//
-// 要点：
-//   - 对外响应契约稳定优先，不泄露内部原始错误对象。
-//   - 普通 4xx / 5xx 只写统一错误响应，不额外输出重复业务错误日志。
-//   - violation 明细固定为公开结构，不再接受任意 payload。
-
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/kanata996/hah/internal/errx"
 )
 
-// problemPayload 是最终写入响应体的公共错误字段。
-// 这里不包含内部原始 error，避免把服务端细节泄露给客户端。
-type problemPayload struct {
-	Title  string           `json:"title"`
-	Status int              `json:"status"`
-	Detail string           `json:"detail,omitempty"`
-	Code   string           `json:"code"`
-	Errors []errx.Violation `json:"errors,omitempty"`
+const errorCodeBase = 1000
+
+type errorBody struct {
+	Title  string       `json:"title"`
+	Status int          `json:"status"`
+	Code   string       `json:"code"`
+	Fields []fieldError `json:"fields,omitempty"`
+}
+
+type fieldError struct {
+	Field   string `json:"field"`
+	In      string `json:"in,omitempty"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 // WriteError 是 HTTP 错误写回的统一入口。
-//
-// 它只负责把给定 error 收敛成稳定的 Problem JSON 并写回。
-// 对 HEAD 等请求沿用 net/http 默认语义；调用方应在开始写出响应前调用它。
-func WriteError(w http.ResponseWriter, err error) error {
+func WriteError(w http.ResponseWriter, err error, code ...int) error {
 	if err == nil {
 		return nil
+	}
+
+	topCode, topCodeSet, topCodeErr := normalizeTopCode(code)
+	if topCodeErr != nil {
+		return topCodeErr
 	}
 
 	if w == nil {
 		return errNilResponseWriter
 	}
 
-	payload := normalizeProblemPayload(err)
-	// problemPayload 的公开形状固定为 JSON 基础类型组合；
-	// 回归测试会锁住“始终可编码”的内部不变量。
-	body, _ := encodeJSON(payload)
-	return writePreparedJSONBytes(w, payload.Status, problemJSONContentType, body)
+	httpErr := normalizeHTTPError(err)
+	if !topCodeSet {
+		topCode = httpErr.Status() * errorCodeBase
+	}
+
+	body, encodeErr := encodeJSON(responseEnvelope{
+		Code:    topCode,
+		Message: deriveErrorMessage(httpErr),
+		Error:   newErrorBody(httpErr),
+	})
+	if encodeErr != nil {
+		return encodeErr
+	}
+
+	return writePreparedJSONBytes(w, httpErr.Status(), jsonContentType, body)
 }
 
-func normalizeProblemPayload(err error) problemPayload {
-	var httpErr *errx.HTTPError
-	if errors.As(err, &httpErr) && httpErr != nil {
-		return problemPayload{
-			Title:  httpErr.Title(),
-			Status: httpErr.Status(),
-			Detail: httpErr.Detail(),
-			Code:   httpErr.Code(),
-			Errors: httpErr.Errors(),
+func normalizeTopCode(code []int) (value int, ok bool, err error) {
+	switch len(code) {
+	case 0:
+		return 0, false, nil
+	case 1:
+		if code[0] <= 0 {
+			return 0, false, fmt.Errorf("resp: invalid top-level error code %d", code[0])
 		}
+		return code[0], true, nil
+	default:
+		return 0, false, errors.New("resp: WriteError accepts at most one top-level error code")
+	}
+}
+
+func normalizeHTTPError(err error) *errx.HTTPError {
+	if httpErr := findHTTPError(err); httpErr != nil {
+		return httpErr
 	}
 
 	status := http.StatusInternalServerError
@@ -73,10 +84,53 @@ func normalizeProblemPayload(err error) problemPayload {
 		status = http.StatusGatewayTimeout
 	}
 
-	synthetic := errx.NewHTTPError(status, "", "")
-	return problemPayload{
-		Title:  synthetic.Title(),
-		Status: synthetic.Status(),
-		Code:   synthetic.Code(),
+	return errx.NewHTTPError(status, "", "")
+}
+
+func findHTTPError(err error) *errx.HTTPError {
+	if err == nil {
+		return nil
+	}
+
+	var httpErr *errx.HTTPError
+	if errors.As(err, &httpErr) && httpErr != nil {
+		return httpErr
+	}
+
+	switch wrapped := err.(type) {
+	case interface{ Unwrap() []error }:
+		for _, child := range wrapped.Unwrap() {
+			if httpErr := findHTTPError(child); httpErr != nil {
+				return httpErr
+			}
+		}
+	case interface{ Unwrap() error }:
+		return findHTTPError(wrapped.Unwrap())
+	}
+
+	return nil
+}
+
+func deriveErrorMessage(httpErr *errx.HTTPError) string {
+	return httpErr.Detail()
+}
+
+func newErrorBody(httpErr *errx.HTTPError) *errorBody {
+	violations := httpErr.Errors()
+	fields := make([]fieldError, 0, len(violations))
+	for _, violation := range violations {
+		fields = append(fields, fieldError{
+			Field:   violation.Field,
+			In:      string(violation.In),
+			Code:    string(violation.Code),
+			Message: violation.Detail,
+		})
+	}
+
+	return &errorBody{
+		Title:  httpErr.Title(),
+		Status: httpErr.Status(),
+		Code:   httpErr.Code(),
+		Fields: fields,
 	}
 }

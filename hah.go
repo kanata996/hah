@@ -108,8 +108,8 @@ func TooManyRequests(code, detail string) *HTTPError {
 }
 
 // WriteError 按统一错误对象写回响应。
-func WriteError(w http.ResponseWriter, err error) error {
-	return resp.WriteError(w, err)
+func WriteError(w http.ResponseWriter, err error, code ...int) error {
+	return resp.WriteError(w, err, code...)
 }
 
 // JSON 写回 JSON 响应。
@@ -125,9 +125,4 @@ func OK(w http.ResponseWriter, data any) error {
 // Created 写回 201 成功响应。
 func Created(w http.ResponseWriter, data any) error {
 	return resp.Created(w, data)
-}
-
-// NoContent 写回 204 成功响应。
-func NoContent(w http.ResponseWriter) error {
-	return resp.NoContent(w)
 }

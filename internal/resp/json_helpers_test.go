@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -101,7 +102,7 @@ func assertPublicErrorObject(t *testing.T, got any, want map[string]any) {
 		t.Fatalf("error item = %#v, want object", got)
 	}
 	for key, wantValue := range want {
-		if gotValue := gotMap[key]; gotValue != wantValue {
+		if gotValue := gotMap[key]; !reflect.DeepEqual(gotValue, wantValue) {
 			t.Fatalf("error item %q = %#v, want %#v", key, gotValue, wantValue)
 		}
 	}

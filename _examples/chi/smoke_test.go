@@ -26,7 +26,7 @@ func TestChiCreateGetListAndDeleteFlow(t *testing.T) {
 	}
 
 	var created account
-	decodeJSON(t, createRR.Body.Bytes(), &created)
+	decodeJSON(t, mustResponseData(t, createRR.Body.Bytes()), &created)
 	if created.Name != "Platform Team" {
 		t.Fatalf("created name = %q, want Platform Team", created.Name)
 	}
@@ -41,7 +41,7 @@ func TestChiCreateGetListAndDeleteFlow(t *testing.T) {
 	}
 
 	var listed map[string]any
-	decodeJSON(t, listRR.Body.Bytes(), &listed)
+	decodeJSON(t, mustResponseData(t, listRR.Body.Bytes()), &listed)
 	if got := int(listed["count"].(float64)); got != 3 {
 		t.Fatalf("list count = %d, want 3", got)
 	}
@@ -71,11 +71,19 @@ func TestChiCreateGetListAndDeleteFlow(t *testing.T) {
 	deleteRR := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRR, deleteReq)
 
-	if deleteRR.Code != http.StatusNoContent {
-		t.Fatalf("delete status = %d, want %d", deleteRR.Code, http.StatusNoContent)
+	if deleteRR.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, want %d", deleteRR.Code, http.StatusOK)
 	}
 	if got := deleteRR.Header().Get("X-Deleted-By"); got != "ops@example.com" {
 		t.Fatalf("X-Deleted-By = %q, want ops@example.com", got)
+	}
+
+	deletePayload := decodeEnvelope(t, deleteRR.Body.Bytes())
+	if got := deletePayload["code"]; got != float64(0) {
+		t.Fatalf("delete code = %#v, want 0", got)
+	}
+	if _, exists := deletePayload["data"]; exists {
+		t.Fatalf("delete data unexpectedly present: %#v", deletePayload["data"])
 	}
 
 	missingReq := httptest.NewRequest(http.MethodGet, "/orgs/org_123/accounts/"+created.ID, nil)
@@ -97,27 +105,34 @@ func TestDeleteRequiresActorHeader(t *testing.T) {
 	if rr.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusUnprocessableEntity)
 	}
-	if got := rr.Header().Get("Content-Type"); got != "application/problem+json" {
-		t.Fatalf("Content-Type = %q, want application/problem+json", got)
+	if got := rr.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
 	}
 
-	var problem map[string]any
-	decodeJSON(t, rr.Body.Bytes(), &problem)
-	if got := problem["code"]; got != "invalid_request" {
-		t.Fatalf("problem code = %#v, want invalid_request", got)
+	problem := decodeEnvelope(t, rr.Body.Bytes())
+	if got := problem["code"]; got != float64(422000) {
+		t.Fatalf("top code = %#v, want 422000", got)
 	}
 
-	errorsList, ok := problem["errors"].([]any)
-	if !ok || len(errorsList) == 0 {
-		t.Fatalf("errors = %#v, want at least one violation", problem["errors"])
+	errorValue := mustErrorObject(t, problem)
+	if got := errorValue["code"]; got != "invalid_request" {
+		t.Fatalf("error.code = %#v, want invalid_request", got)
 	}
 
-	first, ok := errorsList[0].(map[string]any)
+	fields, ok := errorValue["fields"].([]any)
+	if !ok || len(fields) == 0 {
+		t.Fatalf("fields = %#v, want at least one violation", errorValue["fields"])
+	}
+
+	first, ok := fields[0].(map[string]any)
 	if !ok {
-		t.Fatalf("first error = %#v, want object", errorsList[0])
+		t.Fatalf("first field = %#v, want object", fields[0])
 	}
 	if got := first["in"]; got != "header" {
 		t.Fatalf("violation in = %#v, want header", got)
+	}
+	if got := first["message"]; got != "is required" {
+		t.Fatalf("violation message = %#v, want is required", got)
 	}
 }
 
@@ -141,7 +156,7 @@ func TestHeartbeatAndPathValueBridge(t *testing.T) {
 	}
 
 	var fetched account
-	decodeJSON(t, getRR.Body.Bytes(), &fetched)
+	decodeJSON(t, mustResponseData(t, getRR.Body.Bytes()), &fetched)
 	if fetched.ID != "acct_001" {
 		t.Fatalf("fetched id = %q, want acct_001", fetched.ID)
 	}
@@ -189,6 +204,42 @@ func TestRequestIDTraceIDAndHTTPLogIntegration(t *testing.T) {
 	if got := entry["http.response.status_code"]; got != float64(http.StatusOK) {
 		t.Fatalf("http.response.status_code = %#v, want %d", got, http.StatusOK)
 	}
+}
+
+func decodeEnvelope(t *testing.T, body []byte) map[string]any {
+	t.Helper()
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(%s) error = %v", string(body), err)
+	}
+	return payload
+}
+
+func mustResponseData(t *testing.T, body []byte) []byte {
+	t.Helper()
+
+	payload := decodeEnvelope(t, body)
+	data, ok := payload["data"]
+	if !ok {
+		t.Fatalf("data missing in payload: %#v", payload)
+	}
+
+	raw, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("json.Marshal(data) error = %v", err)
+	}
+	return raw
+}
+
+func mustErrorObject(t *testing.T, payload map[string]any) map[string]any {
+	t.Helper()
+
+	errorValue, ok := payload["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", payload["error"])
+	}
+	return errorValue
 }
 
 func decodeJSON(t *testing.T, body []byte, dst any) {

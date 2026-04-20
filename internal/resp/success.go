@@ -2,24 +2,34 @@ package resp
 
 import "net/http"
 
+const (
+	successTopCode = 0
+	successMessage = "success"
+)
+
 // OK 写出 200 JSON 成功响应。
 func OK(w http.ResponseWriter, data any) error {
-	return JSON(w, http.StatusOK, data)
+	return writeSuccess(w, http.StatusOK, data)
 }
 
 // Created 写出 201 JSON 成功响应。
 func Created(w http.ResponseWriter, data any) error {
-	return JSON(w, http.StatusCreated, data)
+	return writeSuccess(w, http.StatusCreated, data)
 }
 
-// NoContent 写出 204 响应且不包含响应体。
-func NoContent(w http.ResponseWriter) error {
+func writeSuccess(w http.ResponseWriter, status int, data any) error {
 	if w == nil {
 		return errNilResponseWriter
 	}
-	header := w.Header()
-	header.Del("Content-Type")
-	header.Del("Content-Length")
-	w.WriteHeader(http.StatusNoContent)
-	return nil
+
+	body, err := encodeJSON(responseEnvelope{
+		Code:    successTopCode,
+		Message: successMessage,
+		Data:    data,
+	})
+	if err != nil {
+		return err
+	}
+
+	return writePreparedJSONBytes(w, status, jsonContentType, body)
 }

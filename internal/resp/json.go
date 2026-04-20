@@ -9,11 +9,17 @@ import (
 )
 
 const (
-	jsonContentType        = "application/json"
-	problemJSONContentType = "application/problem+json"
+	jsonContentType = "application/json"
 )
 
 var errNilResponseWriter = errors.New("resp: response writer is nil")
+
+type responseEnvelope struct {
+	Code    int        `json:"code"`
+	Message string     `json:"message"`
+	Data    any        `json:"data,omitempty"`
+	Error   *errorBody `json:"error,omitempty"`
+}
 
 // JSON 写出 JSON 响应。
 func JSON(w http.ResponseWriter, status int, data any) error {

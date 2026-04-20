@@ -22,10 +22,10 @@ import (
 type rootPayloadMap map[string]any
 
 type decodedRootViolation struct {
-	Field  string
-	In     string
-	Code   string
-	Detail string
+	Field   string
+	In      string
+	Code    string
+	Message string
 }
 
 // BindBody 只从 JSON body 绑定数据。
@@ -108,7 +108,7 @@ func TestInvalidRequest_DelegatesToReqx(t *testing.T) {
 		Code:  CodeRequired,
 	}))
 
-	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Detail != "is required" {
+	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Message != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -135,7 +135,7 @@ func TestNewHTTPError_DelegatesToErrx(t *testing.T) {
 	}
 
 	violation := assertSingleRootViolation(t, err)
-	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeInvalid) || violation.Detail != "is invalid" {
+	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeInvalid) || violation.Message != "is invalid" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -178,7 +178,7 @@ func TestRootErrorHelpersExposePublicViolationSurface(t *testing.T) {
 	}
 
 	violation := assertSingleRootViolation(t, err)
-	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Detail != "is required" {
+	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Message != "is required" {
 		t.Fatalf("violation = %#v", violation)
 	}
 }
@@ -220,7 +220,7 @@ func TestRootErrorHelpers_CommonStatuses(t *testing.T) {
 func TestWriteError_DelegatesToResp(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	if err := WriteError(rr, context.DeadlineExceeded); err != nil {
+	if err := WriteError(rr, context.DeadlineExceeded, 504123); err != nil {
 		t.Fatalf("WriteError() error = %v", err)
 	}
 	if rr.Code != http.StatusGatewayTimeout {
@@ -228,11 +228,19 @@ func TestWriteError_DelegatesToResp(t *testing.T) {
 	}
 
 	body := decodeRootPayload(t, rr.Body.Bytes())
-	if got := body["code"]; got != "timeout" {
-		t.Fatalf("code = %#v, want timeout", got)
+	if got := body["code"]; got != float64(504123) {
+		t.Fatalf("code = %#v, want 504123", got)
 	}
-	if got := body["title"]; got != http.StatusText(http.StatusGatewayTimeout) {
-		t.Fatalf("title = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
+	if got := body["message"]; got != http.StatusText(http.StatusGatewayTimeout) {
+		t.Fatalf("message = %#v, want %q", got, http.StatusText(http.StatusGatewayTimeout))
+	}
+
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
+	}
+	if got := errorValue["code"]; got != "timeout" {
+		t.Fatalf("error.code = %#v, want timeout", got)
 	}
 }
 
@@ -248,8 +256,19 @@ func TestOK_DelegatesToResp(t *testing.T) {
 	}
 
 	payload := decodeRootPayload(t, rr.Body.Bytes())
-	if payload["id"] != "u_1" {
-		t.Fatalf("id = %#v, want u_1", payload["id"])
+	if got := payload["code"]; got != float64(0) {
+		t.Fatalf("code = %#v, want 0", got)
+	}
+	if got := payload["message"]; got != "success" {
+		t.Fatalf("message = %#v, want success", got)
+	}
+
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data = %#v, want object", payload["data"])
+	}
+	if data["id"] != "u_1" {
+		t.Fatalf("data.id = %#v, want u_1", data["id"])
 	}
 }
 
@@ -280,23 +299,19 @@ func TestCreated_DelegatesToResp(t *testing.T) {
 	}
 
 	payload := decodeRootPayload(t, rr.Body.Bytes())
-	if payload["id"] != "u_1" {
-		t.Fatalf("id = %#v, want u_1", payload["id"])
+	if got := payload["code"]; got != float64(0) {
+		t.Fatalf("code = %#v, want 0", got)
 	}
-}
+	if got := payload["message"]; got != "success" {
+		t.Fatalf("message = %#v, want success", got)
+	}
 
-// NoContent 会通过根包 facade 写回标准 204 响应。
-func TestNoContent_DelegatesToResp(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	if err := NoContent(rr); err != nil {
-		t.Fatalf("NoContent() error = %v", err)
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data = %#v, want object", payload["data"])
 	}
-	if rr.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNoContent)
-	}
-	if rr.Body.Len() != 0 {
-		t.Fatalf("body = %q, want empty", rr.Body.String())
+	if data["id"] != "u_1" {
+		t.Fatalf("data.id = %#v, want u_1", data["id"])
 	}
 }
 
@@ -331,21 +346,26 @@ func assertSingleRootViolation(t *testing.T, err error) decodedRootViolation {
 	t.Helper()
 
 	payload := decodeRootPayload(t, mustWriteRootError(t, err))
-	errorsValue, ok := payload["errors"].([]any)
-	if !ok || len(errorsValue) != 1 {
-		t.Fatalf("errors = %#v, want single violation", payload["errors"])
+	errorValue, ok := payload["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", payload["error"])
 	}
 
-	violationMap, ok := errorsValue[0].(map[string]any)
+	fields, ok := errorValue["fields"].([]any)
+	if !ok || len(fields) != 1 {
+		t.Fatalf("fields = %#v, want single violation", errorValue["fields"])
+	}
+
+	violationMap, ok := fields[0].(map[string]any)
 	if !ok {
-		t.Fatalf("violation type = %T, want map[string]any", errorsValue[0])
+		t.Fatalf("violation type = %T, want map[string]any", fields[0])
 	}
 
 	return decodedRootViolation{
-		Field:  stringValue(violationMap["field"]),
-		In:     stringValue(violationMap["in"]),
-		Code:   stringValue(violationMap["code"]),
-		Detail: stringValue(violationMap["detail"]),
+		Field:   stringValue(violationMap["field"]),
+		In:      stringValue(violationMap["in"]),
+		Code:    stringValue(violationMap["code"]),
+		Message: stringValue(violationMap["message"]),
 	}
 }
 
