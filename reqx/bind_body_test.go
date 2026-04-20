@@ -9,11 +9,6 @@ import (
 	"testing"
 )
 
-type bindBodyReadErrorCloser struct{ err error }
-
-func (r bindBodyReadErrorCloser) Read([]byte) (int, error) { return 0, r.err }
-func (r bindBodyReadErrorCloser) Close() error             { return nil }
-
 type bindBodyJSONValue struct {
 	Value string
 }

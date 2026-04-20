@@ -11,6 +11,22 @@ import (
 	"github.com/kanata996/hah/internal/errx"
 )
 
+type bindBodyReadErrorCloser struct{ err error }
+
+func (r bindBodyReadErrorCloser) Read([]byte) (int, error) { return 0, r.err }
+func (r bindBodyReadErrorCloser) Close() error             { return nil }
+
+type bindQueryNamedString string
+type bindQueryNamedSlice []string
+type bindQueryNamedBool bool
+type bindQueryNamedInt int32
+type bindQueryNamedUint uint16
+type bindQueryNamedFloat float32
+
+type bindQueryTextValue string
+
+func (*bindQueryTextValue) UnmarshalText([]byte) error { return nil }
+
 func newJSONRequest(method, target, body string) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
