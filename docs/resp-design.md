@@ -1,7 +1,7 @@
 # hah 响应协议设计方案
 
-- 状态：Draft
-- 版本：v15
+- 状态：Locked
+- 版本：v18
 - 起草日期：2026-04-20
 - 适用范围：
   - 根包 `hah` 面向业务 JSON API 的默认响应协议
@@ -32,7 +32,7 @@
 本文档锁定的是默认业务协议，而不是最底层 JSON 写回能力。
 若最终继续保留 `hah.JSON`，它只应作为不带 envelope 的底层逃生口，不反向约束本文定义的默认协议。
 在 `v1` 之前，响应协议不承诺兼容旧设计；如有必要，可以直接删除与本文冲突的旧入口和旧行为。
-由于本文状态是 `Draft`，当前实现可以尚未完全对齐；只有当代码与黑盒测试一并切换后，本文才会升级为 `Locked` 契约。
+本文当前版本自本次起视为 `Locked` 契约；后续任何公开行为变化都必须先更新本文并补黑盒测试。
 
 ## 2. 公开入口
 
@@ -72,8 +72,9 @@
 - `WriteError(w, nil, code)` 也是 no-op；可选 `code` 在 `err == nil` 时必须被忽略
 - `WriteError(w, err)` 使用默认顶层 `code` 规则
 - `WriteError(w, err, code)` 使用显式顶层 `code`
+- `WriteError(w, err)` 在失败响应中必须最终收敛出非空 `error.reason`
 - `WriteError(w, err, code1, code2, ...)` 必须在首次提交前返回 error
-- `WriteError(w, err, code)` 中 `code <= 0` 必须在首次提交前返回 error
+- `WriteError(w, err, code)` 中非五位或 `code <= 0` 的值必须在首次提交前返回 error
 
 ## 4. 总体模型
 
@@ -88,10 +89,8 @@ type Response[T any] struct {
 }
 
 type ErrorBody struct {
-	Title  string       `json:"title"`
 	Status int          `json:"status"`
-	Code   string       `json:"code"`
-	Detail string       `json:"-"`
+	Reason string       `json:"reason"`
 	Fields []FieldError `json:"fields,omitempty"`
 }
 
@@ -108,7 +107,7 @@ type FieldError struct {
 
 - 成功时 `data` 是可选字段
 - 无 payload 的成功响应允许省略 `data`
-- 显式传入 `nil` payload 时允许写出 `"data": null`
+- 成功时 `data` 是否省略或写出 `null` 不作为稳定契约
 - 失败时不得写出 `data`
 - 成功时不得写出 `error`
 
@@ -118,11 +117,13 @@ type FieldError struct {
 - 顶层固定字段为 `code` 与 `message`
 - 成功响应可写 `data`，且不得写 `error`
 - 失败响应写 `error`，不得写 `data`
-- 顶层 `code` 是整数业务码
-- 嵌套 `error.code` 是稳定字符串错误类型
+- 顶层 `code` 是整数业务码；失败时固定为五位业务错误码
+- 嵌套 `error.reason` 是必填、非空的稳定字符串错误类型
 - `message` 是给人看的短摘要，不用于程序分支判断
 - 失败时顶层 `message` 是派生字段，不作为独立输入
-- `ErrorBody.Detail` 只用于内部派生 `message`，不属于公开 JSON 协议
+- `title` 不再属于公开 JSON 协议；人类可读摘要统一收敛到顶层 `message`
+- 内部允许保留 `detail` 作为最具体的错误摘要来源
+- 若底层错误模型仍有 `title`，它只属于内部兼容信息，不参与默认响应协议，也不参与 `message` 派生
 - `FieldError.Code` 是字段级规则码，例如 `required` / `invalid` / `type`
 - `FieldError.Message` 是字段级错误提示
 
@@ -164,11 +165,11 @@ type FieldError struct {
 
 - 成功时 `data` 是可选字段
 - `data` 若存在，可以是对象、数组、标量或 `null`
-- 无 payload 的成功响应默认省略 `data`
-- 显式 `nil` payload 编码为 JSON `null`
+- 无 payload 的成功响应可以省略 `data`
+- 显式 `nil` payload 是否编码为 JSON `null` 不作为稳定契约
 - 具体 JSON 序列化语义仍跟随 `encoding/json`
-- `OK` 的无数据成功默认写 `200` + 不含 `data` 的 envelope
-- `Created` 的无数据成功默认写 `201` + 不含 `data` 的 envelope
+- `OK` 的无数据成功允许写 `200` + 不含 `data` 的 envelope
+- `Created` 的无数据成功允许写 `201` + 不含 `data` 的 envelope
 - 成功 envelope 不承担业务分页、trace、meta 等扩展字段；是否追加额外顶层字段，留待单独设计
 
 ## 6. 失败响应
@@ -177,8 +178,8 @@ type FieldError struct {
 
 - HTTP 状态码使用 `4xx` 或 `5xx`
 - `Content-Type` 为 `application/json`
-- 顶层 `code` 为非 `0` 整数
-- 顶层 `message` 为错误摘要，且由内部 `detail -> error.title` 派生
+- 顶层 `code` 为非 `0` 的五位整数
+- 顶层 `message` 为错误摘要，且由内部 `detail -> humanized reason` 派生
 - 不写 `data`
 - 具体错误内容写入 `error`
 
@@ -186,12 +187,11 @@ type FieldError struct {
 
 ```json
 {
-  "code": 422000,
+  "code": 42200,
   "message": "request validation failed",
   "error": {
-    "title": "Unprocessable Entity",
     "status": 422,
-    "code": "unprocessable_entity",
+    "reason": "unprocessable_entity",
     "fields": [
       {
         "field": "email",
@@ -206,12 +206,12 @@ type FieldError struct {
 
 `error` 对象的字段职责固定为：
 
-- `title`：短标题，由公开错误模型决定
 - `status`：最终 HTTP 状态码
-- `code`：稳定字符串错误类型，例如 `unprocessable_entity`、`timeout`、`not_found`
+- `reason`：必填、非空的稳定字符串错误类型，例如 `unprocessable_entity`、`timeout`、`not_found`
 - `fields`：字段级错误列表；仅在有 violations 时写出
 
 `detail` 仍允许保留在内部错误承载结构中，但只用于派生顶层 `message`，不作为公开 `error` JSON 字段输出。
+若现有底层错误模型仍有 `title` 概念，它只属于内部兼容信息，不参与默认响应协议，也不参与 `message` 派生。
 
 `fields` 的稳定 JSON 字段固定为：
 
@@ -222,9 +222,9 @@ type FieldError struct {
 
 规则：
 
-- `error.code` 与顶层 `code` 语义不同，不得混用
+- `error.reason` 与顶层 `code` 语义不同，不得混用
 - 顶层 `code` 负责业务分支
-- `error.code` 负责稳定错误类型
+- `error.reason` 负责稳定错误类型
 - `fields` 不排序、不去重、不改写顺序
 
 ## 7. 顶层 `code` / `message` 规则
@@ -246,8 +246,9 @@ type FieldError struct {
 
 约束：
 
-- 显式失败 `code` 必须是正整数
+- 显式失败 `code` 必须是五位正整数
 - 显式失败 `code` 不得为 `0`
+- 显式失败 `code` 必须满足 `10000 <= code <= 99999`
 - 顶层 `message` 不允许作为独立输入
 - `WriteError` 的第三参数只改变顶层 `code` 选择规则，不改变 HTTP 状态码、顶层 `message` 派生规则和 `error` payload 结构
 - `WriteError(w, err)` 表示“不显式传入顶层 `code`，使用默认规则”
@@ -261,9 +262,17 @@ type FieldError struct {
 失败时，顶层 `message` 固定按以下优先级派生：
 
 1. 内部 `detail`
-2. `error.title`
+2. `error.reason` 的可读化结果
 
-调用方若要影响失败 `message`，应通过公开错误模型提供 `detail`；若未提供 detail，则回退为 `title`。
+调用方若要影响失败 `message`，应优先通过公开错误模型提供 `detail`；若未提供 `detail`，则由公开的稳定 `reason` 自动派生可读摘要。
+
+其中 `humanized reason` 的规则固定为：
+
+- 只允许基于公开、稳定、可对外暴露的 `error.reason` 生成
+- 将 `snake_case` / `kebab-case` 中的 `_` / `-` 统一替换为空格
+- 合并连续分隔符并输出为小写短语
+- 不得从原始 `error.Error()` 或其他内部错误文本直接派生
+- 因此公开错误模型必须提供非空 `reason`，默认协议不再回退到 `http.StatusText(status)`
 
 内部 `detail` 允许由调用方通过公开错误模型定义，但不作为公开 JSON 字段输出。
 
@@ -271,33 +280,33 @@ type FieldError struct {
 
 若调用方使用 `WriteError(w, err)`，即未显式提供顶层 `code`，默认规则固定为：
 
-- `code = status * 1000`
+- `code = status * 100`
 
 示例：
 
 | HTTP status | 默认顶层 `code` | 顶层 `message` 优先级  |
 | ----------- | --------------- | ---------------------- |
-| `400`       | `400000`        | `detail`，否则 `title` |
-| `401`       | `401000`        | `detail`，否则 `title` |
-| `404`       | `404000`        | `detail`，否则 `title` |
-| `422`       | `422000`        | `detail`，否则 `title` |
-| `500`       | `500000`        | `detail`，否则 `title` |
+| `400`       | `40000`         | `detail -> humanized reason` |
+| `401`       | `40100`         | `detail -> humanized reason` |
+| `404`       | `40400`         | `detail -> humanized reason` |
+| `422`       | `42200`         | `detail -> humanized reason` |
+| `500`       | `50000`         | `detail -> humanized reason` |
 
 该规则只定义默认值，不限制业务方在此基础上自行细分，例如：
 
-- `401001` 表示 token missing
-- `401002` 表示 token invalid
-- `422001` 表示 invalid json
+- `40101` 表示 token missing
+- `40102` 表示 token invalid
+- `42201` 表示 invalid json
 
 ### 7.5 顶层 `code` 保留约定
 
 顶层 `code` 的保留规则固定为：
 
 - `0` 保留给成功响应
-- `400000` 到 `599999` 保留给默认 HTTP 错误映射
-- 其他正整数可由业务方通过 `WriteError(w, err, code)` 显式传入使用
+- `40000` 到 `59999` 保留给默认 HTTP 错误映射
+- 其他五位正整数可由业务方通过 `WriteError(w, err, code)` 显式传入使用
 
-业务方若显式传入 `400000` 到 `599999` 区间内的值，应自行保证语义一致，不得制造与默认 HTTP 错误映射相冲突的歧义。
+业务方若显式传入 `40000` 到 `59999` 区间内的值，应自行保证语义一致，不得制造与默认 HTTP 错误映射相冲突的歧义。
 
 ## 8. 与现有 `hah` 错误模型的映射
 
@@ -305,10 +314,11 @@ type FieldError struct {
 
 映射规则固定为：
 
-- `error.title` 对应 `hah.HTTPError.Title()`
 - `error.status` 对应 `hah.HTTPError.Status()`
-- `error.code` 对应 `hah.HTTPError.Code()`
+- `error.reason` 对应 `hah.HTTPError.Code()`
 - 内部 `detail` 对应 `hah.HTTPError.Detail()`，仅用于派生顶层 `message`
+- `hah.HTTPError.Code()` 必须能提供非空 `reason`
+- `hah.HTTPError.Title()` 不再映射到公开 JSON 字段，也不参与 `message` 派生；若当前模型仍保留 `Title()`，它只属于内部兼容信息
 - `error.fields` 对应 `hah.HTTPError.Errors()`
 
 字段级映射固定为：
@@ -320,8 +330,8 @@ type FieldError struct {
 
 对 `context.Canceled`、`context.DeadlineExceeded` 与普通 `error` 这类框架合成错误：
 
-- 仍先按 `hah` 公开错误模型收敛出 `title` / `status` / `code`
-- 顶层 `message` 固定按 `detail -> title` 派生
+- 仍先按 `hah` 公开错误模型收敛出 `status` / `reason` / 内部消息源
+- 顶层 `message` 固定按 `detail -> humanized reason` 派生
 - 不得泄漏原始内部错误文本
 
 ## 9. HTTP 语义
@@ -335,8 +345,8 @@ type FieldError struct {
 - 默认协议不使用 `204 No Content`
 - 无数据成功仍返回 JSON envelope；`OK` 默认使用 `200`，`Created` 默认使用 `201`
 - 失败时的顶层 `message` 只是 `error` 的摘要投影，不是额外独立错误源
-- 内部 `detail` 可以保留，但对外 `error` JSON 不输出 `detail`
-- 失败时顶层 `code` 要么显式来自 `WriteError` 的单个第三参数，要么默认来自 `WriteError` 的 `status * 1000` 规则
+- 内部 `detail` 可以保留，但对外 `error` JSON 不输出 `detail` / `title`
+- 失败时顶层 `code` 要么显式来自 `WriteError` 的单个第三参数，要么默认来自 `WriteError` 的 `status * 100` 规则
 
 ## 10. 前端判断规则
 
@@ -346,7 +356,7 @@ type FieldError struct {
 2. `2xx` 视为成功；若存在 `data`，则读取 `data`
 3. 非 `2xx` 视为失败，读取 `error`
 4. 业务分支优先看顶层 `code`
-5. 细分错误类型看 `error.code`
+5. 细分错误类型看 `error.reason`
 6. 字段级提示看 `error.fields`
 
 禁止：
@@ -368,16 +378,17 @@ type FieldError struct {
 - 首次提交前必须完成校验与编码；预提交失败不得写半成品响应
 - 首次提交后底层写失败只返回 error，不回滚响应
 - 失败响应固定写出非 `0` 顶层 `code`、顶层 `message` 与 `error`
-- 失败 `message` 固定按内部 `detail -> error.title` 派生，不接受独立传入
-- 未显式提供失败 `code` 时，按 `status * 1000` 生成默认值
+- 失败 `message` 固定按内部 `detail -> humanized reason` 派生，不接受独立传入
+- 未显式提供失败 `code` 时，按 `status * 100` 生成默认值
 - `WriteError` 显式提供单个失败 `code` 时，优先使用调用方传入值
-- `WriteError` 对 `code <= 0` 必须在首次提交前返回 error
+- `WriteError` 对非五位或 `code <= 0` 的失败 `code` 必须在首次提交前返回 error
 - `WriteError` 传入多个 `code` 参数时，必须在首次提交前返回 error
 - `WriteError(w, nil)` 与 `WriteError(w, nil, code)` 都是 no-op
-- `error` 固定包含 `title` / `status` / `code`，并按需包含 `fields`
+- `error` 固定包含 `status` 与非空 `reason`，并按需包含 `fields`
 - `error.fields` 的稳定 JSON 字段固定为 `field` / `in` / `code` / `message`
 - 调用方显式提供公开 `detail` 时，顶层 `message` 必须与之保持一致
-- 对外 `error` JSON 不输出 `detail`
+- 未提供 `detail` 且 `reason` 可用时，顶层 `message` 必须等于 `reason` 的确定性可读化结果
+- 对外 `error` JSON 不输出 `detail` / `title`
 - `context.Canceled`、`context.DeadlineExceeded` 与普通 `error` 不得泄漏内部错误文本
 - 无数据成功固定返回 envelope，而不是 `204`
-- 显式 `nil` payload 与“无 payload”必须可区分：前者可写 `data: null`，后者可省略 `data`
+- 成功时 `data` 为可选字段；是否省略或写出 `null` 不作为稳定契约
