@@ -13,6 +13,20 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.7.2] - 2026-04-20
+
+### Fixed
+
+- Fixed `reqx.BindQuery(...)` / `hah.BindQuery(...)` so named scalar DTO fields backed by `bool`, `int*`, `uint*`, and `float*` underlying kinds now bind according to their scalar family rules, matching the documented `BindQuery(...)` contract for named scalar query fields.
+
+### Documentation
+
+- Clarified the `hah.HTTPError` design contract so nil `*HTTPError` receivers remain outside the supported public surface, and `WithViolations(...)` requires a non-nil receiver.
+
+### Testing
+
+- Added regression coverage for named-scalar `BindQuery(...)` decoding and `reqx` usage-error wrapping behavior.
+
 ## [v0.7.1] - 2026-04-20
 
 ### Fixed
