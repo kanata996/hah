@@ -139,7 +139,7 @@ func assertNotHTTPError(t *testing.T, err error) {
 	}
 }
 
-func assertFieldErrors(t *testing.T, err error) []errx.FieldError {
+func assertFieldErrors(t *testing.T, err error) []FieldError {
 	t.Helper()
 
 	httpErr := assertHTTPError(
@@ -153,7 +153,7 @@ func assertFieldErrors(t *testing.T, err error) []errx.FieldError {
 	return httpErr.Errors()
 }
 
-func assertSingleFieldError(t *testing.T, err error) errx.FieldError {
+func assertSingleFieldError(t *testing.T, err error) FieldError {
 	t.Helper()
 
 	fieldErrors := assertFieldErrors(t, err)
@@ -163,7 +163,7 @@ func assertSingleFieldError(t *testing.T, err error) errx.FieldError {
 	return fieldErrors[0]
 }
 
-func assertFieldError(t *testing.T, err error, want errx.FieldError) {
+func assertFieldError(t *testing.T, err error, want FieldError) {
 	t.Helper()
 
 	if got := assertSingleFieldError(t, err); got != want {
@@ -171,24 +171,24 @@ func assertFieldError(t *testing.T, err error, want errx.FieldError) {
 	}
 }
 
-func assertInvalidFieldErrorAt(t *testing.T, err error, field string, in errx.FieldErrorIn) {
+func assertInvalidFieldErrorAt(t *testing.T, err error, field string, in FieldErrorIn) {
 	t.Helper()
 
-	assertFieldError(t, err, errx.FieldError{
+	assertFieldError(t, err, FieldError{
 		Field:  field,
 		In:     in,
-		Code:   errx.CodeInvalid,
+		Code:   CodeInvalid,
 		Detail: "is invalid",
 	})
 }
 
-func assertRequiredFieldErrorAt(t *testing.T, err error, field string, in errx.FieldErrorIn) {
+func assertRequiredFieldErrorAt(t *testing.T, err error, field string, in FieldErrorIn) {
 	t.Helper()
 
-	assertFieldError(t, err, errx.FieldError{
+	assertFieldError(t, err, FieldError{
 		Field:  field,
 		In:     in,
-		Code:   errx.CodeRequired,
+		Code:   CodeRequired,
 		Detail: "is required",
 	})
 }

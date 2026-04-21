@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/internal/errx"
 )
 
 func TestQueryTypedBuilder_ScalarParsersAndConstraints(t *testing.T) {
@@ -95,7 +94,7 @@ func TestQueryTypedBuilder_ScalarParsersAndConstraints(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/items?score="+url.QueryEscape(raw), nil)
 
 				_, err := Query(req, "score").Float64().Get()
-				assertInvalidFieldErrorAt(t, err, "score", errx.InQuery)
+				assertInvalidFieldErrorAt(t, err, "score", InQuery)
 			})
 		}
 	})
@@ -247,7 +246,7 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?mode=go", nil), "mode").String().
 			MinLen(3).
 			Get()
-		assertInvalidFieldErrorAt(t, err, "mode", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "mode", InQuery)
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "mode").String().
 			MinLen(3).

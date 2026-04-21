@@ -7,20 +7,19 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/internal/errx"
 )
 
 func TestPathBuilder_Contracts(t *testing.T) {
 	t.Run("required missing path returns required field error", func(t *testing.T) {
 		_, err := Path(requestWithPathParams(nil), "id").String().Required().Get()
-		assertRequiredFieldErrorAt(t, err, "id", errx.InPath)
+		assertRequiredFieldErrorAt(t, err, "id", InPath)
 	})
 
 	t.Run("query values do not satisfy path lookup", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/?id=42", nil)
 
 		_, err := Path(req, "id").String().Required().Get()
-		assertRequiredFieldErrorAt(t, err, "id", errx.InPath)
+		assertRequiredFieldErrorAt(t, err, "id", InPath)
 	})
 
 	t.Run("empty path value counts as missing", func(t *testing.T) {
@@ -28,7 +27,7 @@ func TestPathBuilder_Contracts(t *testing.T) {
 		req.SetPathValue("id", "")
 
 		_, err := Path(req, "id").String().Required().Get()
-		assertRequiredFieldErrorAt(t, err, "id", errx.InPath)
+		assertRequiredFieldErrorAt(t, err, "id", InPath)
 	})
 
 	t.Run("request check failure keeps stable invalid detail", func(t *testing.T) {
@@ -37,14 +36,14 @@ func TestPathBuilder_Contracts(t *testing.T) {
 		_, err := Path(req, "id").String().
 			Check(func(string) error { return errors.New("must be numeric") }).
 			Get()
-		assertInvalidFieldErrorAt(t, err, "id", errx.InPath)
+		assertInvalidFieldErrorAt(t, err, "id", InPath)
 	})
 
 	t.Run("uuid parse failure is invalid field error", func(t *testing.T) {
 		req := requestWithPathParams(map[string][]string{"id": {"not-a-uuid"}})
 
 		_, err := Path(req, "id").UUID().Get()
-		assertInvalidFieldErrorAt(t, err, "id", errx.InPath)
+		assertInvalidFieldErrorAt(t, err, "id", InPath)
 	})
 
 	t.Run("uuid parse success", func(t *testing.T) {
@@ -135,7 +134,7 @@ func TestPathBuilder_ServeMuxPathValueContracts(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/files/", nil)
 		mux.ServeHTTP(httptest.NewRecorder(), req)
 
-		assertRequiredFieldErrorAt(t, handlerErr, "rest", errx.InPath)
+		assertRequiredFieldErrorAt(t, handlerErr, "rest", InPath)
 	})
 }
 

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/internal/errx"
 )
 
 func assertPublicType[T any](_, _ T) {}
@@ -56,38 +55,38 @@ func TestUsageErrorf_PrefixesAndSupportsUnwrap(t *testing.T) {
 func TestInvalidRequest_UsesFieldErrorEnvelope(t *testing.T) {
 	testCases := []struct {
 		name string
-		in   errx.FieldError
-		want errx.FieldError
+		in   FieldError
+		want FieldError
 	}{
 		{
 			name: "default invalid",
-			in:   errx.FieldError{Field: "name"},
-			want: errx.FieldError{Field: "name", Code: errx.CodeInvalid, Detail: "is invalid"},
+			in:   FieldError{Field: "name"},
+			want: FieldError{Field: "name", Code: CodeInvalid, Detail: "is invalid"},
 		},
 		{
 			name: "required",
-			in:   errx.FieldError{Field: "body", In: errx.InBody, Code: errx.CodeRequired},
-			want: errx.FieldError{Field: "body", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
+			in:   FieldError{Field: "body", In: InBody, Code: CodeRequired},
+			want: FieldError{Field: "body", In: InBody, Code: CodeRequired, Detail: "is required"},
 		},
 		{
 			name: "unknown",
-			in:   errx.FieldError{Field: "extra", In: errx.InQuery, Code: errx.CodeUnknown},
-			want: errx.FieldError{Field: "extra", In: errx.InQuery, Code: errx.CodeUnknown, Detail: "unknown field"},
+			in:   FieldError{Field: "extra", In: InQuery, Code: CodeUnknown},
+			want: FieldError{Field: "extra", In: InQuery, Code: CodeUnknown, Detail: "unknown field"},
 		},
 		{
 			name: "type",
-			in:   errx.FieldError{Field: "limit", In: errx.InBody, Code: errx.CodeType},
-			want: errx.FieldError{Field: "limit", In: errx.InBody, Code: errx.CodeType, Detail: "has invalid type"},
+			in:   FieldError{Field: "limit", In: InBody, Code: CodeType},
+			want: FieldError{Field: "limit", In: InBody, Code: CodeType, Detail: "has invalid type"},
 		},
 		{
 			name: "multiple",
-			in:   errx.FieldError{Field: "X-Trace-Id", In: errx.InHeader, Code: errx.CodeMultiple},
-			want: errx.FieldError{Field: "X-Trace-Id", In: errx.InHeader, Code: errx.CodeMultiple, Detail: "must appear only once"},
+			in:   FieldError{Field: "X-Trace-Id", In: InHeader, Code: CodeMultiple},
+			want: FieldError{Field: "X-Trace-Id", In: InHeader, Code: CodeMultiple, Detail: "must appear only once"},
 		},
 		{
 			name: "custom detail is preserved",
-			in:   errx.FieldError{Field: "name", Detail: "must be unique"},
-			want: errx.FieldError{Field: "name", Code: errx.CodeInvalid, Detail: "must be unique"},
+			in:   FieldError{Field: "name", Detail: "must be unique"},
+			want: FieldError{Field: "name", Code: CodeInvalid, Detail: "must be unique"},
 		},
 	}
 
@@ -102,13 +101,13 @@ func TestInvalidRequest_UsesFieldErrorEnvelope(t *testing.T) {
 
 	t.Run("multiple field errors are preserved in order", func(t *testing.T) {
 		got := assertFieldErrors(t, InvalidRequest(
-			errx.FieldError{Field: "page", In: errx.InQuery},
-			errx.FieldError{Field: "body", In: errx.InBody, Code: errx.CodeRequired},
+			FieldError{Field: "page", In: InQuery},
+			FieldError{Field: "body", In: InBody, Code: CodeRequired},
 		))
 
-		want := []errx.FieldError{
-			{Field: "page", In: errx.InQuery, Code: errx.CodeInvalid, Detail: "is invalid"},
-			{Field: "body", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
+		want := []FieldError{
+			{Field: "page", In: InQuery, Code: CodeInvalid, Detail: "is invalid"},
+			{Field: "body", In: InBody, Code: CodeRequired, Detail: "is required"},
 		}
 		if len(got) != len(want) {
 			t.Fatalf("field errors len = %d, want %d", len(got), len(want))
@@ -121,17 +120,17 @@ func TestInvalidRequest_UsesFieldErrorEnvelope(t *testing.T) {
 	})
 
 	t.Run("does not mutate caller owned field error slice", func(t *testing.T) {
-		fieldErrors := []errx.FieldError{
-			{Field: "page", In: errx.InQuery},
-			{Field: "body", In: errx.InBody, Code: errx.CodeRequired},
+		fieldErrors := []FieldError{
+			{Field: "page", In: InQuery},
+			{Field: "body", In: InBody, Code: CodeRequired},
 		}
-		wantOriginal := append([]errx.FieldError(nil), fieldErrors...)
+		wantOriginal := append([]FieldError(nil), fieldErrors...)
 
 		got := assertFieldErrors(t, InvalidRequest(fieldErrors...))
 
-		want := []errx.FieldError{
-			{Field: "page", In: errx.InQuery, Code: errx.CodeInvalid, Detail: "is invalid"},
-			{Field: "body", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
+		want := []FieldError{
+			{Field: "page", In: InQuery, Code: CodeInvalid, Detail: "is invalid"},
+			{Field: "body", In: InBody, Code: CodeRequired, Detail: "is required"},
 		}
 		if len(got) != len(want) {
 			t.Fatalf("field errors len = %d, want %d", len(got), len(want))
