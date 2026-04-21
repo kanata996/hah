@@ -151,6 +151,28 @@ func TestWriteErrorUsesExplicitDetailEvenWhenItMatchesTitle(t *testing.T) {
 	})
 }
 
+func TestWriteErrorOmitsEmptyDetails(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := WriteError(rr, errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid").WithFieldErrors([]errx.FieldError{})); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	assertErrorEnvelopeBasics(t, rr, http.StatusBadRequest, 40000, "payload invalid")
+
+	body := decodePayload(t, rr.Body.Bytes())
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
+	}
+	if _, exists := errorValue["details"]; exists {
+		t.Fatalf("error.details unexpectedly present: %#v", errorValue["details"])
+	}
+	assertPublicErrorObject(t, errorValue, map[string]any{
+		"reason": "invalid_json",
+	})
+}
+
 func TestWriteErrorPreservesFieldErrorOrderAndContent(t *testing.T) {
 	rr := httptest.NewRecorder()
 
