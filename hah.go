@@ -107,6 +107,11 @@ func TooManyRequests(code, detail string) *HTTPError {
 	return errx.TooManyRequests(code, detail)
 }
 
+// InternalServer 构造 500 Internal Server Error 公共错误。
+func InternalServer(code, detail string) *HTTPError {
+	return errx.InternalServer(code, detail)
+}
+
 // WriteError 按统一错误对象写回响应。
 func WriteError(w http.ResponseWriter, err error, code ...int) error {
 	return resp.WriteError(w, err, code...)

@@ -166,11 +166,11 @@ func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, f
 	if !ok {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
-	if got := errorValue["status"]; got != float64(wantStatus) {
-		t.Fatalf("error.status = %#v, want %d", got, wantStatus)
-	}
 	if got := errorValue["reason"]; got != wantReason {
 		t.Fatalf("error.reason = %#v, want %q", got, wantReason)
+	}
+	if _, exists := errorValue["status"]; exists {
+		t.Fatalf("error.status unexpectedly present: %#v", errorValue["status"])
 	}
 	if _, exists := errorValue["code"]; exists {
 		t.Fatalf("error.code unexpectedly present: %#v", errorValue["code"])

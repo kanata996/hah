@@ -16,7 +16,6 @@ const (
 )
 
 type errorBody struct {
-	Status  int               `json:"status"`
 	Reason  string            `json:"reason"`
 	Details []errx.FieldError `json:"details,omitempty"`
 }
@@ -112,7 +111,6 @@ func findHTTPError(err error) *errx.HTTPError {
 
 func newErrorBody(httpErr *errx.HTTPError) *errorBody {
 	return &errorBody{
-		Status:  httpErr.Status(),
 		Reason:  httpErr.Code(),
 		Details: httpErr.Errors(),
 	}

@@ -92,6 +92,12 @@ var standardHTTPErrorConstructors = []standardHTTPErrorConstructorCase{
 		wantStatus: http.StatusTooManyRequests,
 		wantCode:   "too_many_requests",
 	},
+	{
+		name:       "internal server",
+		build:      InternalServer,
+		wantStatus: http.StatusInternalServerError,
+		wantCode:   "internal_error",
+	},
 }
 
 var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{

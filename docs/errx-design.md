@@ -72,6 +72,7 @@
 - `Conflict(code, detail string) *HTTPError`
 - `UnprocessableEntity(code, detail string) *HTTPError`
 - `TooManyRequests(code, detail string) *HTTPError`
+- `InternalServer(code, detail string) *HTTPError`
 - `CodeInvalid`
 - `CodeRequired`
 - `CodeUnknown`

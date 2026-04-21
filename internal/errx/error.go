@@ -8,7 +8,8 @@ import (
 
 // HTTPError 表示 HTTP 边界上的公共错误。
 // 它承载稳定的公开错误语义：status/code/title/detail/errors。
-// 默认 JSON error envelope 会再把这些语义投影为 status/reason/message/details。
+// 默认 JSON error envelope 会再把这些语义投影为 HTTP status、顶层 message、
+// 以及嵌套 error.reason / error.details。
 // cause 仅用于内部保留原始错误链，不直接属于公开响应 payload。
 type HTTPError struct {
 	// status 始终收敛到“可公开返回的错误状态码”范围内。
@@ -138,6 +139,11 @@ func UnprocessableEntity(code, detail string) *HTTPError {
 // TooManyRequests 构造 429 Too Many Requests 公共错误。
 func TooManyRequests(code, detail string) *HTTPError {
 	return NewHTTPError(http.StatusTooManyRequests, code, detail)
+}
+
+// InternalServer 构造 500 Internal Server Error 公共错误。
+func InternalServer(code, detail string) *HTTPError {
+	return NewHTTPError(http.StatusInternalServerError, code, detail)
 }
 
 // cloneFieldErrors 返回 field errors 的浅拷贝，避免调用方后续修改影响已构造的错误对象。

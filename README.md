@@ -143,11 +143,11 @@ DTO binding 与显式规则：
 错误与响应：
 
 - `hah.FieldError`、`hah.HTTPError`、`hah.NewHTTPError(...)`、`hah.NewHTTPErrorWithCause(...)` 是根包暴露的公共错误模型入口
-- `hah.BadRequest(...)`、`hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)` 等快捷构造器适合在已明确公开错误语义的更深层直接返回
+- `hah.BadRequest(...)`、`hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)`、`hah.InternalServer(...)` 等快捷构造器适合在已明确公开错误语义的更深层直接返回
 - `hah.WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成统一 JSON error envelope
 - `hah.OK(...)` / `hah.Created(...)` 会写默认成功 envelope：顶层固定 `code = 0`、`message = "success"`，业务数据放在可选 `data`
 - `hah.WriteError(...)` 会写默认错误 envelope：顶层 `code` 是五位业务错误码，未显式传入时按 `status * 100` 生成；顶层 `message` 直接来自 `hah.HTTPError.Detail()`
-- 默认错误 envelope 的 `error` 对象固定包含 `status` 与稳定的 `reason`；如果有 field errors，再按顺序附带 `details`
+- 默认错误 envelope 的 `error` 对象固定包含稳定的 `reason`；如果有 field errors，再按顺序附带 `details`
 - 若 `hah.HTTPError` 未显式提供 `detail`，共享错误模型会基于公开 `reason` 生成默认短语，例如 `internal_error -> "internal error"`
 - `hah.JSON(...)` 仍是调用方指定状态码与原始 JSON body 的 escape hatch，不参与默认 envelope 协议
 - `hah.WriteError(...)` 的返回值表示响应边界自身异常，例如响应写出失败；生产代码通常至少要记录这个错误
@@ -159,7 +159,6 @@ DTO binding 与显式规则：
   "code": 42200,
   "message": "request contains invalid fields",
   "error": {
-    "status": 422,
     "reason": "invalid_request",
     "details": [
       {

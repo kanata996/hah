@@ -16,6 +16,11 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 ### Breaking
 
 - Renamed the default error envelope field-error array from `error.fields` to `error.details`. The shared `hah.FieldError` item shape is unchanged and still serializes as `field` / `in` / `code` / `detail`.
+- Removed `error.status` from the default error envelope. HTTP status remains the transport-level source of truth, while the nested error payload now carries only `reason` and optional `details`.
+
+### Added
+
+- Added `hah.InternalServer(...)` / `errx.InternalServer(...)` helper constructors so callers can explicitly construct the same stable 500 public error semantics that the shared HTTP error model already normalizes by default.
 
 ## [v0.8.3] - 2026-04-21
 

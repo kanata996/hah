@@ -197,6 +197,7 @@ func TestRootErrorHelpers_CommonStatuses(t *testing.T) {
 		{name: "conflict", build: Conflict, wantStatus: http.StatusConflict},
 		{name: "unprocessable entity", build: UnprocessableEntity, wantStatus: http.StatusUnprocessableEntity},
 		{name: "too many requests", build: TooManyRequests, wantStatus: http.StatusTooManyRequests},
+		{name: "internal server", build: InternalServer, wantStatus: http.StatusInternalServerError},
 	}
 
 	for _, tt := range tests {

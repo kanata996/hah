@@ -16,7 +16,8 @@
 //   - 请求级规则 helper：InvalidRequest
 //   - 公共错误模型：FieldError、HTTPError、NewHTTPError、NewHTTPErrorWithCause
 //   - 常用错误快捷构造：BadRequest、Unauthorized、Forbidden、NotFound、
-//     MethodNotAllowed、Conflict、UnprocessableEntity、TooManyRequests
+//     MethodNotAllowed、Conflict、UnprocessableEntity、TooManyRequests、
+//     InternalServer
 //   - 公开 field error 常量：Code*、In*
 //   - 错误响应入口：WriteError
 //   - 成功响应入口：JSON、OK、Created、NoContent

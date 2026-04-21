@@ -61,7 +61,6 @@ func TestWriteErrorWritesDefaultEnvelope(t *testing.T) {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusUnprocessableEntity),
 		"reason": "unprocessable_entity",
 		"details": []any{
 			map[string]any{
@@ -129,7 +128,6 @@ func TestWriteErrorUsesNormalizedDetailAsMessageWhenDetailIsAbsent(t *testing.T)
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusUnauthorized),
 		"reason": "token-missing__forbidden",
 	})
 }
@@ -149,7 +147,6 @@ func TestWriteErrorUsesExplicitDetailEvenWhenItMatchesTitle(t *testing.T) {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusBadRequest),
 		"reason": "invalid_json",
 	})
 }
@@ -214,7 +211,6 @@ func TestWriteErrorUsesCustomAsHTTPError(t *testing.T) {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusUnauthorized),
 		"reason": "unauthorized",
 	})
 }
@@ -246,7 +242,6 @@ func TestWriteErrorSkipsTypedNilHTTPErrorAndKeepsScanningChain(t *testing.T) {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusBadRequest),
 		"reason": "invalid_json",
 	})
 }
@@ -272,7 +267,6 @@ func TestWriteErrorSkipsTypedNilCustomAsHTTPErrorAndKeepsScanningChain(t *testin
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusForbidden),
 		"reason": "forbidden",
 	})
 }
@@ -290,7 +284,6 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"status": float64(499),
 			"reason": "client_closed_request",
 		})
 	})
@@ -307,7 +300,6 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"status": float64(http.StatusGatewayTimeout),
 			"reason": "timeout",
 		})
 	})
@@ -328,7 +320,6 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"status": float64(http.StatusForbidden),
 			"reason": "forbidden",
 		})
 	})
@@ -345,7 +336,6 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"status": float64(http.StatusInternalServerError),
 			"reason": "internal_error",
 		})
 		if bytes.Contains(rr.Body.Bytes(), []byte("db timeout")) {
@@ -564,5 +554,12 @@ func assertErrorEnvelopeBasics(t *testing.T, rr *httptest.ResponseRecorder, want
 	}
 	if _, exists := body["data"]; exists {
 		t.Fatalf("data unexpectedly present: %#v", body["data"])
+	}
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
+	}
+	if _, exists := errorValue["status"]; exists {
+		t.Fatalf("error.status unexpectedly present: %#v", errorValue["status"])
 	}
 }

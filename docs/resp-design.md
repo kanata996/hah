@@ -89,7 +89,6 @@ type Response[T any] struct {
 }
 
 type ErrorBody struct {
-	Status  int          `json:"status"`
 	Reason  string       `json:"reason"`
 	Details []FieldError `json:"details,omitempty"`
 }
@@ -190,7 +189,6 @@ type FieldError struct {
   "code": 42200,
   "message": "request validation failed",
   "error": {
-    "status": 422,
     "reason": "unprocessable_entity",
     "details": [
       {
@@ -206,7 +204,6 @@ type FieldError struct {
 
 `error` 对象的字段职责固定为：
 
-- `status`：最终 HTTP 状态码
 - `reason`：必填、非空的稳定字符串错误类型，例如 `unprocessable_entity`、`timeout`、`not_found`
 - `details`：字段级错误列表；仅在有 field errors 时写出
 
@@ -303,7 +300,6 @@ type FieldError struct {
 
 映射规则固定为：
 
-- `error.status` 对应 `hah.HTTPError.Status()`
 - `error.reason` 对应 `hah.HTTPError.Code()`
 - 顶层 `message` 直接对应 `hah.HTTPError.Detail()`
 - `hah.HTTPError.Code()` 必须能提供非空 `reason`
@@ -373,7 +369,7 @@ type FieldError struct {
 - `WriteError` 对非五位或 `code <= 0` 的失败 `code` 必须在首次提交前返回 error
 - `WriteError` 传入多个 `code` 参数时，必须在首次提交前返回 error
 - `WriteError(w, nil)` 与 `WriteError(w, nil, code)` 都是 no-op
-- `error` 固定包含 `status` 与非空 `reason`，并按需包含 `details`
+- `error` 固定包含非空 `reason`，并按需包含 `details`
 - `error.details` 的稳定 JSON 字段固定为 `field` / `in` / `code` / `detail`
 - 调用方显式提供公开 `detail` 时，顶层 `message` 必须与之保持一致
 - 共享错误模型未显式提供 `detail` 时，顶层 `message` 必须等于该模型标准化后的 `Detail()`
