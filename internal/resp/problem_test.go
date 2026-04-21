@@ -346,6 +346,29 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 		})
 	})
 
+	t.Run("typed nil http error becomes internal error without panic", func(t *testing.T) {
+		var typedNil *errx.HTTPError
+		rr := httptest.NewRecorder()
+
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				t.Fatalf("WriteError() panicked: %v", recovered)
+			}
+		}()
+
+		if err := WriteError(rr, typedNil); err != nil {
+			t.Fatalf("WriteError() error = %v", err)
+		}
+
+		assertErrorEnvelopeBasics(t, rr, http.StatusInternalServerError, 50000, "internal error")
+
+		body := decodePayload(t, rr.Body.Bytes())
+		errorValue := body["error"].(map[string]any)
+		assertPublicErrorObject(t, errorValue, map[string]any{
+			"reason": "internal_error",
+		})
+	})
+
 	t.Run("unknown error becomes internal error without leak", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 
