@@ -13,6 +13,8 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.8.4] - 2026-04-21
+
 ### Added
 
 - Re-exposed `hah.Accepted(...)` and `hah.NoContent(...)` on the root facade by delegating to the internal response helpers, so callers can keep using the root package as the default public HTTP response boundary.
