@@ -237,6 +237,29 @@ func TestWriteErrorUsesCustomAsHTTPError(t *testing.T) {
 	})
 }
 
+func TestWriteErrorPrefersFirstHTTPErrorInJoinedChain(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	input := errors.Join(
+		errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid"),
+		errx.NewHTTPError(http.StatusForbidden, "forbidden", "access denied"),
+	)
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	assertErrorEnvelopeBasics(t, rr, http.StatusBadRequest, 40000, "payload invalid")
+
+	body := decodePayload(t, rr.Body.Bytes())
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
+	}
+	assertPublicErrorObject(t, errorValue, map[string]any{
+		"reason": "invalid_json",
+	})
+}
+
 func TestWriteErrorSkipsTypedNilHTTPErrorAndKeepsScanningChain(t *testing.T) {
 	var typedNil *errx.HTTPError
 
