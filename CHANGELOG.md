@@ -13,6 +13,18 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+### Added
+
+- Re-exposed `hah.Accepted(...)` and `hah.NoContent(...)` on the root facade by delegating to the internal response helpers, so callers can keep using the root package as the default public HTTP response boundary.
+
+### Documentation
+
+- Refreshed the root docs, response design doc, and bundled example READMEs to document the expanded success-response facade: `OK` / `Accepted` / `Created` write the default success envelope, while `NoContent` is the explicit `204 No Content` helper.
+
+### Testing
+
+- Added root-package regression coverage that locks `hah.Accepted(...)` and `hah.NoContent(...)` to the same status, envelope, and header-clearing behavior as the internal response helpers they delegate to.
+
 ## [v0.8.3] - 2026-04-21
 
 ### Breaking

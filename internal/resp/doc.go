@@ -10,7 +10,8 @@
 //
 // 典型用法：
 //   - 使用 JSON 进行底层 JSON 输出
-//   - 使用 OK / Created 写默认成功响应
+//   - 使用 OK / Accepted / Created 写默认成功响应
+//   - 使用 NoContent 写显式 204 成功响应
 //   - 使用 WriteError 写默认错误响应
 //   - 与 errx.HTTPError 配合，按统一错误模型写回响应
 //
