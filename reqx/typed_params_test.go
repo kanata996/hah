@@ -95,7 +95,7 @@ func TestQueryTypedBuilder_ScalarParsersAndConstraints(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/items?score="+url.QueryEscape(raw), nil)
 
 				_, err := Query(req, "score").Float64().Get()
-				assertInvalidViolationAt(t, err, "score", errx.InQuery)
+				assertInvalidFieldErrorAt(t, err, "score", errx.InQuery)
 			})
 		}
 	})
@@ -247,7 +247,7 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?mode=go", nil), "mode").String().
 			MinLen(3).
 			Get()
-		assertInvalidViolationAt(t, err, "mode", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "mode", errx.InQuery)
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "mode").String().
 			MinLen(3).
@@ -258,12 +258,12 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?page=2", nil), "page").Int().
 			Min(3).
 			Get()
-		assertInvalidViolationAt(t, err, "page", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "page", errx.InQuery)
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?page=4", nil), "page").Int().
 			Max(3).
 			Get()
-		assertInvalidViolationAt(t, err, "page", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "page", errx.InQuery)
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
 			Min(4).
@@ -349,7 +349,7 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 				return nil
 			}).
 			Get()
-		assertViolation(t, err, errx.Violation{
+		assertFieldError(t, err, errx.FieldError{
 			Field:  "page",
 			In:     errx.InQuery,
 			Code:   errx.CodeMultiple,
@@ -370,7 +370,7 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 				return nil
 			}).
 			Get()
-		assertInvalidViolationAt(t, err, "mode", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "mode", errx.InQuery)
 		if checkCalled {
 			t.Fatal("Check() ran after OneOf() failure")
 		}
@@ -383,7 +383,7 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 				return nil
 			}).
 			Get()
-		assertInvalidViolationAt(t, err, "mode", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "mode", errx.InQuery)
 		if checkCalled {
 			t.Fatal("Check() ran after Match() failure")
 		}
@@ -403,13 +403,13 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 		}
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?id=not-a-uuid", nil), "id").UUID().Get()
-		assertInvalidViolationAt(t, err, "id", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "id", errx.InQuery)
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?wait=5", nil), "wait").Duration().Get()
-		assertInvalidViolationAt(t, err, "wait", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "wait", errx.InQuery)
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?enabled=", nil), "enabled").Bool().Get()
-		assertInvalidViolationAt(t, err, "enabled", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "enabled", errx.InQuery)
 	})
 
 	t.Run("time before accepts earlier values and default then required stays usage error", func(t *testing.T) {
@@ -483,9 +483,9 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 				return nil
 			}).
 			Get()
-		assertRequiredViolationAt(t, err, "tag", errx.InQuery)
+		assertRequiredFieldErrorAt(t, err, "tag", errx.InQuery)
 		if checkCalled {
-			t.Fatal("Values().Check() ran after required violation")
+			t.Fatal("Values().Check() ran after required field error")
 		}
 	})
 }
@@ -502,7 +502,7 @@ func TestQueryBuilder_BuiltInConstraintsRunBeforeCustomChecks(t *testing.T) {
 			}).
 			Min(2).
 			Get()
-		assertInvalidViolationAt(t, err, "page", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "page", errx.InQuery)
 		if checkCalled {
 			t.Fatal("Check() ran after built-in min rejection")
 		}
@@ -519,7 +519,7 @@ func TestQueryBuilder_BuiltInConstraintsRunBeforeCustomChecks(t *testing.T) {
 			}).
 			MaxLen(1).
 			Get()
-		assertInvalidViolationAt(t, err, "mode", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "mode", errx.InQuery)
 		if checkCalled {
 			t.Fatal("Check() ran after built-in max length rejection")
 		}
@@ -537,7 +537,7 @@ func TestQueryBuilder_BuiltInConstraintsRunBeforeCustomChecks(t *testing.T) {
 			}).
 			After(boundary.Add(time.Hour)).
 			Get()
-		assertInvalidViolationAt(t, err, "at", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "at", errx.InQuery)
 		if checkCalled {
 			t.Fatal("Check() ran after built-in time rejection")
 		}
@@ -573,14 +573,14 @@ func TestQueryTimeParam_EqualBoundariesAreRejected(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/items?at="+tc.raw, nil)
 
 			_, err := tc.build(Query(req, "at")).After(boundary).Get()
-			assertInvalidViolationAt(t, err, "at", errx.InQuery)
+			assertInvalidFieldErrorAt(t, err, "at", errx.InQuery)
 		})
 
 		t.Run(tc.name+"/before", func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/items?at="+tc.raw, nil)
 
 			_, err := tc.build(Query(req, "at")).Before(boundary).Get()
-			assertInvalidViolationAt(t, err, "at", errx.InQuery)
+			assertInvalidFieldErrorAt(t, err, "at", errx.InQuery)
 		})
 	}
 }

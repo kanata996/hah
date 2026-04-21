@@ -95,10 +95,10 @@ type ErrorBody struct {
 }
 
 type FieldError struct {
-	Field   string `json:"field"`
-	In      string `json:"in,omitempty"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Field  string `json:"field,omitempty"`
+	In     string `json:"in,omitempty"`
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
 }
 ```
 
@@ -197,7 +197,7 @@ type FieldError struct {
         "field": "email",
         "in": "body",
         "code": "invalid",
-        "message": "must be a valid email"
+        "detail": "must be a valid email"
       }
     ]
   }
@@ -208,7 +208,7 @@ type FieldError struct {
 
 - `status`：最终 HTTP 状态码
 - `reason`：必填、非空的稳定字符串错误类型，例如 `unprocessable_entity`、`timeout`、`not_found`
-- `fields`：字段级错误列表；仅在有 violations 时写出
+- `fields`：字段级错误列表；仅在有 field errors 时写出
 
 `detail` 仍允许保留在内部错误承载结构中，但不作为公开 `error` JSON 字段输出；它的公开投影固定为顶层 `message`。
 若现有底层错误模型仍有 `title` 概念，它只属于内部兼容信息，不参与默认响应协议，也不参与 `message` 计算。
@@ -310,12 +310,12 @@ type FieldError struct {
 - `hah.HTTPError.Title()` 不再映射到公开 JSON 字段，也不参与 `message` 计算；若当前模型仍保留 `Title()`，它只属于内部兼容信息
 - `error.fields` 对应 `hah.HTTPError.Errors()`
 
-字段级映射固定为：
+字段级错误直接复用 `hah.FieldError` 的 JSON 形状：
 
-- `Violation.Field -> FieldError.Field`
-- `Violation.In -> FieldError.In`
-- `Violation.Code -> FieldError.Code`
-- `Violation.Detail -> FieldError.Message`
+- `hah.FieldError.Field -> error.fields[].field`
+- `hah.FieldError.In -> error.fields[].in`
+- `hah.FieldError.Code -> error.fields[].code`
+- `hah.FieldError.Detail -> error.fields[].detail`
 
 对 `context.Canceled`、`context.DeadlineExceeded` 与普通 `error` 这类框架合成错误：
 

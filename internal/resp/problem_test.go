@@ -42,7 +42,7 @@ func TestWriteErrorWritesDefaultEnvelope(t *testing.T) {
 		http.StatusUnprocessableEntity,
 		"",
 		"",
-	).WithViolations([]errx.Violation{
+	).WithFieldErrors([]errx.FieldError{
 		{Field: "name", In: errx.InBody, Code: "required", Detail: "is required"},
 	}))
 	if err != nil {
@@ -65,10 +65,10 @@ func TestWriteErrorWritesDefaultEnvelope(t *testing.T) {
 		"reason": "unprocessable_entity",
 		"fields": []any{
 			map[string]any{
-				"field":   "name",
-				"in":      "body",
-				"code":    "required",
-				"message": "is required",
+				"field":  "name",
+				"in":     "body",
+				"code":   "required",
+				"detail": "is required",
 			},
 		},
 	})
@@ -79,7 +79,7 @@ func TestWriteErrorUsesExplicitTopCodeAndDetailDerivedMessage(t *testing.T) {
 
 	input := errors.Join(
 		errors.New("handler failed"),
-		errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid").WithViolations([]errx.Violation{
+		errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid").WithFieldErrors([]errx.FieldError{
 			{Field: "name", Code: "required", Detail: "is required"},
 		}),
 	)
@@ -108,9 +108,9 @@ func TestWriteErrorUsesExplicitTopCodeAndDetailDerivedMessage(t *testing.T) {
 		t.Fatalf("fields = %#v, want 1 item", errorValue["fields"])
 	}
 	assertPublicErrorObject(t, fields[0], map[string]any{
-		"field":   "name",
-		"code":    "required",
-		"message": "is required",
+		"field":  "name",
+		"code":   "required",
+		"detail": "is required",
 	})
 }
 
@@ -157,7 +157,7 @@ func TestWriteErrorUsesExplicitDetailEvenWhenItMatchesTitle(t *testing.T) {
 func TestWriteErrorPreservesViolationOrderAndContent(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, errx.NewHTTPError(http.StatusUnprocessableEntity, "", "").WithViolations([]errx.Violation{
+	err := WriteError(rr, errx.NewHTTPError(http.StatusUnprocessableEntity, "", "").WithFieldErrors([]errx.FieldError{
 		{Field: "name", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
 		{Field: "email", In: errx.InQuery, Code: errx.CodeInvalid, Detail: "is invalid"},
 		{Field: "name", In: errx.InBody, Code: errx.CodeInvalid, Detail: "must be unique"},
@@ -177,22 +177,22 @@ func TestWriteErrorPreservesViolationOrderAndContent(t *testing.T) {
 	}
 
 	assertPublicErrorObject(t, fields[0], map[string]any{
-		"field":   "name",
-		"in":      "body",
-		"code":    "required",
-		"message": "is required",
+		"field":  "name",
+		"in":     "body",
+		"code":   "required",
+		"detail": "is required",
 	})
 	assertPublicErrorObject(t, fields[1], map[string]any{
-		"field":   "email",
-		"in":      "query",
-		"code":    "invalid",
-		"message": "is invalid",
+		"field":  "email",
+		"in":     "query",
+		"code":   "invalid",
+		"detail": "is invalid",
 	})
 	assertPublicErrorObject(t, fields[2], map[string]any{
-		"field":   "name",
-		"in":      "body",
-		"code":    "invalid",
-		"message": "must be unique",
+		"field":  "name",
+		"in":     "body",
+		"code":   "invalid",
+		"detail": "must be unique",
 	})
 }
 
@@ -429,7 +429,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 	})
 
 	t.Run("head uses net http head semantics", func(t *testing.T) {
-		httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
+		httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithFieldErrors([]errx.FieldError{
 			{Field: "name", Code: "required", Detail: "is required"},
 		})
 
@@ -516,7 +516,7 @@ func TestWriteErrorWriteFailure(t *testing.T) {
 	})
 
 	t.Run("clears stale content length on real http server", func(t *testing.T) {
-		httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
+		httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithFieldErrors([]errx.FieldError{
 			{Field: "name", Code: "required", Detail: "is required"},
 		})
 

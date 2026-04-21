@@ -13,6 +13,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.8.3] - 2026-04-21
+
+### Breaking
+
+- Renamed the public request field-error model from `Violation` to `FieldError`. Callers should now use `hah.FieldError{...}`, the shared type names are `FieldErrorCode` / `FieldErrorIn`, and `errx.HTTPError.WithViolations(...)` has been renamed to `WithFieldErrors(...)`.
+- Changed the default error envelope so `error.fields[]` now serializes the shared `FieldError` shape directly. Field-level text is exposed as `detail` instead of the old response-only `message` key, and empty `field` values now follow the shared model's `omitempty` behavior.
+
+### Documentation
+
+- Refreshed the root docs, request guide, and design docs to use the `FieldError` terminology and updated examples accordingly.
+
 ## [v0.8.2] - 2026-04-21
 
 ### Fixed

@@ -180,29 +180,29 @@ limit, err := Query(r, "limit").Int().Get()
 - `Status() == 422`
 - `Code() == "invalid_request"`
 - `Detail() == "request contains invalid fields"`
-- `Errors()` 只包含一个 violation
-- violation `Field` 等于裁剪后的参数名
-- violation `In == hah.InQuery`
-- 缺失 required 参数时，violation `Code == hah.CodeRequired`
-- 单值 typed builder 命中重复 key 时，violation `Code == hah.CodeMultiple`
-- 解析失败或校验失败时，violation `Code == hah.CodeInvalid`
+- `Errors()` 只包含一个 field error
+- field error `Field` 等于裁剪后的参数名
+- field error `In == hah.InQuery`
+- 缺失 required 参数时，field error `Code == hah.CodeRequired`
+- 单值 typed builder 命中重复 key 时，field error `Code == hah.CodeMultiple`
+- 解析失败或校验失败时，field error `Code == hah.CodeInvalid`
 
 ## 5. 与其他文档的关系
 
 - `Query(...)` 是单字段 helper；`BindQuery(...)` 是 DTO binder
 - 两者共享“空字符串视为已提交参数”“单值入口拒绝重复 key”“默认忽略未知 key”这些方向上的输入模型
 - `Query(...)` 不为读取单个 key 额外扫描整条 raw query 的全局合法性
-- 顶层错误模型和 violation 词汇由 `hah` 提供；默认响应写回也由 `hah` 决定
+- 顶层错误模型和 field error 词汇由 `hah` 提供；默认响应写回也由 `hah` 决定
 
 ## 6. 测试基线
 
 后续实现或重构至少应覆盖以下维度：
 
 - builder 创建与输入来源：参数名裁剪、`nil request`、空参数名、`request.URL == nil`、`net/url` 解码语义
-- 单值入口的存在性模型：缺失、恰好一个值、重复 key；其中重复 key 需要稳定收敛为单个 `multiple` violation
+- 单值入口的存在性模型：缺失、恰好一个值、重复 key；其中重复 key 需要稳定收敛为单个 `multiple` field error
 - 空字符串语义：只有 `String()` 接受 `?x=`；其他类型把空字符串当作解析失败
 - 多值入口语义：`Values()` 缺失时返回 `nil`，存在时返回全部值，并保留顺序、重复值和空字符串
-- 缺失参数路径：optional 返回零值，`Required()` 返回单个 `required` violation，`Default(...)` 只在缺失时生效
+- 缺失参数路径：optional 返回零值，`Required()` 返回单个 `required` field error，`Default(...)` 只在缺失时生效
 - 约束路径：代表性覆盖 `String()`、数值类型、时间类型和 `Check(...)` 的成功/失败分支，并验证默认值也会经过后续校验
 - 类型解析路径：至少覆盖 `Duration()`、`UUID()`、`Time()`、`UnixTime()` 的代表性成功/失败用例，其中 `Time()` 需要拒绝非法 RFC3339 offset，`UnixTime()` 只接受恰好 10 个十进制数字
-- 错误收敛：客户端输入错误稳定返回 `422 invalid_request`，并正确标记 query violation 的 `Field`、`In` 和 `Code`
+- 错误收敛：客户端输入错误稳定返回 `422 invalid_request`，并正确标记 query field error 的 `Field`、`In` 和 `Code`

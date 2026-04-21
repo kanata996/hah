@@ -56,94 +56,94 @@ func TestUsageErrorf_PrefixesAndSupportsUnwrap(t *testing.T) {
 func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
 	testCases := []struct {
 		name string
-		in   errx.Violation
-		want errx.Violation
+		in   errx.FieldError
+		want errx.FieldError
 	}{
 		{
 			name: "default invalid",
-			in:   errx.Violation{Field: "name"},
-			want: errx.Violation{Field: "name", Code: errx.CodeInvalid, Detail: "is invalid"},
+			in:   errx.FieldError{Field: "name"},
+			want: errx.FieldError{Field: "name", Code: errx.CodeInvalid, Detail: "is invalid"},
 		},
 		{
 			name: "required",
-			in:   errx.Violation{Field: "body", In: errx.InBody, Code: errx.CodeRequired},
-			want: errx.Violation{Field: "body", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
+			in:   errx.FieldError{Field: "body", In: errx.InBody, Code: errx.CodeRequired},
+			want: errx.FieldError{Field: "body", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
 		},
 		{
 			name: "unknown",
-			in:   errx.Violation{Field: "extra", In: errx.InQuery, Code: errx.CodeUnknown},
-			want: errx.Violation{Field: "extra", In: errx.InQuery, Code: errx.CodeUnknown, Detail: "unknown field"},
+			in:   errx.FieldError{Field: "extra", In: errx.InQuery, Code: errx.CodeUnknown},
+			want: errx.FieldError{Field: "extra", In: errx.InQuery, Code: errx.CodeUnknown, Detail: "unknown field"},
 		},
 		{
 			name: "type",
-			in:   errx.Violation{Field: "limit", In: errx.InBody, Code: errx.CodeType},
-			want: errx.Violation{Field: "limit", In: errx.InBody, Code: errx.CodeType, Detail: "has invalid type"},
+			in:   errx.FieldError{Field: "limit", In: errx.InBody, Code: errx.CodeType},
+			want: errx.FieldError{Field: "limit", In: errx.InBody, Code: errx.CodeType, Detail: "has invalid type"},
 		},
 		{
 			name: "multiple",
-			in:   errx.Violation{Field: "X-Trace-Id", In: errx.InHeader, Code: errx.CodeMultiple},
-			want: errx.Violation{Field: "X-Trace-Id", In: errx.InHeader, Code: errx.CodeMultiple, Detail: "must appear only once"},
+			in:   errx.FieldError{Field: "X-Trace-Id", In: errx.InHeader, Code: errx.CodeMultiple},
+			want: errx.FieldError{Field: "X-Trace-Id", In: errx.InHeader, Code: errx.CodeMultiple, Detail: "must appear only once"},
 		},
 		{
 			name: "custom detail is preserved",
-			in:   errx.Violation{Field: "name", Detail: "must be unique"},
-			want: errx.Violation{Field: "name", Code: errx.CodeInvalid, Detail: "must be unique"},
+			in:   errx.FieldError{Field: "name", Detail: "must be unique"},
+			want: errx.FieldError{Field: "name", Code: errx.CodeInvalid, Detail: "must be unique"},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			violation := assertSingleViolation(t, InvalidRequest(tc.in))
-			if violation != tc.want {
-				t.Fatalf("violation = %#v, want %#v", violation, tc.want)
+			fieldError := assertSingleFieldError(t, InvalidRequest(tc.in))
+			if fieldError != tc.want {
+				t.Fatalf("field error = %#v, want %#v", fieldError, tc.want)
 			}
 		})
 	}
 
-	t.Run("multiple violations are preserved in order", func(t *testing.T) {
-		got := assertViolations(t, InvalidRequest(
-			errx.Violation{Field: "page", In: errx.InQuery},
-			errx.Violation{Field: "body", In: errx.InBody, Code: errx.CodeRequired},
+	t.Run("multiple field errors are preserved in order", func(t *testing.T) {
+		got := assertFieldErrors(t, InvalidRequest(
+			errx.FieldError{Field: "page", In: errx.InQuery},
+			errx.FieldError{Field: "body", In: errx.InBody, Code: errx.CodeRequired},
 		))
 
-		want := []errx.Violation{
+		want := []errx.FieldError{
 			{Field: "page", In: errx.InQuery, Code: errx.CodeInvalid, Detail: "is invalid"},
 			{Field: "body", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
 		}
 		if len(got) != len(want) {
-			t.Fatalf("violations len = %d, want %d", len(got), len(want))
+			t.Fatalf("field errors len = %d, want %d", len(got), len(want))
 		}
 		for i := range want {
 			if got[i] != want[i] {
-				t.Fatalf("violations[%d] = %#v, want %#v", i, got[i], want[i])
+				t.Fatalf("fieldErrors[%d] = %#v, want %#v", i, got[i], want[i])
 			}
 		}
 	})
 
-	t.Run("does not mutate caller owned violation slice", func(t *testing.T) {
-		violations := []errx.Violation{
+	t.Run("does not mutate caller owned field error slice", func(t *testing.T) {
+		fieldErrors := []errx.FieldError{
 			{Field: "page", In: errx.InQuery},
 			{Field: "body", In: errx.InBody, Code: errx.CodeRequired},
 		}
-		wantOriginal := append([]errx.Violation(nil), violations...)
+		wantOriginal := append([]errx.FieldError(nil), fieldErrors...)
 
-		got := assertViolations(t, InvalidRequest(violations...))
+		got := assertFieldErrors(t, InvalidRequest(fieldErrors...))
 
-		want := []errx.Violation{
+		want := []errx.FieldError{
 			{Field: "page", In: errx.InQuery, Code: errx.CodeInvalid, Detail: "is invalid"},
 			{Field: "body", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
 		}
 		if len(got) != len(want) {
-			t.Fatalf("violations len = %d, want %d", len(got), len(want))
+			t.Fatalf("field errors len = %d, want %d", len(got), len(want))
 		}
 		for i := range want {
 			if got[i] != want[i] {
-				t.Fatalf("violations[%d] = %#v, want %#v", i, got[i], want[i])
+				t.Fatalf("fieldErrors[%d] = %#v, want %#v", i, got[i], want[i])
 			}
 		}
 		for i := range wantOriginal {
-			if violations[i] != wantOriginal[i] {
-				t.Fatalf("caller violations[%d] = %#v, want %#v", i, violations[i], wantOriginal[i])
+			if fieldErrors[i] != wantOriginal[i] {
+				t.Fatalf("caller fieldErrors[%d] = %#v, want %#v", i, fieldErrors[i], wantOriginal[i])
 			}
 		}
 	})

@@ -21,11 +21,11 @@ import (
 
 type rootPayloadMap map[string]any
 
-type decodedRootViolation struct {
-	Field   string
-	In      string
-	Code    string
-	Message string
+type decodedRootFieldError struct {
+	Field  string
+	In     string
+	Code   string
+	Detail string
 }
 
 // BindBody 只从 JSON body 绑定数据。
@@ -102,20 +102,20 @@ func TestQuery_ValuesDelegatesToReqx(t *testing.T) {
 
 // InvalidRequest 会通过根包 facade 暴露统一的 invalid_request 错误构造。
 func TestInvalidRequest_DelegatesToReqx(t *testing.T) {
-	violation := assertSingleRootViolation(t, InvalidRequest(Violation{
+	fieldError := assertSingleRootFieldError(t, InvalidRequest(FieldError{
 		Field: "name",
 		In:    InBody,
 		Code:  CodeRequired,
 	}))
 
-	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Message != "is required" {
-		t.Fatalf("violation = %#v", violation)
+	if fieldError.Field != "name" || fieldError.In != string(InBody) || fieldError.Code != string(CodeRequired) || fieldError.Detail != "is required" {
+		t.Fatalf("fieldError = %#v", fieldError)
 	}
 }
 
 // NewHTTPError 会通过根包 facade 暴露共享公共错误模型。
 func TestNewHTTPError_DelegatesToErrx(t *testing.T) {
-	err := NewHTTPError(http.StatusConflict, "account_conflict", "account already exists").WithViolations([]Violation{
+	err := NewHTTPError(http.StatusConflict, "account_conflict", "account already exists").WithFieldErrors([]FieldError{
 		{
 			Field:  "name",
 			In:     InBody,
@@ -134,9 +134,9 @@ func TestNewHTTPError_DelegatesToErrx(t *testing.T) {
 		t.Fatalf("Detail() = %q, want account already exists", got)
 	}
 
-	violation := assertSingleRootViolation(t, err)
-	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeInvalid) || violation.Message != "is invalid" {
-		t.Fatalf("violation = %#v", violation)
+	fieldError := assertSingleRootFieldError(t, err)
+	if fieldError.Field != "name" || fieldError.In != string(InBody) || fieldError.Code != string(CodeInvalid) || fieldError.Detail != "is invalid" {
+		t.Fatalf("fieldError = %#v", fieldError)
 	}
 }
 
@@ -159,9 +159,9 @@ func TestNewHTTPErrorWithCause_DelegatesToErrx(t *testing.T) {
 	}
 }
 
-// 根包也会直接暴露常用 HTTP 错误快捷构造器与 violation 常量。
-func TestRootErrorHelpersExposePublicViolationSurface(t *testing.T) {
-	err := UnprocessableEntity("invalid_account", "account is invalid").WithViolations([]Violation{
+// 根包也会直接暴露常用 HTTP 错误快捷构造器与 field error 常量。
+func TestRootErrorHelpersExposePublicFieldErrorSurface(t *testing.T) {
+	err := UnprocessableEntity("invalid_account", "account is invalid").WithFieldErrors([]FieldError{
 		{
 			Field:  "name",
 			In:     InBody,
@@ -177,9 +177,9 @@ func TestRootErrorHelpersExposePublicViolationSurface(t *testing.T) {
 		t.Fatalf("Code() = %q, want invalid_account", got)
 	}
 
-	violation := assertSingleRootViolation(t, err)
-	if violation.Field != "name" || violation.In != string(InBody) || violation.Code != string(CodeRequired) || violation.Message != "is required" {
-		t.Fatalf("violation = %#v", violation)
+	fieldError := assertSingleRootFieldError(t, err)
+	if fieldError.Field != "name" || fieldError.In != string(InBody) || fieldError.Code != string(CodeRequired) || fieldError.Detail != "is required" {
+		t.Fatalf("fieldError = %#v", fieldError)
 	}
 }
 
@@ -342,7 +342,7 @@ func decodeRootPayload(t *testing.T, body []byte) rootPayloadMap {
 	return payload
 }
 
-func assertSingleRootViolation(t *testing.T, err error) decodedRootViolation {
+func assertSingleRootFieldError(t *testing.T, err error) decodedRootFieldError {
 	t.Helper()
 
 	payload := decodeRootPayload(t, mustWriteRootError(t, err))
@@ -353,19 +353,19 @@ func assertSingleRootViolation(t *testing.T, err error) decodedRootViolation {
 
 	fields, ok := errorValue["fields"].([]any)
 	if !ok || len(fields) != 1 {
-		t.Fatalf("fields = %#v, want single violation", errorValue["fields"])
+		t.Fatalf("fields = %#v, want single field error", errorValue["fields"])
 	}
 
-	violationMap, ok := fields[0].(map[string]any)
+	fieldErrorMap, ok := fields[0].(map[string]any)
 	if !ok {
-		t.Fatalf("violation type = %T, want map[string]any", fields[0])
+		t.Fatalf("field error type = %T, want map[string]any", fields[0])
 	}
 
-	return decodedRootViolation{
-		Field:   stringValue(violationMap["field"]),
-		In:      stringValue(violationMap["in"]),
-		Code:    stringValue(violationMap["code"]),
-		Message: stringValue(violationMap["message"]),
+	return decodedRootFieldError{
+		Field:  stringValue(fieldErrorMap["field"]),
+		In:     stringValue(fieldErrorMap["in"]),
+		Code:   stringValue(fieldErrorMap["code"]),
+		Detail: stringValue(fieldErrorMap["detail"]),
 	}
 }
 

@@ -120,7 +120,7 @@ func assertNotHTTPError(t *testing.T, err error) {
 	}
 }
 
-func assertViolations(t *testing.T, err error) []errx.Violation {
+func assertFieldErrors(t *testing.T, err error) []errx.FieldError {
 	t.Helper()
 
 	httpErr := assertHTTPError(
@@ -134,28 +134,28 @@ func assertViolations(t *testing.T, err error) []errx.Violation {
 	return httpErr.Errors()
 }
 
-func assertSingleViolation(t *testing.T, err error) errx.Violation {
+func assertSingleFieldError(t *testing.T, err error) errx.FieldError {
 	t.Helper()
 
-	violations := assertViolations(t, err)
-	if len(violations) != 1 {
-		t.Fatalf("violations len = %d, want 1", len(violations))
+	fieldErrors := assertFieldErrors(t, err)
+	if len(fieldErrors) != 1 {
+		t.Fatalf("field errors len = %d, want 1", len(fieldErrors))
 	}
-	return violations[0]
+	return fieldErrors[0]
 }
 
-func assertViolation(t *testing.T, err error, want errx.Violation) {
+func assertFieldError(t *testing.T, err error, want errx.FieldError) {
 	t.Helper()
 
-	if got := assertSingleViolation(t, err); got != want {
-		t.Fatalf("violation = %#v, want %#v", got, want)
+	if got := assertSingleFieldError(t, err); got != want {
+		t.Fatalf("field error = %#v, want %#v", got, want)
 	}
 }
 
-func assertInvalidViolationAt(t *testing.T, err error, field string, in errx.ViolationIn) {
+func assertInvalidFieldErrorAt(t *testing.T, err error, field string, in errx.FieldErrorIn) {
 	t.Helper()
 
-	assertViolation(t, err, errx.Violation{
+	assertFieldError(t, err, errx.FieldError{
 		Field:  field,
 		In:     in,
 		Code:   errx.CodeInvalid,
@@ -163,10 +163,10 @@ func assertInvalidViolationAt(t *testing.T, err error, field string, in errx.Vio
 	})
 }
 
-func assertRequiredViolationAt(t *testing.T, err error, field string, in errx.ViolationIn) {
+func assertRequiredFieldErrorAt(t *testing.T, err error, field string, in errx.FieldErrorIn) {
 	t.Helper()
 
-	assertViolation(t, err, errx.Violation{
+	assertFieldError(t, err, errx.FieldError{
 		Field:  field,
 		In:     in,
 		Code:   errx.CodeRequired,

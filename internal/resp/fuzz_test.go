@@ -130,11 +130,13 @@ func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, f
 
 	hiddenCause := "internal cause sentinel"
 	wantField := map[string]any{
-		"field":   jsonSafeString(field),
-		"code":    string(errx.CodeInvalid),
-		"message": "is invalid",
+		"code":   string(errx.CodeInvalid),
+		"detail": "is invalid",
 	}
-	httpErr := errx.NewHTTPErrorWithCause(status, "", detail, errors.New(hiddenCause)).WithViolations([]errx.Violation{
+	if field != "" {
+		wantField["field"] = jsonSafeString(field)
+	}
+	httpErr := errx.NewHTTPErrorWithCause(status, "", detail, errors.New(hiddenCause)).WithFieldErrors([]errx.FieldError{
 		{Field: field, Code: errx.CodeInvalid, Detail: "is invalid"},
 	})
 	input := fmt.Errorf("wrapped: %w", httpErr)

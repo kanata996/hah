@@ -3,7 +3,7 @@
 // 适合在大多数 handler 中直接使用：
 //   - 核心 request helper：Path、Query
 //   - 明确分离的 DTO 绑定入口：BindQuery、BindBody
-//   - 常见请求违规与公共错误模型：InvalidRequest、Violation、HTTPError
+//   - 常见请求违规与公共错误模型：InvalidRequest、FieldError、HTTPError
 //   - 常用 JSON 成功响应辅助
 //   - 统一错误响应写回
 //
@@ -14,10 +14,10 @@
 //   - request helper：Path、Query
 //   - 绑定入口：BindQuery、BindBody
 //   - 请求级规则 helper：InvalidRequest
-//   - 公共错误模型：Violation、HTTPError、NewHTTPError、NewHTTPErrorWithCause
+//   - 公共错误模型：FieldError、HTTPError、NewHTTPError、NewHTTPErrorWithCause
 //   - 常用错误快捷构造：BadRequest、Unauthorized、Forbidden、NotFound、
 //     MethodNotAllowed、Conflict、UnprocessableEntity、TooManyRequests
-//   - 公开 violation 常量：Code*、In*
+//   - 公开 field error 常量：Code*、In*
 //   - 错误响应入口：WriteError
 //   - 成功响应入口：JSON、OK、Created、NoContent
 //

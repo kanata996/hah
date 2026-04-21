@@ -14,7 +14,7 @@ type paramLookupFunc func(r *http.Request, name string) ([]string, bool)
 type paramSpec struct {
 	r      *http.Request
 	name   string
-	input  errx.ViolationIn
+	input  errx.FieldErrorIn
 	lookup paramLookupFunc
 }
 
@@ -117,12 +117,12 @@ func (p *paramValue[T]) validateDefault(value T, validateBuiltins func(T) error)
 func (p *paramValue[T]) validateRequest(value T, validateBuiltins func(T) error) error {
 	if validateBuiltins != nil {
 		if err := validateBuiltins(p.cloneValue(value)); err != nil {
-			return InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
+			return InvalidRequest(newFieldError(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
 		}
 	}
 	for _, check := range p.checks {
 		if err := check(p.cloneValue(value)); err != nil {
-			return InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
+			return InvalidRequest(newFieldError(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
 		}
 	}
 	return nil
@@ -138,7 +138,7 @@ func (p *paramValue[T]) resolveMissing(validateBuiltins func(T) error) (T, error
 		}
 		return value, nil
 	case p.required:
-		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeRequired, ""))
+		return zero, InvalidRequest(newFieldError(p.spec.name, p.spec.input, errx.CodeRequired, ""))
 	default:
 		return zero, nil
 	}
@@ -158,12 +158,12 @@ func (p *paramValue[T]) resolve(validateBuiltins func(T) error) (T, error) {
 		return p.resolveMissing(validateBuiltins)
 	}
 	if !p.allowMultiple && len(values) > 1 {
-		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeMultiple, ""))
+		return zero, InvalidRequest(newFieldError(p.spec.name, p.spec.input, errx.CodeMultiple, ""))
 	}
 
 	value, err := p.parse(values)
 	if err != nil {
-		return zero, InvalidRequest(newViolation(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
+		return zero, InvalidRequest(newFieldError(p.spec.name, p.spec.input, errx.CodeInvalid, ""))
 	}
 	if err := p.validateRequest(value, validateBuiltins); err != nil {
 		return zero, err

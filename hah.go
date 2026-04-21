@@ -24,8 +24,8 @@ const (
 )
 
 type (
-	// Violation 描述单个公开请求违规。
-	Violation = errx.Violation
+	// FieldError 描述单个公开请求违规。
+	FieldError = errx.FieldError
 	// HTTPError 表示 HTTP 边界上的公共错误。
 	HTTPError = errx.HTTPError
 )
@@ -53,8 +53,8 @@ func Query(r *http.Request, name string) *reqx.QueryParam {
 }
 
 // InvalidRequest 生成统一的 invalid_request 错误包络。
-func InvalidRequest(violations ...Violation) error {
-	return reqx.InvalidRequest(violations...)
+func InvalidRequest(fieldErrors ...FieldError) error {
+	return reqx.InvalidRequest(fieldErrors...)
 }
 
 // NewHTTPError 构造一个不带底层 cause 的公共 HTTP 错误。

@@ -146,7 +146,7 @@ func (r *createAccountRequest) normalize() {
 func validateListAccountsRequest(req *listAccountsRequest) error {
 	req.normalize()
 	if req.Limit < 1 || req.Limit > 100 {
-		return hah.InvalidRequest(hah.Violation{
+		return hah.InvalidRequest(hah.FieldError{
 			Field:  "limit",
 			In:     hah.InQuery,
 			Detail: "must be between 1 and 100",
@@ -159,19 +159,19 @@ func validateCreateAccountRequest(req *createAccountRequest) error {
 	req.normalize()
 	switch nameLen := utf8.RuneCountInString(req.Name); {
 	case req.Name == "":
-		return hah.InvalidRequest(hah.Violation{
+		return hah.InvalidRequest(hah.FieldError{
 			Field: "name",
 			In:    hah.InBody,
 			Code:  hah.CodeRequired,
 		})
 	case nameLen < 3:
-		return hah.InvalidRequest(hah.Violation{
+		return hah.InvalidRequest(hah.FieldError{
 			Field:  "name",
 			In:     hah.InBody,
 			Detail: "must be at least 3 characters",
 		})
 	case nameLen > 64:
-		return hah.InvalidRequest(hah.Violation{
+		return hah.InvalidRequest(hah.FieldError{
 			Field:  "name",
 			In:     hah.InBody,
 			Detail: "must be at most 64 characters",
@@ -183,7 +183,7 @@ func validateCreateAccountRequest(req *createAccountRequest) error {
 
 func validateDeleteActor(actor string) error {
 	if strings.TrimSpace(actor) == "" {
-		return hah.InvalidRequest(hah.Violation{
+		return hah.InvalidRequest(hah.FieldError{
 			Field: "X-Actor",
 			In:    hah.InHeader,
 			Code:  hah.CodeRequired,

@@ -74,11 +74,11 @@ tags, err := hah.Query(r, "tag").Values().Get()
 - `Path(r, name)` / `Query(r, name)` 先指定来源，再选择类型
 - `Path` 只暴露 path 适用的单值能力
 - `Query` 额外支持 `Values()` 读取重复 query 的解析后值
-- `Required()`：参数缺失时返回 `required` violation
+- `Required()`：参数缺失时返回 `required` field error
 - `Default(v)`：参数缺失时使用默认值；与 `Required()` 互斥
 - 常见快捷校验直接链式表达，例如 `Min`、`Max`、`MinLen`、`MaxLen`、`OneOf`、`Match`、`Before`、`After`
 - 同类 built-in constraint 重复声明时以后一次为准；built-in constraint 总在 `Check(...)` 之前执行
-- `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` violation
+- `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` field error
 - `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
 - `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
 
@@ -185,7 +185,7 @@ if err := hah.BindBody(r, &body); err != nil {
 ## 绑定后的显式校验
 
 `hah` 不预设 DTO 的校验方式。绑定完成后，调用方自己决定下一步是手写校验、接入第三方库，还是映射到应用层命令再校验。
-多数 handler 直接用 `hah.InvalidRequest(...)`、`hah.Violation{...}` 就够了；如果你需要更完整的错误构造器族，或某个更深层已经明确要返回稳定公共 HTTP 错误，继续直接使用根包提供的 `hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)` 等入口即可。
+多数 handler 直接用 `hah.InvalidRequest(...)`、`hah.FieldError{...}` 就够了；如果你需要更完整的错误构造器族，或某个更深层已经明确要返回稳定公共 HTTP 错误，继续直接使用根包提供的 `hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)` 等入口即可。
 
 ### 1. 手写校验
 
@@ -197,7 +197,7 @@ type CreateAccountBody struct {
 func validateCreateAccountBody(body *CreateAccountBody) error {
 	body.Name = strings.TrimSpace(body.Name)
 	if body.Name == "" {
-		return hah.InvalidRequest(hah.Violation{
+		return hah.InvalidRequest(hah.FieldError{
 			Field: "name",
 			In:    hah.InBody,
 			Code:  hah.CodeRequired,
@@ -283,7 +283,7 @@ _ = orgID
 ```go
 actor := strings.TrimSpace(r.Header.Get("X-Actor"))
 if actor == "" {
-	return hah.InvalidRequest(hah.Violation{
+	return hah.InvalidRequest(hah.FieldError{
 		Field: "X-Actor",
 		In:    hah.InHeader,
 		Code:  hah.CodeRequired,

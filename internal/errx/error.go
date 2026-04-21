@@ -16,8 +16,8 @@ type HTTPError struct {
 	code string
 	// detail 是公开错误详情；缺省时会回退到稳定的标题文案。
 	detail string
-	// errors 是公开结构化错误详情列表；这里固定为 Violation 列表。
-	errors []Violation
+	// errors 是公开结构化错误详情列表；这里固定为 FieldError 列表。
+	errors []FieldError
 	// cause 仅用于内部错误链，不直接暴露给客户端。
 	cause error
 }
@@ -42,11 +42,11 @@ func NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPEr
 	}
 }
 
-// WithViolations 绑定公开 violation 列表。
+// WithFieldErrors 绑定公开 field error 列表。
 // 调用方后续修改传入切片时，不会影响已构造的 HTTPError。
-func (e *HTTPError) WithViolations(violations []Violation) *HTTPError {
+func (e *HTTPError) WithFieldErrors(fieldErrors []FieldError) *HTTPError {
 	cloned := *e
-	cloned.errors = cloneViolations(violations)
+	cloned.errors = cloneFieldErrors(fieldErrors)
 	return &cloned
 }
 
@@ -95,8 +95,8 @@ func (e *HTTPError) Detail() string {
 
 // Errors 返回公开结构化错误详情列表的防御性浅拷贝。
 // 调用方修改返回切片时，不会影响已构造的 HTTPError。
-func (e *HTTPError) Errors() []Violation {
-	return cloneViolations(e.errors)
+func (e *HTTPError) Errors() []FieldError {
+	return cloneFieldErrors(e.errors)
 }
 
 // BadRequest 构造 400 Bad Request 公共错误。
@@ -139,12 +139,12 @@ func TooManyRequests(code, detail string) *HTTPError {
 	return NewHTTPError(http.StatusTooManyRequests, code, detail)
 }
 
-// cloneViolations 返回 violations 的浅拷贝，避免调用方后续修改影响已构造的错误对象。
-func cloneViolations(violations []Violation) []Violation {
-	if len(violations) == 0 {
+// cloneFieldErrors 返回 field errors 的浅拷贝，避免调用方后续修改影响已构造的错误对象。
+func cloneFieldErrors(fieldErrors []FieldError) []FieldError {
+	if len(fieldErrors) == 0 {
 		return nil
 	}
-	return append([]Violation(nil), violations...)
+	return append([]FieldError(nil), fieldErrors...)
 }
 
 func (e *HTTPError) normalizedStatus() int {

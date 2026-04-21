@@ -128,7 +128,7 @@ func TestValidationFailureReturnsErrorEnvelope(t *testing.T) {
 
 	fields, ok := errorValue["fields"].([]any)
 	if !ok || len(fields) == 0 {
-		t.Fatalf("fields = %#v, want at least one violation", errorValue["fields"])
+		t.Fatalf("fields = %#v, want at least one field error", errorValue["fields"])
 	}
 
 	first, ok := fields[0].(map[string]any)
@@ -136,10 +136,10 @@ func TestValidationFailureReturnsErrorEnvelope(t *testing.T) {
 		t.Fatalf("first field = %#v, want object", fields[0])
 	}
 	if got := first["field"]; got != "name" {
-		t.Fatalf("violation field = %#v, want name", got)
+		t.Fatalf("field error field = %#v, want name", got)
 	}
-	if got := first["message"]; got != "is required" {
-		t.Fatalf("violation message = %#v, want is required", got)
+	if got := first["detail"]; got != "is required" {
+		t.Fatalf("field error detail = %#v, want is required", got)
 	}
 }
 

@@ -149,19 +149,19 @@ func validateCreateAccountRequest(req *createAccountRequest) error {
 	req.normalize()
 	switch nameLen := utf8.RuneCountInString(req.Name); {
 	case req.Name == "":
-		return hah.InvalidRequest(hah.Violation{
+		return hah.InvalidRequest(hah.FieldError{
 			Field: "name",
 			In:    hah.InBody,
 			Code:  hah.CodeRequired,
 		})
 	case nameLen < 3:
-		return hah.InvalidRequest(hah.Violation{
+		return hah.InvalidRequest(hah.FieldError{
 			Field:  "name",
 			In:     hah.InBody,
 			Detail: "must be at least 3 characters",
 		})
 	case nameLen > 64:
-		return hah.InvalidRequest(hah.Violation{
+		return hah.InvalidRequest(hah.FieldError{
 			Field:  "name",
 			In:     hah.InBody,
 			Detail: "must be at most 64 characters",
