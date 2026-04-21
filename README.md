@@ -114,6 +114,7 @@ func main() {
 ```
 
 这个例子展示的是 `hah` 的默认使用路径：读取 path 参数，绑定 body，显式补充输入规则，然后统一写回默认 JSON envelope。
+如果你在拆分 request-side 能力或直接构建输入层组件，`reqx` 提供同一组原生入口；根包 `hah` 保留兼容 facade。
 
 ## 上手路径
 
@@ -218,6 +219,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 
 - `hah`：默认公开 HTTP 边界，聚合常用 request helper、绑定、显式请求规则、公共错误模型入口与响应写回入口
 - `reqx`：请求侧辅助包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`InvalidRequest` 以及 request-side field error 规范化
+  当你直接依赖请求输入层时，优先把 `FieldError` / `Code*` / `In*` 等 request-side 契约视为 `reqx` 的公开面；`hah` 继续转发这些入口用于默认 handler 路径
 
 实现层还包含 `internal/errx`（共享 HTTP 错误模型）与 `internal/resp`（默认 JSON success/error envelope 写回），但它们都不属于公开 API。
 

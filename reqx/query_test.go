@@ -343,7 +343,7 @@ func TestQueryStringAndMultiValueContracts(t *testing.T) {
 		}
 
 		_, err = Query(req, "mode").String().MinLen(2).Get()
-		assertInvalidFieldErrorAt(t, err, "mode", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "mode", InQuery)
 	})
 
 	t.Run("values required and check are enforced", func(t *testing.T) {
@@ -366,7 +366,7 @@ func TestQueryStringAndMultiValueContracts(t *testing.T) {
 		}
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().Required().Get()
-		assertRequiredFieldErrorAt(t, err, "tag", errx.InQuery)
+		assertRequiredFieldErrorAt(t, err, "tag", InQuery)
 	})
 }
 

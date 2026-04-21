@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/internal/errx"
 )
 
 // PathParam 表示一个待解析的 path 单参数。
@@ -19,7 +18,7 @@ func Path(r *http.Request, name string) *PathParam {
 		spec: paramSpec{
 			r:      r,
 			name:   strings.TrimSpace(name),
-			input:  errx.InPath,
+			input:  InPath,
 			lookup: pathParamValues,
 		},
 	}

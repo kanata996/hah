@@ -73,7 +73,7 @@ func newFieldError(field string, input FieldErrorIn, code FieldErrorCode, detail
 
 func normalizeFieldError(fieldError FieldError) FieldError {
 	if fieldError.Code == "" {
-		fieldError.Code = errx.CodeInvalid
+		fieldError.Code = CodeInvalid
 	}
 	if fieldError.Detail != "" {
 		return fieldError
@@ -84,13 +84,13 @@ func normalizeFieldError(fieldError FieldError) FieldError {
 
 func defaultFieldErrorDetail(code FieldErrorCode) string {
 	switch code {
-	case errx.CodeRequired:
+	case CodeRequired:
 		return fieldErrorDetailRequired
-	case errx.CodeUnknown:
+	case CodeUnknown:
 		return fieldErrorDetailUnknownField
-	case errx.CodeType:
+	case CodeType:
 		return fieldErrorDetailInvalidType
-	case errx.CodeMultiple:
+	case CodeMultiple:
 		return fieldErrorDetailMustNotRepeat
 	default:
 		return fieldErrorDetailInvalid
