@@ -128,7 +128,7 @@ type FieldError struct {
 - 内部允许保留 `detail` 作为最具体的错误摘要字段
 - 若底层错误模型仍有 `title`，它只属于内部兼容信息，不参与默认响应协议，也不参与 `message` 计算
 - `FieldError.Code` 是字段级规则码，例如 `required` / `invalid` / `type`
-- `FieldError.Message` 是字段级错误提示
+- `FieldError.Detail` 是字段级错误提示
 
 ## 5. 成功响应
 
@@ -229,7 +229,7 @@ type FieldError struct {
 - `field`
 - `in`
 - `code`
-- `message`
+- `detail`
 
 规则：
 
