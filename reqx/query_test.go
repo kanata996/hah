@@ -118,6 +118,8 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 		for _, raw := range []string{
 			"2026-04-13T10:00:00+08:60",
 			"2026-04-13T10:00:00+24:00",
+			"2026-04-13T10:00:00-00:60",
+			"2026-04-13T10:00:00-24:00",
 		} {
 			t.Run(raw, func(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/items?at="+url.QueryEscape(raw), nil)
@@ -133,6 +135,18 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 
 		_, err := Query(req, "at").Time().Get()
 		assertInvalidFieldErrorAt(t, err, "at", errx.InQuery)
+	})
+
+	t.Run("time accepts fractional seconds and negative offsets", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?at="+url.QueryEscape("2026-04-13T10:00:00.123456789-07:30"), nil)
+
+		got, err := Query(req, "at").Time().Get()
+		if err != nil {
+			t.Fatalf("Time().Get() error = %v", err)
+		}
+		if got.Format(time.RFC3339Nano) != "2026-04-13T10:00:00.123456789-07:30" {
+			t.Fatalf("at = %q, want 2026-04-13T10:00:00.123456789-07:30", got.Format(time.RFC3339Nano))
+		}
 	})
 }
 

@@ -560,6 +560,13 @@ func TestQueryTimeParam_EqualBoundariesAreRejected(t *testing.T) {
 			},
 		},
 		{
+			name: "rfc3339 same instant with different offset",
+			raw:  "2026-04-13T18:00:00+08:00",
+			build: func(p *QueryParam) *TimeParam {
+				return p.Time()
+			},
+		},
+		{
 			name: "unix time",
 			raw:  strconv.FormatInt(boundary.Unix(), 10),
 			build: func(p *QueryParam) *TimeParam {
