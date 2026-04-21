@@ -137,11 +137,11 @@
 
 错误包络沿用共享 request-side 模型；`Path(...)` 额外固定为：
 
-- `Errors()` 只包含一个 violation
-- violation `Field` 等于裁剪后的参数名
-- violation `In == hah.InPath`
-- 缺失 required 参数时，violation `Code == hah.CodeRequired`
-- 解析失败或校验失败时，violation `Code == hah.CodeInvalid`
+- `Errors()` 只包含一个 field error
+- field error `Field` 等于裁剪后的参数名
+- field error `In == hah.InPath`
+- 缺失 required 参数时，field error `Code == hah.CodeRequired`
+- 解析失败或校验失败时，field error `Code == hah.CodeInvalid`
 
 其余顶层 `422 invalid_request` 包络语义，沿用关联文档中的共享 request-side 错误模型。
 
@@ -163,4 +163,4 @@
 - `request.PathValue(name)` 非空时被原样消费
 - `request.PathValue(name)` 为空字符串时按缺失处理
 - bridge 手工填充的 `PathValue` 会被原样消费，不会再做二次 unescape 或额外归一化
-- path violation 会稳定标记 `Field`、`In=InPath`、`Code=required/invalid`
+- path field error 会稳定标记 `Field`、`In=InPath`、`Code=required/invalid`

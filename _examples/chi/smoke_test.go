@@ -119,20 +119,20 @@ func TestDeleteRequiresActorHeader(t *testing.T) {
 		t.Fatalf("error.reason = %#v, want invalid_request", got)
 	}
 
-	fields, ok := errorValue["fields"].([]any)
-	if !ok || len(fields) == 0 {
-		t.Fatalf("fields = %#v, want at least one violation", errorValue["fields"])
+	details, ok := errorValue["details"].([]any)
+	if !ok || len(details) == 0 {
+		t.Fatalf("details = %#v, want at least one field error", errorValue["details"])
 	}
 
-	first, ok := fields[0].(map[string]any)
+	first, ok := details[0].(map[string]any)
 	if !ok {
-		t.Fatalf("first field = %#v, want object", fields[0])
+		t.Fatalf("first detail = %#v, want object", details[0])
 	}
 	if got := first["in"]; got != "header" {
-		t.Fatalf("violation in = %#v, want header", got)
+		t.Fatalf("field error in = %#v, want header", got)
 	}
-	if got := first["message"]; got != "is required" {
-		t.Fatalf("violation message = %#v, want is required", got)
+	if got := first["detail"]; got != "is required" {
+		t.Fatalf("field error detail = %#v, want is required", got)
 	}
 }
 

@@ -13,7 +13,7 @@
 - 面向 `net/http` 设计，保留标准 handler 和 router 控制权
 - 以 `hah.Path(...)` / `hah.Query(...)` 作为默认请求侧 API，直接读取 path/query 参数
 - 支持把 query、body 绑定到 DTO，再由调用方显式做后续校验
-- 把常见请求违规收敛为稳定的公开 HTTP 错误
+- 把常见请求字段错误收敛为稳定的公开 HTTP 错误
 - 内置统一 JSON envelope 成功响应与错误响应
 - 根包提供默认且完整的公开 HTTP 边界
 - 适合渐进接入现有服务，不要求整体迁移
@@ -65,7 +65,7 @@ type createAccountRequest struct {
 func validateCreateAccountRequest(req *createAccountRequest) error {
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
-		return hah.InvalidRequest(hah.Violation{
+		return hah.InvalidRequest(hah.FieldError{
 			Field: "name",
 			In:    hah.InBody,
 			Code:  hah.CodeRequired,
@@ -142,12 +142,12 @@ DTO binding 与显式规则：
 
 错误与响应：
 
-- `hah.Violation`、`hah.HTTPError`、`hah.NewHTTPError(...)`、`hah.NewHTTPErrorWithCause(...)` 是根包暴露的公共错误模型入口
-- `hah.BadRequest(...)`、`hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)` 等快捷构造器适合在已明确公开错误语义的更深层直接返回
+- `hah.FieldError`、`hah.HTTPError`、`hah.NewHTTPError(...)`、`hah.NewHTTPErrorWithCause(...)` 是根包暴露的公共错误模型入口
+- `hah.BadRequest(...)`、`hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)`、`hah.InternalServer(...)` 等快捷构造器适合在已明确公开错误语义的更深层直接返回
 - `hah.WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成统一 JSON error envelope
 - `hah.OK(...)` / `hah.Created(...)` 会写默认成功 envelope：顶层固定 `code = 0`、`message = "success"`，业务数据放在可选 `data`
 - `hah.WriteError(...)` 会写默认错误 envelope：顶层 `code` 是五位业务错误码，未显式传入时按 `status * 100` 生成；顶层 `message` 直接来自 `hah.HTTPError.Detail()`
-- 默认错误 envelope 的 `error` 对象固定包含 `status` 与稳定的 `reason`；如果有 violations，再按顺序附带 `fields`
+- 默认错误 envelope 的 `error` 对象固定包含稳定的 `reason`；如果有 field errors，再按顺序附带 `details`
 - 若 `hah.HTTPError` 未显式提供 `detail`，共享错误模型会基于公开 `reason` 生成默认短语，例如 `internal_error -> "internal error"`
 - `hah.JSON(...)` 仍是调用方指定状态码与原始 JSON body 的 escape hatch，不参与默认 envelope 协议
 - `hah.WriteError(...)` 的返回值表示响应边界自身异常，例如响应写出失败；生产代码通常至少要记录这个错误
@@ -159,14 +159,13 @@ DTO binding 与显式规则：
   "code": 42200,
   "message": "request contains invalid fields",
   "error": {
-    "status": 422,
     "reason": "invalid_request",
-    "fields": [
+    "details": [
       {
         "field": "name",
         "in": "body",
         "code": "required",
-        "message": "is required"
+        "detail": "is required"
       }
     ]
   }
@@ -216,7 +215,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 对外主要分成两个包：
 
 - `hah`：默认公开 HTTP 边界，聚合常用 request helper、绑定、显式请求规则、公共错误模型入口与响应写回入口
-- `reqx`：请求侧辅助包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`InvalidRequest` 以及 request-side violation 规范化
+- `reqx`：请求侧辅助包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`InvalidRequest` 以及 request-side field error 规范化
 
 实现层还包含 `internal/errx`（共享 HTTP 错误模型）与 `internal/resp`（默认 JSON success/error envelope 写回），但它们都不属于公开 API。
 

@@ -130,11 +130,13 @@ func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, f
 
 	hiddenCause := "internal cause sentinel"
 	wantField := map[string]any{
-		"field":   jsonSafeString(field),
-		"code":    string(errx.CodeInvalid),
-		"message": "is invalid",
+		"code":   string(errx.CodeInvalid),
+		"detail": "is invalid",
 	}
-	httpErr := errx.NewHTTPErrorWithCause(status, "", detail, errors.New(hiddenCause)).WithViolations([]errx.Violation{
+	if field != "" {
+		wantField["field"] = jsonSafeString(field)
+	}
+	httpErr := errx.NewHTTPErrorWithCause(status, "", detail, errors.New(hiddenCause)).WithFieldErrors([]errx.FieldError{
 		{Field: field, Code: errx.CodeInvalid, Detail: "is invalid"},
 	})
 	input := fmt.Errorf("wrapped: %w", httpErr)
@@ -164,11 +166,11 @@ func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, f
 	if !ok {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
-	if got := errorValue["status"]; got != float64(wantStatus) {
-		t.Fatalf("error.status = %#v, want %d", got, wantStatus)
-	}
 	if got := errorValue["reason"]; got != wantReason {
 		t.Fatalf("error.reason = %#v, want %q", got, wantReason)
+	}
+	if _, exists := errorValue["status"]; exists {
+		t.Fatalf("error.status unexpectedly present: %#v", errorValue["status"])
 	}
 	if _, exists := errorValue["code"]; exists {
 		t.Fatalf("error.code unexpectedly present: %#v", errorValue["code"])
@@ -180,11 +182,11 @@ func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, f
 		t.Fatalf("error.detail unexpectedly present: %#v", errorValue["detail"])
 	}
 
-	fields, ok := errorValue["fields"].([]any)
-	if !ok || len(fields) != 1 {
-		t.Fatalf("fields = %#v, want 1 item", errorValue["fields"])
+	details, ok := errorValue["details"].([]any)
+	if !ok || len(details) != 1 {
+		t.Fatalf("details = %#v, want 1 item", errorValue["details"])
 	}
-	assertPublicErrorObject(t, fields[0], wantField)
+	assertPublicErrorObject(t, details[0], wantField)
 
 	if bytes.Contains(rr.Body.Bytes(), []byte(hiddenCause)) {
 		t.Fatalf("body leaked internal cause: %q", rr.Body.String())

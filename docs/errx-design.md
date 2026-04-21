@@ -5,7 +5,7 @@
 - 锁定日期：2026-04-20
 - 适用范围：
   - `hah.HTTPError`
-  - `hah.Violation`
+  - `hah.FieldError`
   - `hah` 暴露的错误构造器、快捷构造器与共享常量
   - `reqx` / `resp` 对 `internal/errx` 的仓库内协作依赖
 - 不覆盖：
@@ -27,18 +27,18 @@
 本文档优先锁定根包 `hah` 的公开契约；只有当 `reqx` / `resp` 明确依赖某些 `internal/errx` 行为时，才额外记录为仓库内协作约束。
 除 `hah.go` 明确暴露的符号外，`internal/errx` 的导出项不构成对外公开 API。
 
-这里提到的 `HTTPError` / `Violation`，如无特殊说明，均指根包 `hah` 暴露给调用方的公开类型。
+这里提到的 `HTTPError` / `FieldError`，如无特殊说明，均指根包 `hah` 暴露给调用方的公开类型。
 它不限定错误必须在 handler 层构造；只要某一层已经明确决定该错误可以直接公开给客户端，就可以返回 `hah.HTTPError`。
 如果错误仍属于内部业务语义，则应继续保留普通 error 或内部错误类型，并在 HTTP 边界再映射。
 
 该错误模型对外负责：
 
 - 定义 `HTTPError`
-- 定义 `Violation`
+- 定义 `FieldError`
 - 标准化 `status`、`code`、`title`、`detail`
 - 提供可保留或不保留 `cause` 的基础构造器
 - 提供一组常用状态的快捷构造器
-- 提供项目级共享 violation 常量
+- 提供项目级共享 field error 常量
 
 该错误模型对外不负责：
 
@@ -61,7 +61,7 @@
 根包 `hah` 必须公开：
 
 - `HTTPError`
-- `Violation`
+- `FieldError`
 - `NewHTTPError(status int, code, detail string) *HTTPError`
 - `NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPError`
 - `BadRequest(code, detail string) *HTTPError`
@@ -72,6 +72,7 @@
 - `Conflict(code, detail string) *HTTPError`
 - `UnprocessableEntity(code, detail string) *HTTPError`
 - `TooManyRequests(code, detail string) *HTTPError`
+- `InternalServer(code, detail string) *HTTPError`
 - `CodeInvalid`
 - `CodeRequired`
 - `CodeUnknown`
@@ -86,8 +87,8 @@
 
 `hah` 不公开：
 
-- `ViolationCode`
-- `ViolationIn`
+- `FieldErrorCode`
+- `FieldErrorIn`
 
 ### 2.2 `hah.HTTPError` 公开方法
 
@@ -99,8 +100,8 @@
 - `Code() string`
 - `Title() string`
 - `Detail() string`
-- `Errors() []Violation`
-- `WithViolations([]Violation) *HTTPError`
+- `Errors() []FieldError`
+- `WithFieldErrors([]FieldError) *HTTPError`
 
 ## 3. `HTTPError` 公开语义
 
@@ -203,42 +204,42 @@
 `nil` 的 `*HTTPError` receiver 不属于公开契约。
 调用方不得依赖其任何方法行为；实现可以直接 panic。
 
-## 4. `Violation` 与 `WithViolations(...)`
+## 4. `FieldError` 与 `WithFieldErrors(...)`
 
-### 4.1 `Violation` 字段语义
+### 4.1 `FieldError` 字段语义
 
-`Violation` 公开字段只包含：
+`FieldError` 公开字段只包含：
 
 - `Field`
 - `In`
 - `Code`
 - `Detail`
 
-共享错误模型只定义 `Violation` 的公开字段和值承载语义；
+共享错误模型只定义 `FieldError` 的公开字段和值承载语义；
 若这些字段被写入默认错误 envelope，由 `resp` 契约定义输出字段与包络。
 
-共享错误模型对 `Violation` 只做承载，不负责：
+共享错误模型对 `FieldError` 只做承载，不负责：
 
 - 自动补默认 `Code`
 - 自动补默认 `Detail`
 - 自动生成 request-side 包络
 
-### 4.2 `WithViolations(...)`
+### 4.2 `WithFieldErrors(...)`
 
-`WithViolations(...)` 的固定公开结果为：
+`WithFieldErrors(...)` 的固定公开结果为：
 
 - receiver 必须是非 `nil` 的 `*HTTPError`
 - 返回新的 `*HTTPError`，且不修改 receiver
-- 除 `violations` 外，必须保留 receiver 的 `Status()` / `Code()` / `Title()` / `Detail()` / `Unwrap()` 公开语义
-- 返回值中的 violations 必须完全替换 receiver 当前的 violations；不得 merge、append 或保留 receiver 的旧 violations
-- `nil` 或空切片输入表示“无 violations”，即 `Errors() == nil`
-- `Errors()` 按提供顺序暴露 violation 列表，不排序、不去重、不重写单个 `Violation`
-- 后续对入参切片或 `Errors()` 返回结果的修改，都不得影响错误对象内部保存的 violations
+- 除 `field errors` 外，必须保留 receiver 的 `Status()` / `Code()` / `Title()` / `Detail()` / `Unwrap()` 公开语义
+- 返回值中的 field errors 必须完全替换 receiver 当前的 field errors；不得 merge、append 或保留 receiver 的旧 field errors
+- `nil` 或空切片输入表示“无 field errors”，即 `Errors() == nil`
+- `Errors()` 按提供顺序暴露 field error 列表，不排序、不去重、不重写单个 `FieldError`
+- 后续对入参切片或 `Errors()` 返回结果的修改，都不得影响错误对象内部保存的 field errors
 
 ## 5. 仓库内协作约束
 
-- `reqx` 负责决定 request-side 的默认 detail、包络和 violation 内容。
-- `reqx` 当前会直接使用 `internal/errx.ViolationCode` 与 `internal/errx.ViolationIn` 组装内部错误；这是仓库内协作细节，不是对外公开 API。
+- `reqx` 负责决定 request-side 的默认 detail、包络和 field error 内容。
+- `reqx` 当前会直接使用 `internal/errx.FieldErrorCode` 与 `internal/errx.FieldErrorIn` 组装内部错误；这是仓库内协作细节，不是对外公开 API。
 - `resp` 只能通过 `Status()` / `Code()` / `Title()` / `Detail()` / `Errors()` 消费共享错误模型；其中 `Status()` / `Code()` / `Detail()` 会被直接映射到默认错误 envelope 的 `status` / `reason` / 顶层 `message`。
 - `resp` 若需要参与错误链，只能用 `errors.Is` / `errors.As`，不能读内部字段。
 
@@ -249,8 +250,8 @@
 
 至少额外锁住以下容易回归的边界：
 
-- 根包公开面存在：`HTTPError`、`Violation`、两个基础构造器、八个快捷构造器、`HTTPError` 的公开方法、全部 `Code*` / `In*` 常量
+- 根包公开面存在：`HTTPError`、`FieldError`、两个基础构造器、八个快捷构造器、`HTTPError` 的公开方法、全部 `Code*` / `In*` 常量
 - 状态码与默认文案收敛规则：非错误状态码统一回落到 `500`，`499` 原样保留，默认 `title` / `code` / `detail` 与表格一致
 - `cause` 语义：`NewHTTPError(...)` 不保留 `cause`，`NewHTTPErrorWithCause(...)` 保留 `cause`，typed-nil `cause` 归一化为 `nil`，`Error()` 不泄漏 `cause` 文本，`errors.Is` / `errors.As` 能通过 `Unwrap()` 正常工作
-- `WithViolations(...)` 语义：不修改 receiver、替换而不是追加旧 violations、且不受入参切片和 `Errors()` 返回结果后续修改影响
+- `WithFieldErrors(...)` 语义：不修改 receiver、替换而不是追加旧 field errors、且不受入参切片和 `Errors()` 返回结果后续修改影响
 - 零值 `HTTPError` 的全部 getter 与 `Error()` 语义

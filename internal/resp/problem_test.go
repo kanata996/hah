@@ -42,7 +42,7 @@ func TestWriteErrorWritesDefaultEnvelope(t *testing.T) {
 		http.StatusUnprocessableEntity,
 		"",
 		"",
-	).WithViolations([]errx.Violation{
+	).WithFieldErrors([]errx.FieldError{
 		{Field: "name", In: errx.InBody, Code: "required", Detail: "is required"},
 	}))
 	if err != nil {
@@ -61,14 +61,13 @@ func TestWriteErrorWritesDefaultEnvelope(t *testing.T) {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusUnprocessableEntity),
 		"reason": "unprocessable_entity",
-		"fields": []any{
+		"details": []any{
 			map[string]any{
-				"field":   "name",
-				"in":      "body",
-				"code":    "required",
-				"message": "is required",
+				"field":  "name",
+				"in":     "body",
+				"code":   "required",
+				"detail": "is required",
 			},
 		},
 	})
@@ -79,7 +78,7 @@ func TestWriteErrorUsesExplicitTopCodeAndDetailDerivedMessage(t *testing.T) {
 
 	input := errors.Join(
 		errors.New("handler failed"),
-		errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid").WithViolations([]errx.Violation{
+		errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid").WithFieldErrors([]errx.FieldError{
 			{Field: "name", Code: "required", Detail: "is required"},
 		}),
 	)
@@ -103,14 +102,14 @@ func TestWriteErrorUsesExplicitTopCodeAndDetailDerivedMessage(t *testing.T) {
 	if got := errorValue["reason"]; got != "invalid_json" {
 		t.Fatalf("error.reason = %#v, want invalid_json", got)
 	}
-	fields, ok := errorValue["fields"].([]any)
-	if !ok || len(fields) != 1 {
-		t.Fatalf("fields = %#v, want 1 item", errorValue["fields"])
+	details, ok := errorValue["details"].([]any)
+	if !ok || len(details) != 1 {
+		t.Fatalf("details = %#v, want 1 item", errorValue["details"])
 	}
-	assertPublicErrorObject(t, fields[0], map[string]any{
-		"field":   "name",
-		"code":    "required",
-		"message": "is required",
+	assertPublicErrorObject(t, details[0], map[string]any{
+		"field":  "name",
+		"code":   "required",
+		"detail": "is required",
 	})
 }
 
@@ -129,7 +128,6 @@ func TestWriteErrorUsesNormalizedDetailAsMessageWhenDetailIsAbsent(t *testing.T)
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusUnauthorized),
 		"reason": "token-missing__forbidden",
 	})
 }
@@ -149,15 +147,14 @@ func TestWriteErrorUsesExplicitDetailEvenWhenItMatchesTitle(t *testing.T) {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusBadRequest),
 		"reason": "invalid_json",
 	})
 }
 
-func TestWriteErrorPreservesViolationOrderAndContent(t *testing.T) {
+func TestWriteErrorPreservesFieldErrorOrderAndContent(t *testing.T) {
 	rr := httptest.NewRecorder()
 
-	err := WriteError(rr, errx.NewHTTPError(http.StatusUnprocessableEntity, "", "").WithViolations([]errx.Violation{
+	err := WriteError(rr, errx.NewHTTPError(http.StatusUnprocessableEntity, "", "").WithFieldErrors([]errx.FieldError{
 		{Field: "name", In: errx.InBody, Code: errx.CodeRequired, Detail: "is required"},
 		{Field: "email", In: errx.InQuery, Code: errx.CodeInvalid, Detail: "is invalid"},
 		{Field: "name", In: errx.InBody, Code: errx.CodeInvalid, Detail: "must be unique"},
@@ -171,28 +168,28 @@ func TestWriteErrorPreservesViolationOrderAndContent(t *testing.T) {
 	if !ok {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
-	fields, ok := errorValue["fields"].([]any)
-	if !ok || len(fields) != 3 {
-		t.Fatalf("fields = %#v, want 3 items", errorValue["fields"])
+	details, ok := errorValue["details"].([]any)
+	if !ok || len(details) != 3 {
+		t.Fatalf("details = %#v, want 3 items", errorValue["details"])
 	}
 
-	assertPublicErrorObject(t, fields[0], map[string]any{
-		"field":   "name",
-		"in":      "body",
-		"code":    "required",
-		"message": "is required",
+	assertPublicErrorObject(t, details[0], map[string]any{
+		"field":  "name",
+		"in":     "body",
+		"code":   "required",
+		"detail": "is required",
 	})
-	assertPublicErrorObject(t, fields[1], map[string]any{
-		"field":   "email",
-		"in":      "query",
-		"code":    "invalid",
-		"message": "is invalid",
+	assertPublicErrorObject(t, details[1], map[string]any{
+		"field":  "email",
+		"in":     "query",
+		"code":   "invalid",
+		"detail": "is invalid",
 	})
-	assertPublicErrorObject(t, fields[2], map[string]any{
-		"field":   "name",
-		"in":      "body",
-		"code":    "invalid",
-		"message": "must be unique",
+	assertPublicErrorObject(t, details[2], map[string]any{
+		"field":  "name",
+		"in":     "body",
+		"code":   "invalid",
+		"detail": "must be unique",
 	})
 }
 
@@ -214,7 +211,6 @@ func TestWriteErrorUsesCustomAsHTTPError(t *testing.T) {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusUnauthorized),
 		"reason": "unauthorized",
 	})
 }
@@ -246,7 +242,6 @@ func TestWriteErrorSkipsTypedNilHTTPErrorAndKeepsScanningChain(t *testing.T) {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusBadRequest),
 		"reason": "invalid_json",
 	})
 }
@@ -272,7 +267,6 @@ func TestWriteErrorSkipsTypedNilCustomAsHTTPErrorAndKeepsScanningChain(t *testin
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
-		"status": float64(http.StatusForbidden),
 		"reason": "forbidden",
 	})
 }
@@ -290,7 +284,6 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"status": float64(499),
 			"reason": "client_closed_request",
 		})
 	})
@@ -307,7 +300,6 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"status": float64(http.StatusGatewayTimeout),
 			"reason": "timeout",
 		})
 	})
@@ -328,7 +320,6 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"status": float64(http.StatusForbidden),
 			"reason": "forbidden",
 		})
 	})
@@ -345,7 +336,6 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 		body := decodePayload(t, rr.Body.Bytes())
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
-			"status": float64(http.StatusInternalServerError),
 			"reason": "internal_error",
 		})
 		if bytes.Contains(rr.Body.Bytes(), []byte("db timeout")) {
@@ -429,7 +419,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 	})
 
 	t.Run("head uses net http head semantics", func(t *testing.T) {
-		httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
+		httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithFieldErrors([]errx.FieldError{
 			{Field: "name", Code: "required", Detail: "is required"},
 		})
 
@@ -516,7 +506,7 @@ func TestWriteErrorWriteFailure(t *testing.T) {
 	})
 
 	t.Run("clears stale content length on real http server", func(t *testing.T) {
-		httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]errx.Violation{
+		httpErr := errx.NewHTTPError(http.StatusBadRequest, "", "").WithFieldErrors([]errx.FieldError{
 			{Field: "name", Code: "required", Detail: "is required"},
 		})
 
@@ -564,5 +554,12 @@ func assertErrorEnvelopeBasics(t *testing.T, rr *httptest.ResponseRecorder, want
 	}
 	if _, exists := body["data"]; exists {
 		t.Fatalf("data unexpectedly present: %#v", body["data"])
+	}
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
+	}
+	if _, exists := errorValue["status"]; exists {
+		t.Fatalf("error.status unexpectedly present: %#v", errorValue["status"])
 	}
 }

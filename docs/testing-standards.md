@@ -144,7 +144,7 @@ go test ./<touched_pkg> -run=^$$ -fuzz=Fuzz -fuzztime=10s
 
 至少验证：
 
-- `HTTPError`、`Violation` 和共享常量的公开语义
+- `HTTPError`、`FieldError` 和共享常量的公开语义
 - 标准化规则
 - 错误链语义
 - defensive copy 语义

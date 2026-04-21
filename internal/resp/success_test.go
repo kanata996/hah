@@ -21,6 +21,21 @@ func TestSuccessWritersWriteEnvelopeResponses(t *testing.T) {
 		assertData func(*testing.T, payloadMap)
 	}{
 		{
+			name:       "Accepted writes object payload under data",
+			write:      func(w http.ResponseWriter) error { return Accepted(w, map[string]any{"id": "u_1"}) },
+			wantStatus: http.StatusAccepted,
+			assertData: func(t *testing.T, body payloadMap) {
+				t.Helper()
+				data, ok := body["data"].(map[string]any)
+				if !ok {
+					t.Fatalf("data = %#v, want object", body["data"])
+				}
+				if got := data["id"]; got != "u_1" {
+					t.Fatalf("data.id = %#v, want u_1", got)
+				}
+			},
+		},
+		{
 			name:       "Created writes object payload under data",
 			write:      func(w http.ResponseWriter) error { return Created(w, map[string]any{"id": "u_1"}) },
 			wantStatus: http.StatusCreated,
@@ -109,7 +124,9 @@ func TestSuccessWritersRejectNilWriter(t *testing.T) {
 		name  string
 		write func() error
 	}{
+		{name: "Accepted", write: func() error { return Accepted(nil, map[string]any{"id": "u_1"}) }},
 		{name: "Created", write: func() error { return Created(nil, map[string]any{"id": "u_1"}) }},
+		{name: "NoContent", write: func() error { return NoContent(nil) }},
 		{name: "OK", write: func() error { return OK(nil, map[string]any{"id": "u_1"}) }},
 	}
 
@@ -127,6 +144,7 @@ func TestSuccessWritersRejectUnsupportedValue(t *testing.T) {
 		name  string
 		write func(http.ResponseWriter) error
 	}{
+		{name: "Accepted", write: func(w http.ResponseWriter) error { return Accepted(w, make(chan int)) }},
 		{name: "Created", write: func(w http.ResponseWriter) error { return Created(w, make(chan int)) }},
 		{name: "OK", write: func(w http.ResponseWriter) error { return OK(w, make(chan int)) }},
 	}
@@ -205,6 +223,57 @@ func TestSuccessWritersResponseBoundaries(t *testing.T) {
 			t.Fatalf("Content-Length = %q, want empty or %d", got, len(result.body))
 		}
 	})
+
+	t.Run("no content clears stale content headers and writes no body", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+		rr.Header().Set("X-Trace-ID", "trace-1")
+		rr.Header().Set("Content-Type", "application/json")
+		rr.Header().Set("Content-Length", "999")
+
+		if err := NoContent(rr); err != nil {
+			t.Fatalf("NoContent() error = %v", err)
+		}
+
+		if rr.Code != http.StatusNoContent {
+			t.Fatalf("status = %d, want %d", rr.Code, http.StatusNoContent)
+		}
+		if rr.Body.Len() != 0 {
+			t.Fatalf("body = %q, want empty", rr.Body.String())
+		}
+		if got := rr.Header().Get("X-Trace-ID"); got != "trace-1" {
+			t.Fatalf("X-Trace-ID = %q, want %q", got, "trace-1")
+		}
+		if got := rr.Header().Get("Content-Type"); got != "" {
+			t.Fatalf("Content-Type = %q, want empty", got)
+		}
+		if got := rr.Header().Get("Content-Length"); got != "" {
+			t.Fatalf("Content-Length = %q, want empty", got)
+		}
+	})
+
+	t.Run("no content keeps real http response body empty", func(t *testing.T) {
+		result := roundTripOverHTTP(t, func(w http.ResponseWriter, _ *http.Request) error {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Content-Length", "999")
+			return NoContent(w)
+		})
+
+		if result.handlerErr != nil {
+			t.Fatalf("handler error = %v", result.handlerErr)
+		}
+		if result.response.StatusCode != http.StatusNoContent {
+			t.Fatalf("status = %d, want %d", result.response.StatusCode, http.StatusNoContent)
+		}
+		if len(result.body) != 0 {
+			t.Fatalf("body = %q, want empty", string(result.body))
+		}
+		if got := result.response.Header.Get("Content-Type"); got != "" {
+			t.Fatalf("Content-Type = %q, want empty", got)
+		}
+		if got := result.response.Header.Get("Content-Length"); got != "" {
+			t.Fatalf("Content-Length = %q, want empty", got)
+		}
+	})
 }
 
 func TestSuccessWritersReturnWrappedWriteError(t *testing.T) {
@@ -213,6 +282,11 @@ func TestSuccessWritersReturnWrappedWriteError(t *testing.T) {
 		wantStatus int
 		write      func(http.ResponseWriter) error
 	}{
+		{
+			name:       "Accepted",
+			wantStatus: http.StatusAccepted,
+			write:      func(w http.ResponseWriter) error { return Accepted(w, map[string]any{"id": "u_1"}) },
+		},
 		{
 			name:       "OK",
 			wantStatus: http.StatusOK,

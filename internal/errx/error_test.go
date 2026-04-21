@@ -92,6 +92,12 @@ var standardHTTPErrorConstructors = []standardHTTPErrorConstructorCase{
 		wantStatus: http.StatusTooManyRequests,
 		wantCode:   "too_many_requests",
 	},
+	{
+		name:       "internal server",
+		build:      InternalServer,
+		wantStatus: http.StatusInternalServerError,
+		wantCode:   "internal_error",
+	},
 }
 
 var normalizedHTTPErrorPublicFieldCases = []normalizedHTTPErrorPublicFieldCase{
@@ -240,7 +246,7 @@ func assertHTTPErrorPreservesCause(t *testing.T, err *HTTPError, wantDetail stri
 	}
 }
 
-func assertHTTPErrorErrors(t *testing.T, err *HTTPError, want ...Violation) {
+func assertHTTPErrorErrors(t *testing.T, err *HTTPError, want ...FieldError) {
 	t.Helper()
 
 	got := err.Errors()
@@ -322,57 +328,57 @@ func TestHTTPErrorUnwrapNilReceiverReturnsNil(t *testing.T) {
 	}
 }
 
-// WithViolations 的结果不应受入参切片或 Errors() 返回结果后续修改影响；有无 cause 时契约一致。
-func TestHTTPErrorWithViolationsClonesInputAndReturnedSlices(t *testing.T) {
+// WithFieldErrors 的结果不应受入参切片或 Errors() 返回结果后续修改影响；有无 cause 时契约一致。
+func TestHTTPErrorWithFieldErrorsClonesInputAndReturnedSlices(t *testing.T) {
 	testCases := []struct {
 		name  string
 		cause error
-		build func(error, []Violation) *HTTPError
+		build func(error, []FieldError) *HTTPError
 	}{
 		{
 			name: "without cause",
-			build: func(_ error, violations []Violation) *HTTPError {
-				return NewHTTPError(http.StatusBadRequest, " invalid_json ", " invalid payload ").WithViolations(violations)
+			build: func(_ error, fieldErrors []FieldError) *HTTPError {
+				return NewHTTPError(http.StatusBadRequest, " invalid_json ", " invalid payload ").WithFieldErrors(fieldErrors)
 			},
 		},
 		{
 			name:  "with cause",
 			cause: errors.New("db timeout"),
-			build: func(cause error, violations []Violation) *HTTPError {
-				return NewHTTPErrorWithCause(http.StatusConflict, "", "", cause).WithViolations(violations)
+			build: func(cause error, fieldErrors []FieldError) *HTTPError {
+				return NewHTTPErrorWithCause(http.StatusConflict, "", "", cause).WithFieldErrors(fieldErrors)
 			},
 		},
 	}
 
-	want := []Violation{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}}
+	want := []FieldError{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}}
 
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			input := []Violation{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}}
+			input := []FieldError{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}}
 			err := tc.build(tc.cause, input)
 
 			input[0].Field = "changed"
 			assertHTTPErrorErrors(t, err, want...)
 
 			gotErrors := err.Errors()
-			gotErrors[0] = Violation{Field: "changed", In: InQuery, Code: CodeInvalid, Detail: "is invalid"}
+			gotErrors[0] = FieldError{Field: "changed", In: InQuery, Code: CodeInvalid, Detail: "is invalid"}
 			assertHTTPErrorErrors(t, err, want...)
 		})
 	}
 }
 
-// WithViolations 应返回携带独立 violations 的新错误对象，不能污染模板对象或兄弟结果。
-func TestHTTPErrorWithViolationsDoesNotMutateReceiverOrSiblingResults(t *testing.T) {
+// WithFieldErrors 应返回携带独立 field errors 的新错误对象，不能污染模板对象或兄弟结果。
+func TestHTTPErrorWithFieldErrorsDoesNotMutateReceiverOrSiblingResults(t *testing.T) {
 	cause := errors.New("db timeout")
-	baseWant := []Violation{{Field: "base", In: InHeader, Code: CodeUnknown, Detail: "is duplicated"}}
-	base := NewHTTPErrorWithCause(http.StatusConflict, " account_conflict ", " account already exists ", cause).WithViolations(baseWant)
+	baseWant := []FieldError{{Field: "base", In: InHeader, Code: CodeUnknown, Detail: "is duplicated"}}
+	base := NewHTTPErrorWithCause(http.StatusConflict, " account_conflict ", " account already exists ", cause).WithFieldErrors(baseWant)
 
-	firstWant := []Violation{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}}
-	secondWant := []Violation{{Field: "email", In: InQuery, Code: CodeInvalid, Detail: "is invalid"}}
+	firstWant := []FieldError{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}}
+	secondWant := []FieldError{{Field: "email", In: InQuery, Code: CodeInvalid, Detail: "is invalid"}}
 
-	first := base.WithViolations(firstWant)
-	second := base.WithViolations(secondWant)
+	first := base.WithFieldErrors(firstWant)
+	second := base.WithFieldErrors(secondWant)
 
 	assertHTTPErrorPublicFields(
 		t,
@@ -391,28 +397,28 @@ func TestHTTPErrorWithViolationsDoesNotMutateReceiverOrSiblingResults(t *testing
 	assertHTTPErrorErrors(t, second, secondWant...)
 	assertHTTPErrorPreservesCause(t, second, "account already exists", cause)
 
-	// 第二次基于同一模板构造，不能回头覆盖第一次的 violations。
+	// 第二次基于同一模板构造，不能回头覆盖第一次的 field errors。
 	assertHTTPErrorErrors(t, first, firstWant...)
 }
 
-// 基于已有 violations 再传入 nil/空切片时，应显式清空旧 violations，而不是保留或合并。
-func TestHTTPErrorWithViolationsNilAndEmptyInputReplaceExistingViolations(t *testing.T) {
+// 基于已有 field errors 再传入 nil/空切片时，应显式清空旧 field errors，而不是保留或合并。
+func TestHTTPErrorWithFieldErrorsNilAndEmptyInputReplaceExistingFieldErrors(t *testing.T) {
 	cause := errors.New("db timeout")
-	baseWant := []Violation{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}}
-	base := NewHTTPErrorWithCause(http.StatusConflict, " account_conflict ", " account already exists ", cause).WithViolations(baseWant)
+	baseWant := []FieldError{{Field: "name", In: InBody, Code: CodeRequired, Detail: "is required"}}
+	base := NewHTTPErrorWithCause(http.StatusConflict, " account_conflict ", " account already exists ", cause).WithFieldErrors(baseWant)
 
 	testCases := []struct {
-		name       string
-		violations []Violation
+		name        string
+		fieldErrors []FieldError
 	}{
-		{name: "nil input", violations: nil},
-		{name: "empty input", violations: []Violation{}},
+		{name: "nil input", fieldErrors: nil},
+		{name: "empty input", fieldErrors: []FieldError{}},
 	}
 
 	for _, tc := range testCases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			err := base.WithViolations(tc.violations)
+			err := base.WithFieldErrors(tc.fieldErrors)
 
 			assertHTTPErrorPublicFields(
 				t,
@@ -526,7 +532,7 @@ func TestHTTPErrorWorksWithErrorsIsAndAs(t *testing.T) {
 	}
 }
 
-// 构造时不设置 violations，Errors() 应返回 nil 而非空切片。
+// 构造时不设置 field errors，Errors() 应返回 nil 而非空切片。
 func TestHTTPErrorErrorsReturnsNilWhenNoErrors(t *testing.T) {
 	err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request")
 
@@ -535,19 +541,19 @@ func TestHTTPErrorErrorsReturnsNilWhenNoErrors(t *testing.T) {
 	}
 }
 
-// nil 与空切片输入都应收敛为无 violations 的稳定 nil 表示。
-func TestHTTPErrorWithViolationsNilAndEmptySliceNormalizeToNil(t *testing.T) {
+// nil 与空切片输入都应收敛为无 field errors 的稳定 nil 表示。
+func TestHTTPErrorWithFieldErrorsNilAndEmptySliceNormalizeToNil(t *testing.T) {
 	testCases := []struct {
-		name       string
-		violations []Violation
+		name        string
+		fieldErrors []FieldError
 	}{
-		{name: "nil input", violations: nil},
-		{name: "empty input", violations: []Violation{}},
+		{name: "nil input", fieldErrors: nil},
+		{name: "empty input", fieldErrors: []FieldError{}},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request").WithViolations(tc.violations)
+			err := NewHTTPError(http.StatusBadRequest, "bad_request", "bad request").WithFieldErrors(tc.fieldErrors)
 
 			if got := err.Errors(); got != nil {
 				t.Fatalf("Errors() = %#v, want nil", got)
@@ -662,11 +668,11 @@ func expectedHumanizedCode(code string) string {
 	return strings.ToLower(strings.Join(strings.Fields(replacer.Replace(code)), " "))
 }
 
-// 共享 violation 常量的 string 值属于公开可观察语义。
-func TestViolationSharedConstantsExposeStableValues(t *testing.T) {
+// 共享 field error 常量的 string 值属于公开可观察语义。
+func TestFieldErrorSharedConstantsExposeStableValues(t *testing.T) {
 	codeCases := []struct {
 		name string
-		got  ViolationCode
+		got  FieldErrorCode
 		want string
 	}{
 		{name: "invalid", got: CodeInvalid, want: "invalid"},
@@ -686,7 +692,7 @@ func TestViolationSharedConstantsExposeStableValues(t *testing.T) {
 
 	inCases := []struct {
 		name string
-		got  ViolationIn
+		got  FieldErrorIn
 		want string
 	}{
 		{name: "body", got: InBody, want: "body"},
@@ -704,9 +710,9 @@ func TestViolationSharedConstantsExposeStableValues(t *testing.T) {
 	}
 }
 
-// WithViolations 必须保留顺序和重复项，不排序、不去重。
-func TestHTTPErrorWithViolationsPreservesOrderAndDuplicates(t *testing.T) {
-	err := NewHTTPError(http.StatusBadRequest, "", "").WithViolations([]Violation{
+// WithFieldErrors 必须保留顺序和重复项，不排序、不去重。
+func TestHTTPErrorWithFieldErrorsPreservesOrderAndDuplicates(t *testing.T) {
+	err := NewHTTPError(http.StatusBadRequest, "", "").WithFieldErrors([]FieldError{
 		{Field: "name", In: InBody, Code: CodeInvalid, Detail: "is invalid"},
 		{Field: "name", In: InBody, Code: CodeInvalid, Detail: "is invalid"},
 		{Field: "email", In: InQuery, Code: CodeRequired, Detail: "is required"},
@@ -715,8 +721,8 @@ func TestHTTPErrorWithViolationsPreservesOrderAndDuplicates(t *testing.T) {
 	assertHTTPErrorErrors(
 		t,
 		err,
-		Violation{Field: "name", In: InBody, Code: CodeInvalid, Detail: "is invalid"},
-		Violation{Field: "name", In: InBody, Code: CodeInvalid, Detail: "is invalid"},
-		Violation{Field: "email", In: InQuery, Code: CodeRequired, Detail: "is required"},
+		FieldError{Field: "name", In: InBody, Code: CodeInvalid, Detail: "is invalid"},
+		FieldError{Field: "name", In: InBody, Code: CodeInvalid, Detail: "is invalid"},
+		FieldError{Field: "email", In: InQuery, Code: CodeRequired, Detail: "is required"},
 	)
 }
