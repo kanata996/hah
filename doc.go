@@ -3,7 +3,7 @@
 // 适合在大多数 handler 中直接使用：
 //   - 核心 request helper：Path、Query
 //   - 明确分离的 DTO 绑定入口：BindQuery、BindBody
-//   - 常见请求违规与公共错误模型：InvalidRequest、FieldError、HTTPError
+//   - 常见请求字段错误与公共错误模型：InvalidRequest、FieldError、HTTPError
 //   - 常用 JSON 成功响应辅助
 //   - 统一错误响应写回
 //

@@ -154,7 +154,7 @@ func TestWriteErrorUsesExplicitDetailEvenWhenItMatchesTitle(t *testing.T) {
 	})
 }
 
-func TestWriteErrorPreservesViolationOrderAndContent(t *testing.T) {
+func TestWriteErrorPreservesFieldErrorOrderAndContent(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	err := WriteError(rr, errx.NewHTTPError(http.StatusUnprocessableEntity, "", "").WithFieldErrors([]errx.FieldError{

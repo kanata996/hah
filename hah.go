@@ -24,7 +24,7 @@ const (
 )
 
 type (
-	// FieldError 描述单个公开请求违规。
+	// FieldError 描述单个公开字段错误。
 	FieldError = errx.FieldError
 	// HTTPError 表示 HTTP 边界上的公共错误。
 	HTTPError = errx.HTTPError

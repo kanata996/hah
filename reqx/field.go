@@ -6,7 +6,7 @@ import (
 	"github.com/kanata996/hah/internal/errx"
 )
 
-// 本文件负责 reqx 对外公开的违规模型、错误码和 invalid_request 错误包络。
+// 本文件负责 reqx 对外公开的 field error 模型、错误码和 invalid_request 错误包络。
 //
 // 这里承载的能力包括：
 //   - 公开的顶层错误码常量

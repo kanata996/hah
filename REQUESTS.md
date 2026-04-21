@@ -16,7 +16,7 @@
 | 单字段 path / query 读取并顺手做常见校验 | `hah.Path` / `hah.Query` | 主路径，直接返回 source-aware `required` / `invalid` 错误 |
 | 批量 query DTO 绑定 | `hah.BindQuery` | 适合筛选条件、分页参数、显式 DTO 投影 |
 | 只做 JSON body 绑定 | `hah.BindBody` | 适合 body DTO 解码 |
-| 手写字段级请求违规 | `hah.InvalidRequest` | 适合把业务前的输入错误收敛成统一 `422 invalid_request` |
+| 手写字段级 FieldError | `hah.InvalidRequest` | 适合把业务前的输入错误收敛成统一 `422 invalid_request` |
 | 读取 header | `r.Header.Get(...)` / `r.Header.Values(...)` | header 默认直接走标准库 |
 
 ## 读取 request 数据

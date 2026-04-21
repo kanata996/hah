@@ -13,7 +13,7 @@
 - 面向 `net/http` 设计，保留标准 handler 和 router 控制权
 - 以 `hah.Path(...)` / `hah.Query(...)` 作为默认请求侧 API，直接读取 path/query 参数
 - 支持把 query、body 绑定到 DTO，再由调用方显式做后续校验
-- 把常见请求违规收敛为稳定的公开 HTTP 错误
+- 把常见请求字段错误收敛为稳定的公开 HTTP 错误
 - 内置统一 JSON envelope 成功响应与错误响应
 - 根包提供默认且完整的公开 HTTP 边界
 - 适合渐进接入现有服务，不要求整体迁移

@@ -53,7 +53,7 @@ func TestUsageErrorf_PrefixesAndSupportsUnwrap(t *testing.T) {
 	}
 }
 
-func TestInvalidRequest_UsesViolationEnvelope(t *testing.T) {
+func TestInvalidRequest_UsesFieldErrorEnvelope(t *testing.T) {
 	testCases := []struct {
 		name string
 		in   errx.FieldError
