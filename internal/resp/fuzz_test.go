@@ -24,6 +24,28 @@ func FuzzJSONWritersPublicContracts(f *testing.F) {
 	})
 }
 
+func FuzzSuccessWritersPublicContracts(f *testing.F) {
+	f.Add(uint8(0), "u_1")
+	f.Add(uint8(1), "\t")
+	f.Add(uint8(2), "")
+	f.Add(uint8(3), "kanata")
+
+	f.Fuzz(func(t *testing.T, variant uint8, value string) {
+		fuzzSuccessWriterContracts(t, variant, value)
+	})
+}
+
+func FuzzNoContentPublicContracts(f *testing.F) {
+	f.Add("trace-1", "application/json", "999")
+	f.Add("", "text/plain", "0")
+	f.Add("kanata", "", "")
+	f.Add("trace/with space", "application/problem+json", "100")
+
+	f.Fuzz(func(t *testing.T, traceID, staleContentType, staleContentLength string) {
+		fuzzNoContentContracts(t, traceID, staleContentType, staleContentLength)
+	})
+}
+
 func FuzzWriteErrorWrappedHTTPErrorPublicContracts(f *testing.F) {
 	f.Add(http.StatusBadRequest, "payload invalid", "name")
 	f.Add(http.StatusUnprocessableEntity, "", "")
@@ -55,6 +77,37 @@ func fuzzJSONWriterContracts(t *testing.T, variant uint8, value string) {
 		err := Created(rr, payload)
 		assertRecorderEnvelopeSuccess(t, rr, err, http.StatusCreated, payload)
 	}
+}
+
+func fuzzSuccessWriterContracts(t *testing.T, variant uint8, value string) {
+	t.Helper()
+
+	payload := map[string]string{"value": value}
+	rr := httptest.NewRecorder()
+
+	switch variant % 3 {
+	case 0:
+		err := OK(rr, payload)
+		assertRecorderEnvelopeSuccess(t, rr, err, http.StatusOK, payload)
+	case 1:
+		err := Accepted(rr, payload)
+		assertRecorderEnvelopeSuccess(t, rr, err, http.StatusAccepted, payload)
+	default:
+		err := Created(rr, payload)
+		assertRecorderEnvelopeSuccess(t, rr, err, http.StatusCreated, payload)
+	}
+}
+
+func fuzzNoContentContracts(t *testing.T, traceID, staleContentType, staleContentLength string) {
+	t.Helper()
+
+	rr := httptest.NewRecorder()
+	rr.Header().Set("X-Trace-ID", traceID)
+	rr.Header().Set("Content-Type", staleContentType)
+	rr.Header().Set("Content-Length", staleContentLength)
+
+	err := NoContent(rr)
+	assertNoContentWriterResult(t, rr, err, traceID)
 }
 
 func assertJSONNullWriterResult(t *testing.T, rr *httptest.ResponseRecorder, err error, status int) {
@@ -120,6 +173,29 @@ func assertRecorderEnvelopeSuccess(t *testing.T, rr *httptest.ResponseRecorder, 
 	}
 	if got := data["value"]; got != jsonSafeString(payload["value"]) {
 		t.Fatalf("data.value = %#v, want %#v", got, jsonSafeString(payload["value"]))
+	}
+}
+
+func assertNoContentWriterResult(t *testing.T, rr *httptest.ResponseRecorder, err error, wantTraceID string) {
+	t.Helper()
+
+	if err != nil {
+		t.Fatalf("writer error = %v", err)
+	}
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNoContent)
+	}
+	if rr.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", rr.Body.String())
+	}
+	if got := rr.Header().Get("X-Trace-ID"); got != wantTraceID {
+		t.Fatalf("X-Trace-ID = %q, want %q", got, wantTraceID)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "" {
+		t.Fatalf("Content-Type = %q, want empty", got)
+	}
+	if got := rr.Header().Get("Content-Length"); got != "" {
+		t.Fatalf("Content-Length = %q, want empty", got)
 	}
 }
 
