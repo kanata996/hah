@@ -3,6 +3,7 @@ package reqx
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -302,6 +303,34 @@ func TestBindBody_BoundariesAndUsageErrors(t *testing.T) {
 		err := BindBody(req, &dst)
 		if !errors.Is(err, wantErr) {
 			t.Fatalf("BindBody() error = %v, want %v", err, wantErr)
+		}
+		if dst != (request{Name: "existing"}) {
+			t.Fatalf("dst = %#v, want unchanged", dst)
+		}
+	})
+
+	t.Run("body readers that make no progress fail with ordinary error", func(t *testing.T) {
+		type request struct {
+			Name string `json:"name"`
+		}
+		const noProgressLimit = 100
+
+		wantErr := errors.New("reader progressed too late")
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req.Header.Set("Content-Type", "application/json")
+		req.Body = &bindBodyNoProgressThenErrorCloser{
+			remaining: noProgressLimit,
+			err:       wantErr,
+		}
+		req.ContentLength = -1
+
+		dst := request{Name: "existing"}
+		err := BindBody(req, &dst)
+		if !errors.Is(err, io.ErrNoProgress) {
+			t.Fatalf("BindBody() error = %v, want %v", err, io.ErrNoProgress)
+		}
+		if errors.Is(err, wantErr) {
+			t.Fatalf("BindBody() error = %v, want no-progress error before wrapped reader error", err)
 		}
 		if dst != (request{Name: "existing"}) {
 			t.Fatalf("dst = %#v, want unchanged", dst)

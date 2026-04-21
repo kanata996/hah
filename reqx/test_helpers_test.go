@@ -2,6 +2,7 @@ package reqx
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -15,6 +16,24 @@ type bindBodyReadErrorCloser struct{ err error }
 
 func (r bindBodyReadErrorCloser) Read([]byte) (int, error) { return 0, r.err }
 func (r bindBodyReadErrorCloser) Close() error             { return nil }
+
+type bindBodyNoProgressThenErrorCloser struct {
+	remaining int
+	err       error
+}
+
+func (r *bindBodyNoProgressThenErrorCloser) Read([]byte) (int, error) {
+	if r.remaining > 0 {
+		r.remaining--
+		return 0, nil
+	}
+	if r.err == nil {
+		return 0, io.EOF
+	}
+	return 0, r.err
+}
+
+func (*bindBodyNoProgressThenErrorCloser) Close() error { return nil }
 
 type bindQueryNamedString string
 type bindQueryNamedSlice []string
