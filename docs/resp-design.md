@@ -89,9 +89,9 @@ type Response[T any] struct {
 }
 
 type ErrorBody struct {
-	Status int          `json:"status"`
-	Reason string       `json:"reason"`
-	Fields []FieldError `json:"fields,omitempty"`
+	Status  int          `json:"status"`
+	Reason  string       `json:"reason"`
+	Details []FieldError `json:"details,omitempty"`
 }
 
 type FieldError struct {
@@ -192,7 +192,7 @@ type FieldError struct {
   "error": {
     "status": 422,
     "reason": "unprocessable_entity",
-    "fields": [
+    "details": [
       {
         "field": "email",
         "in": "body",
@@ -208,12 +208,12 @@ type FieldError struct {
 
 - `status`：最终 HTTP 状态码
 - `reason`：必填、非空的稳定字符串错误类型，例如 `unprocessable_entity`、`timeout`、`not_found`
-- `fields`：字段级错误列表；仅在有 field errors 时写出
+- `details`：字段级错误列表；仅在有 field errors 时写出
 
 `detail` 仍允许保留在内部错误承载结构中，但不作为公开 `error` JSON 字段输出；它的公开投影固定为顶层 `message`。
 若现有底层错误模型仍有 `title` 概念，它只属于内部兼容信息，不参与默认响应协议，也不参与 `message` 计算。
 
-`fields` 的稳定 JSON 字段固定为：
+`details` 的稳定 JSON 字段固定为：
 
 - `field`
 - `in`
@@ -225,7 +225,7 @@ type FieldError struct {
 - `error.reason` 与顶层 `code` 语义不同，不得混用
 - 顶层 `code` 负责业务分支
 - `error.reason` 负责稳定错误类型
-- `fields` 不排序、不去重、不改写顺序
+- `details` 不排序、不去重、不改写顺序
 
 ## 7. 顶层 `code` / `message` 规则
 
@@ -308,14 +308,14 @@ type FieldError struct {
 - 顶层 `message` 直接对应 `hah.HTTPError.Detail()`
 - `hah.HTTPError.Code()` 必须能提供非空 `reason`
 - `hah.HTTPError.Title()` 不再映射到公开 JSON 字段，也不参与 `message` 计算；若当前模型仍保留 `Title()`，它只属于内部兼容信息
-- `error.fields` 对应 `hah.HTTPError.Errors()`
+- `error.details` 对应 `hah.HTTPError.Errors()`
 
 字段级错误直接复用 `hah.FieldError` 的 JSON 形状：
 
-- `hah.FieldError.Field -> error.fields[].field`
-- `hah.FieldError.In -> error.fields[].in`
-- `hah.FieldError.Code -> error.fields[].code`
-- `hah.FieldError.Detail -> error.fields[].detail`
+- `hah.FieldError.Field -> error.details[].field`
+- `hah.FieldError.In -> error.details[].in`
+- `hah.FieldError.Code -> error.details[].code`
+- `hah.FieldError.Detail -> error.details[].detail`
 
 对 `context.Canceled`、`context.DeadlineExceeded` 与普通 `error` 这类框架合成错误：
 
@@ -346,7 +346,7 @@ type FieldError struct {
 3. 非 `2xx` 视为失败，读取 `error`
 4. 业务分支优先看顶层 `code`
 5. 细分错误类型看 `error.reason`
-6. 字段级提示看 `error.fields`
+6. 字段级提示看 `error.details`
 
 禁止：
 
@@ -373,8 +373,8 @@ type FieldError struct {
 - `WriteError` 对非五位或 `code <= 0` 的失败 `code` 必须在首次提交前返回 error
 - `WriteError` 传入多个 `code` 参数时，必须在首次提交前返回 error
 - `WriteError(w, nil)` 与 `WriteError(w, nil, code)` 都是 no-op
-- `error` 固定包含 `status` 与非空 `reason`，并按需包含 `fields`
-- `error.fields` 的稳定 JSON 字段固定为 `field` / `in` / `code` / `message`
+- `error` 固定包含 `status` 与非空 `reason`，并按需包含 `details`
+- `error.details` 的稳定 JSON 字段固定为 `field` / `in` / `code` / `detail`
 - 调用方显式提供公开 `detail` 时，顶层 `message` 必须与之保持一致
 - 共享错误模型未显式提供 `detail` 时，顶层 `message` 必须等于该模型标准化后的 `Detail()`
 - 对外 `error` JSON 不输出 `detail` / `title`

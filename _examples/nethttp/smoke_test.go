@@ -126,14 +126,14 @@ func TestValidationFailureReturnsErrorEnvelope(t *testing.T) {
 		t.Fatalf("error.reason = %#v, want invalid_request", got)
 	}
 
-	fields, ok := errorValue["fields"].([]any)
-	if !ok || len(fields) == 0 {
-		t.Fatalf("fields = %#v, want at least one field error", errorValue["fields"])
+	details, ok := errorValue["details"].([]any)
+	if !ok || len(details) == 0 {
+		t.Fatalf("details = %#v, want at least one field error", errorValue["details"])
 	}
 
-	first, ok := fields[0].(map[string]any)
+	first, ok := details[0].(map[string]any)
 	if !ok {
-		t.Fatalf("first field = %#v, want object", fields[0])
+		t.Fatalf("first detail = %#v, want object", details[0])
 	}
 	if got := first["field"]; got != "name" {
 		t.Fatalf("field error field = %#v, want name", got)

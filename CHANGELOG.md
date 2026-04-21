@@ -13,6 +13,10 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+### Breaking
+
+- Renamed the default error envelope field-error array from `error.fields` to `error.details`. The shared `hah.FieldError` item shape is unchanged and still serializes as `field` / `in` / `code` / `detail`.
+
 ## [v0.8.3] - 2026-04-21
 
 ### Breaking

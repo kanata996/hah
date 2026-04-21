@@ -63,7 +63,7 @@ func TestWriteErrorWritesDefaultEnvelope(t *testing.T) {
 	assertPublicErrorObject(t, errorValue, map[string]any{
 		"status": float64(http.StatusUnprocessableEntity),
 		"reason": "unprocessable_entity",
-		"fields": []any{
+		"details": []any{
 			map[string]any{
 				"field":  "name",
 				"in":     "body",
@@ -103,11 +103,11 @@ func TestWriteErrorUsesExplicitTopCodeAndDetailDerivedMessage(t *testing.T) {
 	if got := errorValue["reason"]; got != "invalid_json" {
 		t.Fatalf("error.reason = %#v, want invalid_json", got)
 	}
-	fields, ok := errorValue["fields"].([]any)
-	if !ok || len(fields) != 1 {
-		t.Fatalf("fields = %#v, want 1 item", errorValue["fields"])
+	details, ok := errorValue["details"].([]any)
+	if !ok || len(details) != 1 {
+		t.Fatalf("details = %#v, want 1 item", errorValue["details"])
 	}
-	assertPublicErrorObject(t, fields[0], map[string]any{
+	assertPublicErrorObject(t, details[0], map[string]any{
 		"field":  "name",
 		"code":   "required",
 		"detail": "is required",
@@ -171,24 +171,24 @@ func TestWriteErrorPreservesFieldErrorOrderAndContent(t *testing.T) {
 	if !ok {
 		t.Fatalf("error = %#v, want object", body["error"])
 	}
-	fields, ok := errorValue["fields"].([]any)
-	if !ok || len(fields) != 3 {
-		t.Fatalf("fields = %#v, want 3 items", errorValue["fields"])
+	details, ok := errorValue["details"].([]any)
+	if !ok || len(details) != 3 {
+		t.Fatalf("details = %#v, want 3 items", errorValue["details"])
 	}
 
-	assertPublicErrorObject(t, fields[0], map[string]any{
+	assertPublicErrorObject(t, details[0], map[string]any{
 		"field":  "name",
 		"in":     "body",
 		"code":   "required",
 		"detail": "is required",
 	})
-	assertPublicErrorObject(t, fields[1], map[string]any{
+	assertPublicErrorObject(t, details[1], map[string]any{
 		"field":  "email",
 		"in":     "query",
 		"code":   "invalid",
 		"detail": "is invalid",
 	})
-	assertPublicErrorObject(t, fields[2], map[string]any{
+	assertPublicErrorObject(t, details[2], map[string]any{
 		"field":  "name",
 		"in":     "body",
 		"code":   "invalid",

@@ -7,14 +7,15 @@ import (
 )
 
 // HTTPError 表示 HTTP 边界上的公共错误。
-// cause 仅用于内部保留原始错误链，真正返回给客户端的是
-// title/status/detail/code/errors。
+// 它承载稳定的公开错误语义：status/code/title/detail/errors。
+// 默认 JSON error envelope 会再把这些语义投影为 status/reason/message/details。
+// cause 仅用于内部保留原始错误链，不直接属于公开响应 payload。
 type HTTPError struct {
 	// status 始终收敛到“可公开返回的错误状态码”范围内。
 	status int
 	// code 是机器可读错误码；构造时会做 trim 和缺省补齐。
 	code string
-	// detail 是公开错误详情；缺省时会回退到稳定的标题文案。
+	// detail 是公开错误详情；缺省时会回退到 code 的稳定可读化结果。
 	detail string
 	// errors 是公开结构化错误详情列表；这里固定为 FieldError 列表。
 	errors []FieldError
@@ -29,7 +30,7 @@ func NewHTTPError(status int, code, detail string) *HTTPError {
 }
 
 // NewHTTPErrorWithCause 基于给定 cause 构造公共 HTTP 错误。
-// 非法状态码会被归一化，缺省 code/detail 也会按状态码补全。
+// 非法状态码会被归一化，缺省 code 会按状态码补全，缺省 detail 会基于最终 code 补全。
 // 这里在入口一次性做标准化，保证后续使用时不会因为原始输入脏数据而漂移。
 func NewHTTPErrorWithCause(status int, code, detail string, cause error) *HTTPError {
 	status = normalizeErrorStatus(status)

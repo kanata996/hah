@@ -182,11 +182,11 @@ func fuzzWriteErrorWrappedHTTPErrorContracts(t *testing.T, status int, detail, f
 		t.Fatalf("error.detail unexpectedly present: %#v", errorValue["detail"])
 	}
 
-	fields, ok := errorValue["fields"].([]any)
-	if !ok || len(fields) != 1 {
-		t.Fatalf("fields = %#v, want 1 item", errorValue["fields"])
+	details, ok := errorValue["details"].([]any)
+	if !ok || len(details) != 1 {
+		t.Fatalf("details = %#v, want 1 item", errorValue["details"])
 	}
-	assertPublicErrorObject(t, fields[0], wantField)
+	assertPublicErrorObject(t, details[0], wantField)
 
 	if bytes.Contains(rr.Body.Bytes(), []byte(hiddenCause)) {
 		t.Fatalf("body leaked internal cause: %q", rr.Body.String())

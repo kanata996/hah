@@ -351,14 +351,14 @@ func assertSingleRootFieldError(t *testing.T, err error) decodedRootFieldError {
 		t.Fatalf("error = %#v, want object", payload["error"])
 	}
 
-	fields, ok := errorValue["fields"].([]any)
-	if !ok || len(fields) != 1 {
-		t.Fatalf("fields = %#v, want single field error", errorValue["fields"])
+	details, ok := errorValue["details"].([]any)
+	if !ok || len(details) != 1 {
+		t.Fatalf("details = %#v, want single field error", errorValue["details"])
 	}
 
-	fieldErrorMap, ok := fields[0].(map[string]any)
+	fieldErrorMap, ok := details[0].(map[string]any)
 	if !ok {
-		t.Fatalf("field error type = %T, want map[string]any", fields[0])
+		t.Fatalf("field error type = %T, want map[string]any", details[0])
 	}
 
 	return decodedRootFieldError{

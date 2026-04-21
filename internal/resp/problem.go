@@ -16,9 +16,9 @@ const (
 )
 
 type errorBody struct {
-	Status int               `json:"status"`
-	Reason string            `json:"reason"`
-	Fields []errx.FieldError `json:"fields,omitempty"`
+	Status  int               `json:"status"`
+	Reason  string            `json:"reason"`
+	Details []errx.FieldError `json:"details,omitempty"`
 }
 
 var encodeErrorEnvelope = func(env responseEnvelope) ([]byte, error) {
@@ -112,8 +112,8 @@ func findHTTPError(err error) *errx.HTTPError {
 
 func newErrorBody(httpErr *errx.HTTPError) *errorBody {
 	return &errorBody{
-		Status: httpErr.Status(),
-		Reason: httpErr.Code(),
-		Fields: httpErr.Errors(),
+		Status:  httpErr.Status(),
+		Reason:  httpErr.Code(),
+		Details: httpErr.Errors(),
 	}
 }
