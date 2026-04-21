@@ -23,11 +23,11 @@
 根包 `hah` 对外的默认响应协议，目标从“只保证 HTTP-first 写回”调整为“HTTP 状态码 + 统一 JSON envelope”：
 
 - 前端与 SDK 不再依赖成功响应的 body 形状判断结果
-- 所有默认响应都收敛为顶层 JSON 对象
+- 所有带 body 的默认响应都收敛为顶层 JSON 对象
 - 顶层固定暴露 `code` 与 `message`
 - 成功与失败分别通过 `data` / `error` 承载具体内容
 - HTTP 状态码仍保持正常语义，不采用“永远 200”
-- 默认协议不再提供 `204 No Content`
+- 默认带 body 的成功协议使用统一 JSON envelope；若调用方显式选择 `NoContent`，可写 `204 No Content`
 
 本文档锁定的是默认业务协议，而不是最底层 JSON 写回能力。
 若最终继续保留 `hah.JSON`，它只应作为不带 envelope 的底层逃生口，不反向约束本文定义的默认协议。
@@ -39,13 +39,17 @@
 默认业务响应协议对外固定提供以下入口：
 
 - `OK(w http.ResponseWriter, data any) error`
+- `Accepted(w http.ResponseWriter, data any) error`
 - `Created(w http.ResponseWriter, data any) error`
+- `NoContent(w http.ResponseWriter) error`
 - `WriteError(w http.ResponseWriter, err error, code ...int) error`
 
 稳定规则：
 
 - `OK` 固定写 `200 OK`
+- `Accepted` 固定写 `202 Accepted`
 - `Created` 固定写 `201 Created`
+- `NoContent` 固定写 `204 No Content`
 - `WriteError` 根据最终公开错误模型写出对应 `4xx` / `5xx`
 - `WriteError` 在未传第三个参数时使用默认顶层 `code`
 - `WriteError` 在传入单个第三参数时使用显式顶层 `code`
@@ -78,7 +82,7 @@
 
 ## 4. 总体模型
 
-默认响应协议固定为顶层 JSON 对象：
+带 body 的默认响应协议固定为顶层 JSON 对象：
 
 ```go
 type Response[T any] struct {
@@ -131,13 +135,14 @@ type FieldError struct {
 成功响应的稳定协议为：
 
 - `OK` 固定使用 `200`
+- `Accepted` 固定使用 `202`
 - `Created` 固定使用 `201`
 - `Content-Type` 为 `application/json`
 - 顶层 `code` 固定为 `0`
 - 顶层 `message` 固定为 `"success"`
 - 有业务数据时写入 `data`
 - 不写 `error`
-- 无数据成功也必须写 envelope，不再使用 `204`
+- 无数据成功也可以继续写 envelope；只有显式调用 `NoContent` 时才写 `204`
 
 示例：
 
@@ -168,8 +173,17 @@ type FieldError struct {
 - 显式 `nil` payload 是否编码为 JSON `null` 不作为稳定契约
 - 具体 JSON 序列化语义仍跟随 `encoding/json`
 - `OK` 的无数据成功允许写 `200` + 不含 `data` 的 envelope
+- `Accepted` 的无数据成功允许写 `202` + 不含 `data` 的 envelope
 - `Created` 的无数据成功允许写 `201` + 不含 `data` 的 envelope
 - 成功 envelope 不承担业务分页、trace、meta 等扩展字段；是否追加额外顶层字段，留待单独设计
+
+显式无响应体成功的稳定协议为：
+
+- `NoContent` 固定使用 `204`
+- `NoContent` 不写响应体
+- `NoContent` 不写 success envelope
+- `NoContent` 在提交前必须清理冲突的 `Content-Type` 与 `Content-Length`
+- `NoContent` 必须保留无关自定义头部
 
 ## 6. 失败响应
 
@@ -324,11 +338,13 @@ type FieldError struct {
 默认协议仍遵循正常 HTTP 语义：
 
 - `OK` 使用 `200`
+- `Accepted` 使用 `202`
 - `Created` 使用 `201`
+- `NoContent` 在显式调用时使用 `204`
 - 失败使用 `4xx` 或 `5xx`
 - 不采用“所有业务错误都返回 `200`”
-- 默认协议不使用 `204 No Content`
-- 无数据成功仍返回 JSON envelope；`OK` 默认使用 `200`，`Created` 默认使用 `201`
+- 默认带 body 的成功协议不使用 `204 No Content`
+- 无数据成功仍可返回 JSON envelope；`OK` 默认使用 `200`，`Accepted` 默认使用 `202`，`Created` 默认使用 `201`
 - 失败时的顶层 `message` 只是 `error` 的摘要投影，不是额外独立错误源
 - 内部 `detail` 可以保留，但对外 `error` JSON 不输出 `detail` / `title`
 - 失败时顶层 `code` 要么显式来自 `WriteError` 的单个第三参数，要么默认来自 `WriteError` 的 `status * 100` 规则
@@ -354,9 +370,10 @@ type FieldError struct {
 后续实现或重构至少覆盖以下代表性黑盒基线：
 
 - 成功响应固定写出 `code = 0` 与 `message = "success"`
-- `OK` 固定写 `200`，`Created` 固定写 `201`
+- `OK` 固定写 `200`，`Accepted` 固定写 `202`，`Created` 固定写 `201`
 - 成功有 payload 时写 `data`；无 payload 时允许省略 `data`
 - 成功 `data` 若存在，支持对象、数组、标量与 `null`
+- `NoContent` 固定写 `204`、清理冲突的 `Content-Type` / `Content-Length`，且响应体为空
 - 任一公开入口在 `w == nil` 时都返回 error，且不得写内容
 - `HEAD` 请求沿用 `net/http` 默认语义
 - 默认协议拥有 `Content-Type` / `Content-Length` 所有权；无关头部保留，冲突 `Content-Type` 覆盖，预设 `Content-Length` 不原样穿透

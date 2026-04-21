@@ -20,7 +20,7 @@
 //     InternalServer
 //   - 公开 field error 常量：Code*、In*
 //   - 错误响应入口：WriteError
-//   - 成功响应入口：JSON、OK、Created、NoContent
+//   - 成功响应入口：JSON、OK、Accepted、Created、NoContent
 //
 // 当前根包是默认且唯一的公开错误/响应边界；只有在请求侧需要更细粒度 builder
 // 或绑定入口时，才退到 reqx.xx。

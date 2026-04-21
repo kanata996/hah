@@ -288,6 +288,34 @@ func TestJSON_DelegatesToResp(t *testing.T) {
 	}
 }
 
+// Accepted 会通过根包 facade 写回标准 202 JSON 响应。
+func TestAccepted_DelegatesToResp(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := Accepted(rr, map[string]any{"id": "u_1"}); err != nil {
+		t.Fatalf("Accepted() error = %v", err)
+	}
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusAccepted)
+	}
+
+	payload := decodeRootPayload(t, rr.Body.Bytes())
+	if got := payload["code"]; got != float64(0) {
+		t.Fatalf("code = %#v, want 0", got)
+	}
+	if got := payload["message"]; got != "success" {
+		t.Fatalf("message = %#v, want success", got)
+	}
+
+	data, ok := payload["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("data = %#v, want object", payload["data"])
+	}
+	if data["id"] != "u_1" {
+		t.Fatalf("data.id = %#v, want u_1", data["id"])
+	}
+}
+
 // Created 会通过根包 facade 写回标准 201 JSON 响应。
 func TestCreated_DelegatesToResp(t *testing.T) {
 	rr := httptest.NewRecorder()
@@ -313,6 +341,33 @@ func TestCreated_DelegatesToResp(t *testing.T) {
 	}
 	if data["id"] != "u_1" {
 		t.Fatalf("data.id = %#v, want u_1", data["id"])
+	}
+}
+
+// NoContent 会通过根包 facade 写回标准 204 无响应体成功响应。
+func TestNoContent_DelegatesToResp(t *testing.T) {
+	rr := httptest.NewRecorder()
+	rr.Header().Set("X-Trace-ID", "trace-1")
+	rr.Header().Set("Content-Type", "application/json")
+	rr.Header().Set("Content-Length", "999")
+
+	if err := NoContent(rr); err != nil {
+		t.Fatalf("NoContent() error = %v", err)
+	}
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusNoContent)
+	}
+	if rr.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty", rr.Body.String())
+	}
+	if got := rr.Header().Get("X-Trace-ID"); got != "trace-1" {
+		t.Fatalf("X-Trace-ID = %q, want trace-1", got)
+	}
+	if got := rr.Header().Get("Content-Type"); got != "" {
+		t.Fatalf("Content-Type = %q, want empty", got)
+	}
+	if got := rr.Header().Get("Content-Length"); got != "" {
+		t.Fatalf("Content-Length = %q, want empty", got)
 	}
 }
 

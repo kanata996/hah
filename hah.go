@@ -127,7 +127,17 @@ func OK(w http.ResponseWriter, data any) error {
 	return resp.OK(w, data)
 }
 
+// Accepted 写回 202 成功响应。
+func Accepted(w http.ResponseWriter, data any) error {
+	return resp.Accepted(w, data)
+}
+
 // Created 写回 201 成功响应。
 func Created(w http.ResponseWriter, data any) error {
 	return resp.Created(w, data)
+}
+
+// NoContent 写回 204 无响应体成功响应。
+func NoContent(w http.ResponseWriter) error {
+	return resp.NoContent(w)
 }

@@ -122,7 +122,7 @@ func main() {
 - 用 `hah.Path(...)` / `hah.Query(...)` 读取单字段 path/query 参数
 - 用 `hah.BindQuery(...)` / `hah.BindBody(...)` 绑定 DTO
 - 用 `hah.InvalidRequest(...)` 补充显式请求规则
-- 用 `hah.WriteError(...)` / `hah.OK(...)` / `hah.Created(...)` 写回响应
+- 用 `hah.WriteError(...)` / `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)` / `hah.NoContent(...)` 写回响应
 
 ## 公开 API 速览
 
@@ -145,7 +145,8 @@ DTO binding 与显式规则：
 - `hah.FieldError`、`hah.HTTPError`、`hah.NewHTTPError(...)`、`hah.NewHTTPErrorWithCause(...)` 是根包暴露的公共错误模型入口
 - `hah.BadRequest(...)`、`hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)`、`hah.InternalServer(...)` 等快捷构造器适合在已明确公开错误语义的更深层直接返回
 - `hah.WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成统一 JSON error envelope
-- `hah.OK(...)` / `hah.Created(...)` 会写默认成功 envelope：顶层固定 `code = 0`、`message = "success"`，业务数据放在可选 `data`
+- `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)` 会写默认成功 envelope：顶层固定 `code = 0`、`message = "success"`，业务数据放在可选 `data`
+- `hah.NoContent(...)` 会显式写 `204 No Content`，同时清理冲突的 `Content-Type` / `Content-Length`
 - `hah.WriteError(...)` 会写默认错误 envelope：顶层 `code` 是五位业务错误码，未显式传入时按 `status * 100` 生成；顶层 `message` 直接来自 `hah.HTTPError.Detail()`
 - 默认错误 envelope 的 `error` 对象固定包含稳定的 `reason`；如果有 field errors，再按顺序附带 `details`
 - 若 `hah.HTTPError` 未显式提供 `detail`，共享错误模型会基于公开 `reason` 生成默认短语，例如 `internal_error -> "internal error"`
@@ -197,7 +198,8 @@ DTO binding 与显式规则：
 
 - `WriteError(...)` 只负责错误标准化与响应写回，不内建独立错误日志
 - 如果你需要统一的日志或指标策略，在调用方基于原始 error 和业务上下文自行处理
-- 默认成功协议只提供 `OK(...)` 与 `Created(...)`；无 payload 成功也会返回 envelope，而不是 `204 No Content`
+- 默认带 body 的成功协议提供 `OK(...)` / `Accepted(...)` / `Created(...)`；无 payload 成功也允许继续返回 envelope
+- 只有显式调用 `NoContent(...)` 时，才会写 `204 No Content` 且不返回响应体
 - 默认错误协议不输出 `error.title` / `error.detail` / `error.code`；稳定错误类型统一看 `error.reason`
 - `WriteError(w, err)` 的默认顶层错误码固定按 `status * 100` 生成；`WriteError(w, err, code)` 只接受单个五位正整数业务码
 - `HEAD` 场景沿用 `net/http` 默认语义：handler 正常写回，对外是否发送响应体由底层决定
