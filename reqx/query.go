@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/internal/errx"
 )
 
 // QueryParam 表示一个待解析的 query 单参数。
@@ -20,7 +19,7 @@ func Query(r *http.Request, name string) *QueryParam {
 		spec: paramSpec{
 			r:      r,
 			name:   strings.TrimSpace(name),
-			input:  errx.InQuery,
+			input:  InQuery,
 			lookup: queryParamValues,
 		},
 	}

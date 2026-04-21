@@ -10,8 +10,6 @@ import (
 	"strconv"
 	"testing"
 	"time"
-
-	"github.com/kanata996/hah/internal/errx"
 )
 
 func TestQueryTypedBuilder_Contracts(t *testing.T) {
@@ -19,10 +17,10 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?page=5&page=9", nil)
 
 		_, err := Query(req, "page").Int().Get()
-		assertFieldError(t, err, errx.FieldError{
+		assertFieldError(t, err, FieldError{
 			Field:  "page",
-			In:     errx.InQuery,
-			Code:   errx.CodeMultiple,
+			In:     InQuery,
+			Code:   CodeMultiple,
 			Detail: "must appear only once",
 		})
 	})
@@ -53,7 +51,7 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 		_, err := Query(req, "page").Int().
 			Check(func(int) error { return errors.New("must be even") }).
 			Get()
-		assertInvalidFieldErrorAt(t, err, "page", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "page", InQuery)
 	})
 
 	t.Run("default validation failure is usage error", func(t *testing.T) {
@@ -93,7 +91,7 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?sec=123", nil)
 
 		_, err := Query(req, "sec").UnixTime().Get()
-		assertInvalidFieldErrorAt(t, err, "sec", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "sec", InQuery)
 	})
 
 	t.Run("unix time requires exactly 10 decimal digits", func(t *testing.T) {
@@ -102,7 +100,7 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/items?sec="+url.QueryEscape(raw), nil)
 
 				_, err := Query(req, "sec").UnixTime().Get()
-				assertInvalidFieldErrorAt(t, err, "sec", errx.InQuery)
+				assertInvalidFieldErrorAt(t, err, "sec", InQuery)
 			})
 		}
 	})
@@ -111,19 +109,21 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?at=2026-04-13T10:00:00,123Z", nil)
 
 		_, err := Query(req, "at").Time().Get()
-		assertInvalidFieldErrorAt(t, err, "at", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "at", InQuery)
 	})
 
 	t.Run("time rejects invalid rfc3339 offsets", func(t *testing.T) {
 		for _, raw := range []string{
 			"2026-04-13T10:00:00+08:60",
 			"2026-04-13T10:00:00+24:00",
+			"2026-04-13T10:00:00-00:60",
+			"2026-04-13T10:00:00-24:00",
 		} {
 			t.Run(raw, func(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/items?at="+url.QueryEscape(raw), nil)
 
 				_, err := Query(req, "at").Time().Get()
-				assertInvalidFieldErrorAt(t, err, "at", errx.InQuery)
+				assertInvalidFieldErrorAt(t, err, "at", InQuery)
 			})
 		}
 	})
@@ -132,7 +132,19 @@ func TestQueryTypedBuilder_Contracts(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/items?at=2026-13-13T10:00:00Z", nil)
 
 		_, err := Query(req, "at").Time().Get()
-		assertInvalidFieldErrorAt(t, err, "at", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "at", InQuery)
+	})
+
+	t.Run("time accepts fractional seconds and negative offsets", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/items?at="+url.QueryEscape("2026-04-13T10:00:00.123456789-07:30"), nil)
+
+		got, err := Query(req, "at").Time().Get()
+		if err != nil {
+			t.Fatalf("Time().Get() error = %v", err)
+		}
+		if got.Format(time.RFC3339Nano) != "2026-04-13T10:00:00.123456789-07:30" {
+			t.Fatalf("at = %q, want 2026-04-13T10:00:00.123456789-07:30", got.Format(time.RFC3339Nano))
+		}
 	})
 }
 
@@ -199,7 +211,7 @@ func TestQueryBuilder_BaselineContracts(t *testing.T) {
 			Required().
 			Required().
 			Get()
-		assertRequiredFieldErrorAt(t, err, "page", errx.InQuery)
+		assertRequiredFieldErrorAt(t, err, "page", InQuery)
 
 		got, err := Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
 			Default(1).
@@ -331,7 +343,7 @@ func TestQueryStringAndMultiValueContracts(t *testing.T) {
 		}
 
 		_, err = Query(req, "mode").String().MinLen(2).Get()
-		assertInvalidFieldErrorAt(t, err, "mode", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "mode", InQuery)
 	})
 
 	t.Run("values required and check are enforced", func(t *testing.T) {
@@ -354,7 +366,7 @@ func TestQueryStringAndMultiValueContracts(t *testing.T) {
 		}
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "tag").Values().Required().Get()
-		assertRequiredFieldErrorAt(t, err, "tag", errx.InQuery)
+		assertRequiredFieldErrorAt(t, err, "tag", InQuery)
 	})
 }
 

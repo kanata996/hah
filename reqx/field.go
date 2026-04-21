@@ -10,8 +10,33 @@ import (
 //
 // 这里承载的能力包括：
 //   - 公开的顶层错误码常量
+//   - 公开的 field error 类型和输入位置常量
 //   - request-side field error 默认 detail 规范化
 //   - 422 invalid_request 错误的统一构造
+
+type (
+	// FieldErrorCode 描述公开字段错误码。
+	FieldErrorCode = errx.FieldErrorCode
+	// FieldErrorIn 描述公开字段错误来源。
+	FieldErrorIn = errx.FieldErrorIn
+	// FieldError 描述单个公开字段错误。
+	FieldError = errx.FieldError
+)
+
+const (
+	CodeInvalid  = errx.CodeInvalid
+	CodeRequired = errx.CodeRequired
+	CodeUnknown  = errx.CodeUnknown
+	CodeType     = errx.CodeType
+	CodeMultiple = errx.CodeMultiple
+)
+
+const (
+	InBody   = errx.InBody
+	InQuery  = errx.InQuery
+	InPath   = errx.InPath
+	InHeader = errx.InHeader
+)
 
 const invalidRequestCode = "invalid_request"
 const invalidRequestDetail = "request contains invalid fields"
@@ -25,8 +50,8 @@ const (
 )
 
 // InvalidRequest 生成统一的 invalid_request 错误包络。
-func InvalidRequest(fieldErrors ...errx.FieldError) error {
-	normalized := make([]errx.FieldError, len(fieldErrors))
+func InvalidRequest(fieldErrors ...FieldError) error {
+	normalized := make([]FieldError, len(fieldErrors))
 	for i := range fieldErrors {
 		normalized[i] = normalizeFieldError(fieldErrors[i])
 	}
@@ -37,8 +62,8 @@ func InvalidRequest(fieldErrors ...errx.FieldError) error {
 	).WithFieldErrors(normalized)
 }
 
-func newFieldError(field string, input errx.FieldErrorIn, code errx.FieldErrorCode, detail string) errx.FieldError {
-	return errx.FieldError{
+func newFieldError(field string, input FieldErrorIn, code FieldErrorCode, detail string) FieldError {
+	return FieldError{
 		Field:  field,
 		In:     input,
 		Code:   code,
@@ -46,9 +71,9 @@ func newFieldError(field string, input errx.FieldErrorIn, code errx.FieldErrorCo
 	}
 }
 
-func normalizeFieldError(fieldError errx.FieldError) errx.FieldError {
+func normalizeFieldError(fieldError FieldError) FieldError {
 	if fieldError.Code == "" {
-		fieldError.Code = errx.CodeInvalid
+		fieldError.Code = CodeInvalid
 	}
 	if fieldError.Detail != "" {
 		return fieldError
@@ -57,15 +82,15 @@ func normalizeFieldError(fieldError errx.FieldError) errx.FieldError {
 	return fieldError
 }
 
-func defaultFieldErrorDetail(code errx.FieldErrorCode) string {
+func defaultFieldErrorDetail(code FieldErrorCode) string {
 	switch code {
-	case errx.CodeRequired:
+	case CodeRequired:
 		return fieldErrorDetailRequired
-	case errx.CodeUnknown:
+	case CodeUnknown:
 		return fieldErrorDetailUnknownField
-	case errx.CodeType:
+	case CodeType:
 		return fieldErrorDetailInvalidType
-	case errx.CodeMultiple:
+	case CodeMultiple:
 		return fieldErrorDetailMustNotRepeat
 	default:
 		return fieldErrorDetailInvalid

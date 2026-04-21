@@ -14,6 +14,7 @@ import (
 )
 
 const defaultMaxBodyBytes int64 = 1 << 20
+const maxConsecutiveEmptyBodyReads = 100
 
 const (
 	CodeInvalidJSON          = "invalid_json"
@@ -152,7 +153,7 @@ var errDuplicateContentType = errors.New("reqx: multiple Content-Type values")
 
 // 只多读 1 个字节来判断是否超限，避免为大小检查引入更复杂的状态管理。
 func readBody(body io.ReadCloser) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(body, defaultMaxBodyBytes+1))
+	data, err := io.ReadAll(io.LimitReader(newProgressReader(body), defaultMaxBodyBytes+1))
 	if err != nil {
 		return nil, err
 	}
@@ -160,4 +161,27 @@ func readBody(body io.ReadCloser) ([]byte, error) {
 		return nil, errRequestTooLarge
 	}
 	return data, nil
+}
+
+type progressReader struct {
+	reader     io.Reader
+	emptyReads int
+}
+
+func newProgressReader(reader io.Reader) *progressReader {
+	return &progressReader{reader: reader}
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.reader.Read(p)
+	if n != 0 || err != nil {
+		r.emptyReads = 0
+		return n, err
+	}
+
+	r.emptyReads++
+	if r.emptyReads >= maxConsecutiveEmptyBodyReads {
+		return 0, io.ErrNoProgress
+	}
+	return 0, nil
 }

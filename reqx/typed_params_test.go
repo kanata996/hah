@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/kanata996/hah/internal/errx"
 )
 
 func TestQueryTypedBuilder_ScalarParsersAndConstraints(t *testing.T) {
@@ -95,7 +94,7 @@ func TestQueryTypedBuilder_ScalarParsersAndConstraints(t *testing.T) {
 				req := httptest.NewRequest(http.MethodGet, "/items?score="+url.QueryEscape(raw), nil)
 
 				_, err := Query(req, "score").Float64().Get()
-				assertInvalidFieldErrorAt(t, err, "score", errx.InQuery)
+				assertInvalidFieldErrorAt(t, err, "score", InQuery)
 			})
 		}
 	})
@@ -247,7 +246,7 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 		_, err := Query(httptest.NewRequest(http.MethodGet, "/items?mode=go", nil), "mode").String().
 			MinLen(3).
 			Get()
-		assertInvalidFieldErrorAt(t, err, "mode", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "mode", InQuery)
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "mode").String().
 			MinLen(3).
@@ -258,12 +257,12 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?page=2", nil), "page").Int().
 			Min(3).
 			Get()
-		assertInvalidFieldErrorAt(t, err, "page", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "page", InQuery)
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?page=4", nil), "page").Int().
 			Max(3).
 			Get()
-		assertInvalidFieldErrorAt(t, err, "page", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "page", InQuery)
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items", nil), "page").Int().
 			Min(4).
@@ -349,10 +348,10 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 				return nil
 			}).
 			Get()
-		assertFieldError(t, err, errx.FieldError{
+		assertFieldError(t, err, FieldError{
 			Field:  "page",
-			In:     errx.InQuery,
-			Code:   errx.CodeMultiple,
+			In:     InQuery,
+			Code:   CodeMultiple,
 			Detail: "must appear only once",
 		})
 		if checkCalled {
@@ -370,7 +369,7 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 				return nil
 			}).
 			Get()
-		assertInvalidFieldErrorAt(t, err, "mode", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "mode", InQuery)
 		if checkCalled {
 			t.Fatal("Check() ran after OneOf() failure")
 		}
@@ -383,7 +382,7 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 				return nil
 			}).
 			Get()
-		assertInvalidFieldErrorAt(t, err, "mode", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "mode", InQuery)
 		if checkCalled {
 			t.Fatal("Check() ran after Match() failure")
 		}
@@ -403,13 +402,13 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 		}
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?id=not-a-uuid", nil), "id").UUID().Get()
-		assertInvalidFieldErrorAt(t, err, "id", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "id", InQuery)
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?wait=5", nil), "wait").Duration().Get()
-		assertInvalidFieldErrorAt(t, err, "wait", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "wait", InQuery)
 
 		_, err = Query(httptest.NewRequest(http.MethodGet, "/items?enabled=", nil), "enabled").Bool().Get()
-		assertInvalidFieldErrorAt(t, err, "enabled", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "enabled", InQuery)
 	})
 
 	t.Run("time before accepts earlier values and default then required stays usage error", func(t *testing.T) {
@@ -483,7 +482,7 @@ func TestQueryBuilder_AdditionalBaselineContracts(t *testing.T) {
 				return nil
 			}).
 			Get()
-		assertRequiredFieldErrorAt(t, err, "tag", errx.InQuery)
+		assertRequiredFieldErrorAt(t, err, "tag", InQuery)
 		if checkCalled {
 			t.Fatal("Values().Check() ran after required field error")
 		}
@@ -502,7 +501,7 @@ func TestQueryBuilder_BuiltInConstraintsRunBeforeCustomChecks(t *testing.T) {
 			}).
 			Min(2).
 			Get()
-		assertInvalidFieldErrorAt(t, err, "page", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "page", InQuery)
 		if checkCalled {
 			t.Fatal("Check() ran after built-in min rejection")
 		}
@@ -519,7 +518,7 @@ func TestQueryBuilder_BuiltInConstraintsRunBeforeCustomChecks(t *testing.T) {
 			}).
 			MaxLen(1).
 			Get()
-		assertInvalidFieldErrorAt(t, err, "mode", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "mode", InQuery)
 		if checkCalled {
 			t.Fatal("Check() ran after built-in max length rejection")
 		}
@@ -537,7 +536,7 @@ func TestQueryBuilder_BuiltInConstraintsRunBeforeCustomChecks(t *testing.T) {
 			}).
 			After(boundary.Add(time.Hour)).
 			Get()
-		assertInvalidFieldErrorAt(t, err, "at", errx.InQuery)
+		assertInvalidFieldErrorAt(t, err, "at", InQuery)
 		if checkCalled {
 			t.Fatal("Check() ran after built-in time rejection")
 		}
@@ -560,6 +559,13 @@ func TestQueryTimeParam_EqualBoundariesAreRejected(t *testing.T) {
 			},
 		},
 		{
+			name: "rfc3339 same instant with different offset",
+			raw:  "2026-04-13T18:00:00+08:00",
+			build: func(p *QueryParam) *TimeParam {
+				return p.Time()
+			},
+		},
+		{
 			name: "unix time",
 			raw:  strconv.FormatInt(boundary.Unix(), 10),
 			build: func(p *QueryParam) *TimeParam {
@@ -573,14 +579,14 @@ func TestQueryTimeParam_EqualBoundariesAreRejected(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/items?at="+tc.raw, nil)
 
 			_, err := tc.build(Query(req, "at")).After(boundary).Get()
-			assertInvalidFieldErrorAt(t, err, "at", errx.InQuery)
+			assertInvalidFieldErrorAt(t, err, "at", InQuery)
 		})
 
 		t.Run(tc.name+"/before", func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/items?at="+tc.raw, nil)
 
 			_, err := tc.build(Query(req, "at")).Before(boundary).Get()
-			assertInvalidFieldErrorAt(t, err, "at", errx.InQuery)
+			assertInvalidFieldErrorAt(t, err, "at", InQuery)
 		})
 	}
 }

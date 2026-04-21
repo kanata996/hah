@@ -8,6 +8,7 @@
 
 - `hah.Path(...)` / `hah.Query(...)` 是默认请求侧 API
 - `hah.BindQuery(...)` / `hah.BindBody(...)` 是默认 DTO 绑定入口
+- `reqx` 暴露同一套 request-side 原生入口，并承载 `FieldError` / `Code*` / `In*` 这组输入错误公开契约；`hah` 继续做兼容 facade
 
 ## 先看选型
 

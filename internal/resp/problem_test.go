@@ -151,6 +151,28 @@ func TestWriteErrorUsesExplicitDetailEvenWhenItMatchesTitle(t *testing.T) {
 	})
 }
 
+func TestWriteErrorOmitsEmptyDetails(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	if err := WriteError(rr, errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid").WithFieldErrors([]errx.FieldError{})); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	assertErrorEnvelopeBasics(t, rr, http.StatusBadRequest, 40000, "payload invalid")
+
+	body := decodePayload(t, rr.Body.Bytes())
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
+	}
+	if _, exists := errorValue["details"]; exists {
+		t.Fatalf("error.details unexpectedly present: %#v", errorValue["details"])
+	}
+	assertPublicErrorObject(t, errorValue, map[string]any{
+		"reason": "invalid_json",
+	})
+}
+
 func TestWriteErrorPreservesFieldErrorOrderAndContent(t *testing.T) {
 	rr := httptest.NewRecorder()
 
@@ -212,6 +234,29 @@ func TestWriteErrorUsesCustomAsHTTPError(t *testing.T) {
 	}
 	assertPublicErrorObject(t, errorValue, map[string]any{
 		"reason": "unauthorized",
+	})
+}
+
+func TestWriteErrorPrefersFirstHTTPErrorInJoinedChain(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	input := errors.Join(
+		errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid"),
+		errx.NewHTTPError(http.StatusForbidden, "forbidden", "access denied"),
+	)
+	if err := WriteError(rr, input); err != nil {
+		t.Fatalf("WriteError() error = %v", err)
+	}
+
+	assertErrorEnvelopeBasics(t, rr, http.StatusBadRequest, 40000, "payload invalid")
+
+	body := decodePayload(t, rr.Body.Bytes())
+	errorValue, ok := body["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want object", body["error"])
+	}
+	assertPublicErrorObject(t, errorValue, map[string]any{
+		"reason": "invalid_json",
 	})
 }
 
@@ -321,6 +366,29 @@ func TestWriteErrorMapsContextAndUnknownErrors(t *testing.T) {
 		errorValue := body["error"].(map[string]any)
 		assertPublicErrorObject(t, errorValue, map[string]any{
 			"reason": "forbidden",
+		})
+	})
+
+	t.Run("typed nil http error becomes internal error without panic", func(t *testing.T) {
+		var typedNil *errx.HTTPError
+		rr := httptest.NewRecorder()
+
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				t.Fatalf("WriteError() panicked: %v", recovered)
+			}
+		}()
+
+		if err := WriteError(rr, typedNil); err != nil {
+			t.Fatalf("WriteError() error = %v", err)
+		}
+
+		assertErrorEnvelopeBasics(t, rr, http.StatusInternalServerError, 50000, "internal error")
+
+		body := decodePayload(t, rr.Body.Bytes())
+		errorValue := body["error"].(map[string]any)
+		assertPublicErrorObject(t, errorValue, map[string]any{
+			"reason": "internal_error",
 		})
 	})
 

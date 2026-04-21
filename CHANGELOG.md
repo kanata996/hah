@@ -13,6 +13,24 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.8.5] - 2026-04-22
+
+### Changed
+
+- Moved the request-side public field-error surface under `reqx`: `reqx.FieldError`, `reqx.Code*`, and `reqx.In*` are now the canonical input-contract entry points, while the root `hah` package remains a compatibility facade exposing the same values and types.
+
+### Fixed
+
+- Restored the no-progress body-read guard in `reqx.BindBody(...)` / `hah.BindBody(...)` so wrapped request bodies that repeatedly return `(0, nil)` now fail with an ordinary `io.ErrNoProgress` instead of hanging until a later transport error.
+
+### Documentation
+
+- Refreshed `README.md`, `REQUESTS.md`, `reqx` package docs, and the response design doc to clarify that `reqx` owns the request-side field-error contract and that field-level text in the default error envelope is exposed as `detail`.
+
+### Testing
+
+- Added regression coverage for the `reqx.InvalidRequest(...)` public field-error surface, time-parameter decoding edge cases, and no-progress body readers, plus expanded `internal/resp` contract and fuzz coverage for joined HTTP errors, empty error details, success-envelope writers, and `NoContent(...)`.
+
 ## [v0.8.4] - 2026-04-21
 
 ### Added

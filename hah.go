@@ -9,23 +9,23 @@ import (
 )
 
 const (
-	CodeInvalid  = errx.CodeInvalid
-	CodeRequired = errx.CodeRequired
-	CodeUnknown  = errx.CodeUnknown
-	CodeType     = errx.CodeType
-	CodeMultiple = errx.CodeMultiple
+	CodeInvalid  = reqx.CodeInvalid
+	CodeRequired = reqx.CodeRequired
+	CodeUnknown  = reqx.CodeUnknown
+	CodeType     = reqx.CodeType
+	CodeMultiple = reqx.CodeMultiple
 )
 
 const (
-	InBody   = errx.InBody
-	InQuery  = errx.InQuery
-	InPath   = errx.InPath
-	InHeader = errx.InHeader
+	InBody   = reqx.InBody
+	InQuery  = reqx.InQuery
+	InPath   = reqx.InPath
+	InHeader = reqx.InHeader
 )
 
 type (
 	// FieldError 描述单个公开字段错误。
-	FieldError = errx.FieldError
+	FieldError = reqx.FieldError
 	// HTTPError 表示 HTTP 边界上的公共错误。
 	HTTPError = errx.HTTPError
 )

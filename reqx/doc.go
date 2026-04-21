@@ -4,6 +4,9 @@
 //   - 单字段 path/query helper：Path、Query
 //   - DTO binder：BindQuery、BindBody
 //   - 请求级显式规则：InvalidRequest
+//   - request-side field error 公开模型：FieldError、FieldErrorCode、FieldErrorIn、Code*、In*
+//
+// reqx 是请求输入侧的原生入口；根包 hah 只保留面向常见 handler 场景的兼容 facade。
 //
 // Path / Query 是请求侧主路径。它们暴露两个 source root：
 //   - PathParam
