@@ -1,7 +1,6 @@
 package resp
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -39,7 +38,7 @@ func WriteError(w http.ResponseWriter, err error, code ...int) error {
 		return errNilResponseWriter
 	}
 
-	httpErr := normalizeHTTPError(err)
+	httpErr := errx.NormalizeHTTPError(err)
 	if !topCodeSet {
 		topCode = httpErr.Status() * defaultErrorCodeScale
 	}
@@ -68,45 +67,6 @@ func normalizeTopCode(code []int) (value int, ok bool, err error) {
 	default:
 		return 0, false, errors.New("resp: WriteError accepts at most one top-level error code")
 	}
-}
-
-func normalizeHTTPError(err error) *errx.HTTPError {
-	if httpErr := findHTTPError(err); httpErr != nil {
-		return httpErr
-	}
-
-	switch {
-	case errors.Is(err, context.Canceled):
-		return errx.NewHTTPError(499, "", "")
-	case errors.Is(err, context.DeadlineExceeded):
-		return errx.NewHTTPError(http.StatusGatewayTimeout, "", "")
-	default:
-		return errx.NewHTTPError(http.StatusInternalServerError, "", "")
-	}
-}
-
-func findHTTPError(err error) *errx.HTTPError {
-	if err == nil {
-		return nil
-	}
-
-	var httpErr *errx.HTTPError
-	if errors.As(err, &httpErr) && httpErr != nil {
-		return httpErr
-	}
-
-	switch wrapped := err.(type) {
-	case interface{ Unwrap() []error }:
-		for _, child := range wrapped.Unwrap() {
-			if httpErr := findHTTPError(child); httpErr != nil {
-				return httpErr
-			}
-		}
-	case interface{ Unwrap() error }:
-		return findHTTPError(wrapped.Unwrap())
-	}
-
-	return nil
 }
 
 func newErrorBody(httpErr *errx.HTTPError) *errorBody {
