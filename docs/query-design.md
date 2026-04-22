@@ -46,6 +46,7 @@ limit, err := Query(r, "limit").Int().Get()
 - `Query(...)` 不做 DTO 投影
 - `Query(...)` 不做多字段组合校验
 - `Query(...)` 不额外扫描整条 raw query 的全局合法性
+- `Query(...)` 只对当前显式读取的 key 负责；未被本次调用读取的其他 query 参数即使未知、重复或不可解析，也不在它的默认职责内
 
 ### 2.2 缺失、单值、重复值
 
@@ -73,6 +74,7 @@ limit, err := Query(r, "limit").Int().Get()
 - 数据只从 `request.URL` 的 query source 读取
 - `request.URL == nil` 视为“没有 query 参数”
 - query 的解码语义跟随 `net/url`
+- 对其他未读取 key 的存在性、重复值或全局 raw query 合法性，不提供额外的 source-level 审计
 
 ### 3.2 支持类型表
 
@@ -191,7 +193,8 @@ limit, err := Query(r, "limit").Int().Get()
 
 - `Query(...)` 是单字段 helper；`BindQuery(...)` 是 DTO binder
 - 两者共享“空字符串视为已提交参数”“单值入口拒绝重复 key”“默认忽略未知 key”这些方向上的输入模型
-- `Query(...)` 不为读取单个 key 额外扫描整条 raw query 的全局合法性
+- `Query(...)` 不为读取单个 key 额外扫描整条 raw query 的全局合法性；它默认允许“只读取你关心的那个参数，并忽略其他未消费输入”
+- 如果调用方需要对当前请求 query source 的整体可接受性负责，应使用 `BindQuery(...)` 或自行做更高层校验
 - 顶层错误模型和 field error 词汇由 `hah` 提供；默认响应写回也由 `hah` 决定
 
 ## 6. 测试基线

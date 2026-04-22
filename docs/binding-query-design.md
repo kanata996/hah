@@ -32,6 +32,7 @@
 - 只支持顶层平铺字段
 - 只支持单值 query 模型
 - 把 DTO 形状错误与客户端输入错误区分开
+- 作为整条 query source 的批量绑定入口，对当前请求 query 输入的整体可接受性负责
 
 ## 2. 心智模型
 
@@ -149,6 +150,10 @@ type ListAccountsQuery struct {
 - 参数存在但首值为空字符串时，仍视为“已提交参数”
 - 只有 `string`、底层为 `string` 的命名标量及其一级指针接受空字符串；其他受支持类型把空字符串当解析失败处理
 
+与单字段 helper `Query(...)` 不同，`BindQuery(...)` 不是“只取当前关心字段”的局部读取工具。
+一旦调用它，就表示当前 handler 选择对这次请求的 query source 做一次批量投影；
+因此 raw query 非法、重复 key 或参与绑定字段不可解码，都属于当前入口要拒绝的客户端输入。
+
 ### 3.5 `map[string]string` target
 
 对 `*map[string]string` 的规则固定为：
@@ -194,6 +199,7 @@ type ListAccountsQuery struct {
 - `BindQuery(...)` 与 `Query(...)` 共享“空字符串视为已提交参数”“单值入口拒绝重复值”的输入方向
 - `BindQuery(...)` 是 DTO binder；`Query(...)` 是单字段 helper
 - `BindQuery(...)` 比 `Query(...)` 更严格，因为它还要处理 DTO 规则、整条 query source 和一次性提交语义
+- `Query(...)` 允许“只读取显式关心的 key，并忽略其他未消费 query 输入”；`BindQuery(...)` 则承担当前 query source 的整体绑定责任
 - 顶层错误模型来自 `hah.HTTPError`；对外如何写成默认错误 envelope 也由 `hah.WriteError(...)` 决定
 
 ## 6. 测试基线

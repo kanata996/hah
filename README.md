@@ -133,6 +133,7 @@ func main() {
 - `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`；其中 `Time()` 要求严格 RFC3339 时间戳语法，`UnixTime()` 只接受恰好 10 个十进制数字
 - `hah.Query(...).String()` / `Int()` / `UUID()` 等单值 helper 在重复 query key 上会返回稳定 `invalid_request`
 - `hah.Query(...).Values()` 可直接读取同名 query 参数的全部解析后值；如果你需要批量结构化解码，优先用 `hah.BindQuery(...)`
+- `hah.Query(...)` 是单参数 helper，只对当前显式读取的 key 负责；其他未消费 query 参数默认不会触发额外报错
 
 DTO binding 与显式规则：
 
@@ -185,6 +186,7 @@ DTO binding 与显式规则：
 - `hah.Query(...).Time()` 以及 `BindQuery(...)` 中的 `time.Time` / `*time.Time` 字段都要求严格 RFC3339 时间戳语法，且时区 offset 必须合法
 - `hah.BindQuery(...)` 默认忽略未知 query key；同名 query key 只要出现多个值就返回稳定 `400 bad_request`
 - malformed raw query 返回稳定 `400 bad_request` 且不修改 target；DTO 或 tag 形状非法时，先返回普通错误且不修改 target
+- `hah.BindQuery(...)` 的严格度高于 `hah.Query(...)`：它是整条 query source 的批量绑定入口，因此需要对 raw query 合法性和参与绑定字段的可解码性负责
 - `hah.BindBody(...)` 公开只支持非 `nil`、且根 DTO 不自定义 `UnmarshalJSON` 的 `*struct` target
 - 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
 - 零字节 body 不要求 `Content-Type` 为 JSON

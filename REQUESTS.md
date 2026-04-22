@@ -82,6 +82,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 - `Check(...)` 作为通用兜底校验；返回的非 nil error 会映射成 `invalid` field error
 - `Get()` 返回最终值；参数存在但解析失败或校验失败时，返回 `invalid_request`
 - `?name=` 这类空串算“存在”；如果要限制空串，配合 `MinLen(1)`、`Match(...)` 或 `Check(...)`
+- `Query(...)` 只对当前显式读取的 key 负责；如果其他 query 参数未被本次调用读取，它们默认不会触发额外报错
 
 这套 `Path / Query` 分工是当前请求侧核心设计：
 
@@ -130,6 +131,10 @@ if err := hah.BindQuery(r, &query); err != nil {
 - 缺失参数不会继承已绑定字段的旧值，而是回到这些字段的零值状态
 - DTO/tag 形状本身非法时，先返回普通错误，并保证 target 零修改
 - 对 `struct` target，绑定先在临时对象里重建参与绑定的字段；客户端输入错误下不会部分污染 DTO
+
+这里的严格度故意高于 `hah.Query(...)`。
+`hah.Query(...)` 是单 key 局部读取 helper；`hah.BindQuery(...)` 则表示当前 handler 正在对这次请求的 query source 做一次批量绑定。
+因此 malformed raw query、重复 key 和参与绑定字段的解析失败，都属于 `BindQuery(...)` 要直接拒绝的客户端输入。
 
 它适合“批量投影”，不适合表达请求级规则。像 `Required`、`Default`、`OneOf`、`Min/Max` 这类规则，仍然优先放在 `hah.Query(...)` 或绑定后的显式校验里。
 它也不打算演进成通用 form/query decoder：不以支持嵌套 DTO、slice/map、多值自动投影、`TextUnmarshaler` 泛化或 tag 驱动校验为目标。
