@@ -79,6 +79,8 @@
 - `WriteError(w, err)` 在失败响应中必须最终收敛出非空 `error.reason`
 - `WriteError(w, err, code1, code2, ...)` 必须在首次提交前返回 error
 - `WriteError(w, err, code)` 中非五位或 `code <= 0` 的值必须在首次提交前返回 error
+- `WriteError(w, err)` 会优先选择错误链中第一个可见的公共 `HTTPError`
+- 若错误链中不存在公共 `HTTPError`，则依次按 `context canceled`、`context deadline exceeded`、通用 `internal error` 兜底
 
 ## 4. 总体模型
 
@@ -318,6 +320,9 @@ type FieldError struct {
 - 顶层 `message` 直接对应 `hah.HTTPError.Detail()`
 - `hah.HTTPError.Code()` 必须能提供非空 `reason`
 - `hah.HTTPError.Title()` 不再映射到公开 JSON 字段，也不参与 `message` 计算；若当前模型仍保留 `Title()`，它只属于内部兼容信息
+
+`WriteError(...)` 选择错误对象时，不做“最严重优先”“最深层优先”或“最后一个优先”的额外排序。
+当前稳定规则是：沿错误链按可见顺序找到第一个公共 `HTTPError` 就使用它；只有当整条链都没有公共 `HTTPError` 时，才进入 `context` / `internal error` 兜底路径。
 - `error.details` 对应 `hah.HTTPError.Errors()`
 
 字段级错误直接复用 `hah.FieldError` 的 JSON 形状：

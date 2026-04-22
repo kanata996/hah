@@ -145,6 +145,7 @@ DTO binding 与显式规则：
 错误与响应：
 
 - `hah.FieldError`、`hah.HTTPError`、`hah.NewHTTPError(...)`、`hah.NewHTTPErrorWithCause(...)` 是根包暴露的公共错误模型入口
+- `nil` 的 `*hah.HTTPError` receiver 不属于支持的公开使用方式；调用方应只在持有真实错误值时再调用其方法
 - `hah.BadRequest(...)`、`hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)`、`hah.InternalServer(...)` 等快捷构造器适合在已明确公开错误语义的更深层直接返回
 - `hah.WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成统一 JSON error envelope
 - `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)` 会写默认成功 envelope：顶层固定 `code = 0`、`message = "success"`，业务数据放在可选 `data`
@@ -205,6 +206,7 @@ DTO binding 与显式规则：
 - 只有显式调用 `NoContent(...)` 时，才会写 `204 No Content` 且不返回响应体
 - 默认错误协议不输出 `error.title` / `error.detail` / `error.code`；稳定错误类型统一看 `error.reason`
 - `WriteError(w, err)` 的默认顶层错误码固定按 `status * 100` 生成；`WriteError(w, err, code)` 只接受单个五位正整数业务码
+- `WriteError(...)` 会优先选择错误链中第一个可见的公共 `HTTPError`；若不存在，再按 `context canceled`、`deadline exceeded`、`internal error` 兜底
 - `HEAD` 场景沿用 `net/http` 默认语义：handler 正常写回，对外是否发送响应体由底层决定
 - 调用方应在开始写出响应前调用 `WriteError(...)`
 

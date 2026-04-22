@@ -203,6 +203,7 @@
 
 `nil` 的 `*HTTPError` receiver 不属于公开契约。
 调用方不得依赖其任何方法行为；实现可以直接 panic。
+对外公开文档也应避免把 `HTTPError` 描述成“nil-safe 错误对象”。
 
 ## 4. `FieldError` 与 `WithFieldErrors(...)`
 
