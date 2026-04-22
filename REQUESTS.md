@@ -8,7 +8,7 @@
 
 - `hah.Path(...)` / `hah.Query(...)` 是默认请求侧 API
 - `hah.BindQuery(...)` / `hah.BindBody(...)` 是默认 DTO 绑定入口
-- `reqx` 暴露同一套 request-side 原生入口，并承载 `FieldError` / `Code*` / `In*` 这组输入错误公开契约；`hah` 继续做兼容 facade
+- `reqx` 暴露同一套较低层 request-side 原生入口，并承载 `FieldError` / `Code*` / `In*` 这组输入错误公开契约；常规 handler 路径仍优先使用 `hah`
 
 ## 先看选型
 
@@ -88,6 +88,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 - `Path` 代表资源标识型输入，保持窄而清晰
 - `Query` 代表更宽的参数语义，允许 richer scalar helpers 与重复值读取
 - 调整它们的类型面、链式方法或错误语义时，应按核心 public API 变更对待
+- 后续原则上不再轻易增加新的 source root、builder family 或 tag 驱动规则
 
 `Path(...)` 更完整的公开 API、source 语义和错误边界，见 [docs/path-design.md](./docs/path-design.md)。
 
@@ -131,6 +132,7 @@ if err := hah.BindQuery(r, &query); err != nil {
 - 对 `struct` target，绑定先在临时对象里重建参与绑定的字段；客户端输入错误下不会部分污染 DTO
 
 它适合“批量投影”，不适合表达请求级规则。像 `Required`、`Default`、`OneOf`、`Min/Max` 这类规则，仍然优先放在 `hah.Query(...)` 或绑定后的显式校验里。
+它也不打算演进成通用 form/query decoder：不以支持嵌套 DTO、slice/map、多值自动投影、`TextUnmarshaler` 泛化或 tag 驱动校验为目标。
 
 ### body DTO 绑定
 
@@ -187,6 +189,7 @@ if err := hah.BindBody(r, &body); err != nil {
 
 `hah` 不预设 DTO 的校验方式。绑定完成后，调用方自己决定下一步是手写校验、接入第三方库，还是映射到应用层命令再校验。
 多数 handler 直接用 `hah.InvalidRequest(...)`、`hah.FieldError{...}` 就够了；如果你需要更完整的错误构造器族，或某个更深层已经明确要返回稳定公共 HTTP 错误，继续直接使用根包提供的 `hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)`、`hah.InternalServer(...)` 等入口即可。
+`hah` 不计划新增 `BindAndValidate`、`validate` tag 解释或 body/query/header 混合绑定入口。
 
 ### 1. 手写校验
 
