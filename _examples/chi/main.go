@@ -255,27 +255,6 @@ func attachRequestObservability(next http.Handler) http.Handler {
 	})
 }
 
-func bridgeChiPathValues(r *http.Request) {
-	if r == nil {
-		return
-	}
-
-	routeCtx := chi.RouteContext(r.Context())
-	if routeCtx == nil {
-		return
-	}
-
-	if pattern := strings.TrimSpace(routeCtx.RoutePattern()); pattern != "" {
-		r.Pattern = pattern
-	}
-	for i, key := range routeCtx.URLParams.Keys {
-		if strings.TrimSpace(key) == "" || i >= len(routeCtx.URLParams.Values) {
-			continue
-		}
-		r.SetPathValue(key, routeCtx.URLParams.Values[i])
-	}
-}
-
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	if err == nil {
 		return
@@ -287,8 +266,6 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 func (a *app) listAccounts(w http.ResponseWriter, r *http.Request) {
-	bridgeChiPathValues(r)
-
 	orgID, err := hah.Path(r, "org_id").String().Required().Get()
 	if err != nil {
 		writeError(w, r, err)
@@ -323,8 +300,6 @@ func (a *app) listAccounts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
-	bridgeChiPathValues(r)
-
 	orgID, err := hah.Path(r, "org_id").String().Required().Get()
 	if err != nil {
 		writeError(w, r, err)
@@ -353,8 +328,6 @@ func (a *app) createAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
-	bridgeChiPathValues(r)
-
 	orgID, err := hah.Path(r, "org_id").String().Required().Get()
 	if err != nil {
 		writeError(w, r, err)
@@ -379,8 +352,6 @@ func (a *app) getAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) deleteAccount(w http.ResponseWriter, r *http.Request) {
-	bridgeChiPathValues(r)
-
 	orgID, err := hah.Path(r, "org_id").String().Required().Get()
 	if err != nil {
 		writeError(w, r, err)

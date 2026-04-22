@@ -1,4 +1,4 @@
-// Package hah 提供默认的根包请求/响应边界入口，聚合 reqx 与内部错误/响应实现中最常用的一组能力。
+// Package hah 提供默认的根包 HTTP 边界入口，聚合请求输入、公共错误模型与 JSON 响应写回。
 //
 // 适合在大多数 handler 中直接使用：
 //   - 核心 request helper：Path、Query
@@ -7,8 +7,9 @@
 //   - 常用 JSON 成功响应辅助
 //   - 统一错误响应写回
 //
-// 当前项目里，Path / Query、BindQuery / BindBody、InvalidRequest 与响应写回
-// helper 都可以直接从这里使用。
+// 当前项目里，hah 是默认入口；多数调用方不需要直接 import reqx。
+// 只有当你明确在拆分 request-side 组件、并需要更低层的输入侧公开面时，
+// 才退到 reqx.xx。
 //
 // 公开 API：
 //   - request helper：Path、Query
@@ -22,6 +23,6 @@
 //   - 错误响应入口：WriteError
 //   - 成功响应入口：JSON、OK、Accepted、Created、NoContent
 //
-// 当前根包是默认且唯一的公开错误/响应边界；只有在请求侧需要更细粒度 builder
-// 或绑定入口时，才退到 reqx.xx。
+// 当前根包是默认且唯一推荐的公开入口；错误与响应边界固定收敛在这里。
+// reqx 仍然是公开包，但定位为较低层的 request-side 原生面，而不是并列主入口。
 package hah

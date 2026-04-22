@@ -13,6 +13,17 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.8.6] - 2026-04-22
+
+### Changed
+
+- Clarified the public package strategy in preparation for `v1.0.0`: the root `hah` package is now documented as the default and only recommended public entry point, while `reqx` remains a public but lower-level request-side package for callers that explicitly depend on input-layer contracts.
+
+### Documentation
+
+- Refreshed the root package docs, `README.md`, and `REQUESTS.md` to align on the tightened public-entry-point guidance, keeping `hah.xx` as the default path and explicitly de-emphasizing `reqx` as a parallel onboarding surface.
+- Added `docs/public-api-scope.md` to lock the current public API positioning, non-goals, and review rules ahead of `v1`, including explicit guidance to avoid expanding builder families, introducing mixed-source binders, or coupling binding with validation.
+
 ## [v0.8.5] - 2026-04-22
 
 ### Changed

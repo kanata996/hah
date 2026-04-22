@@ -114,7 +114,7 @@ func main() {
 ```
 
 这个例子展示的是 `hah` 的默认使用路径：读取 path 参数，绑定 body，显式补充输入规则，然后统一写回默认 JSON envelope。
-如果你在拆分 request-side 能力或直接构建输入层组件，`reqx` 提供同一组原生入口；根包 `hah` 保留兼容 facade。
+`hah` 是默认且唯一推荐的公开入口。只有在你明确拆分 request-side 能力、或直接依赖输入层契约时，才退到 `reqx`。
 
 ## 上手路径
 
@@ -133,6 +133,7 @@ func main() {
 - `hah.Query(...)` 承载更宽的参数语义，除了常见标量外，还支持 `Bool()`、`Float64()`、`Duration()`、`Time()`、`UnixTime()`；其中 `Time()` 要求严格 RFC3339 时间戳语法，`UnixTime()` 只接受恰好 10 个十进制数字
 - `hah.Query(...).String()` / `Int()` / `UUID()` 等单值 helper 在重复 query key 上会返回稳定 `invalid_request`
 - `hah.Query(...).Values()` 可直接读取同名 query 参数的全部解析后值；如果你需要批量结构化解码，优先用 `hah.BindQuery(...)`
+- `hah.Query(...)` 是单参数 helper，只对当前显式读取的 key 负责；其他未消费 query 参数默认不会触发额外报错
 
 DTO binding 与显式规则：
 
@@ -144,6 +145,7 @@ DTO binding 与显式规则：
 错误与响应：
 
 - `hah.FieldError`、`hah.HTTPError`、`hah.NewHTTPError(...)`、`hah.NewHTTPErrorWithCause(...)` 是根包暴露的公共错误模型入口
+- `nil` 的 `*hah.HTTPError` receiver 不属于支持的公开使用方式；调用方应只在持有真实错误值时再调用其方法
 - `hah.BadRequest(...)`、`hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)`、`hah.InternalServer(...)` 等快捷构造器适合在已明确公开错误语义的更深层直接返回
 - `hah.WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成统一 JSON error envelope
 - `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)` 会写默认成功 envelope：顶层固定 `code = 0`、`message = "success"`，业务数据放在可选 `data`
@@ -185,6 +187,7 @@ DTO binding 与显式规则：
 - `hah.Query(...).Time()` 以及 `BindQuery(...)` 中的 `time.Time` / `*time.Time` 字段都要求严格 RFC3339 时间戳语法，且时区 offset 必须合法
 - `hah.BindQuery(...)` 默认忽略未知 query key；同名 query key 只要出现多个值就返回稳定 `400 bad_request`
 - malformed raw query 返回稳定 `400 bad_request` 且不修改 target；DTO 或 tag 形状非法时，先返回普通错误且不修改 target
+- `hah.BindQuery(...)` 的严格度高于 `hah.Query(...)`：它是整条 query source 的批量绑定入口，因此需要对 raw query 合法性和参与绑定字段的可解码性负责
 - `hah.BindBody(...)` 公开只支持非 `nil`、且根 DTO 不自定义 `UnmarshalJSON` 的 `*struct` target
 - 非空 body 只接受且只接受一个主媒体类型为 `application/json` 的 `Content-Type`
 - 零字节 body 不要求 `Content-Type` 为 JSON
@@ -203,6 +206,7 @@ DTO binding 与显式规则：
 - 只有显式调用 `NoContent(...)` 时，才会写 `204 No Content` 且不返回响应体
 - 默认错误协议不输出 `error.title` / `error.detail` / `error.code`；稳定错误类型统一看 `error.reason`
 - `WriteError(w, err)` 的默认顶层错误码固定按 `status * 100` 生成；`WriteError(w, err, code)` 只接受单个五位正整数业务码
+- `WriteError(...)` 会优先选择错误链中第一个可见的公共 `HTTPError`；若不存在，再按 `context canceled`、`deadline exceeded`、`internal error` 兜底
 - `HEAD` 场景沿用 `net/http` 默认语义：handler 正常写回，对外是否发送响应体由底层决定
 - 调用方应在开始写出响应前调用 `WriteError(...)`
 
@@ -217,9 +221,9 @@ tags, err := hah.Query(r, "tag").Values().Get()
 
 对外主要分成两个包：
 
-- `hah`：默认公开 HTTP 边界，聚合常用 request helper、绑定、显式请求规则、公共错误模型入口与响应写回入口
-- `reqx`：请求侧辅助包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`InvalidRequest` 以及 request-side field error 规范化
-  当你直接依赖请求输入层时，优先把 `FieldError` / `Code*` / `In*` 等 request-side 契约视为 `reqx` 的公开面；`hah` 继续转发这些入口用于默认 handler 路径
+- `hah`：默认公开 HTTP 边界，也是唯一推荐的主入口；聚合常用 request helper、绑定、显式请求规则、公共错误模型入口与响应写回入口
+- `reqx`：较低层的请求侧公开包，负责 `Path` / `Query`、`BindQuery` / `BindBody`、`InvalidRequest` 以及 request-side field error 规范化
+  只有当你直接依赖输入层时，才把 `FieldError` / `Code*` / `In*` 等 request-side 契约视为 `reqx` 的公开面；常规 handler 路径仍优先用 `hah`
 
 实现层还包含 `internal/errx`（共享 HTTP 错误模型）与 `internal/resp`（默认 JSON success/error envelope 写回），但它们都不属于公开 API。
 
@@ -228,6 +232,7 @@ tags, err := hah.Query(r, "tag").Values().Get()
 请求输入：
 
 - [`REQUESTS.md`](./REQUESTS.md)：以 `hah.xx` 为主路径的 request helper、binding、显式 post-bind validation 模式和常见组合方式
+- [`docs/public-api-scope.md`](./docs/public-api-scope.md)：公开 API 的定位、非目标与演进约束
 
 ## 示例与命令
 
@@ -235,5 +240,3 @@ tags, err := hah.Query(r, "tag").Values().Get()
 
 - [`_examples/nethttp`](./_examples/nethttp)：纯 `net/http` / `ServeMux` 示例
 - [`_examples/chi`](./_examples/chi)：`chi` router + `RequestID` / `traceid` / `httplog` / 常用中间件示例
-
-补充：本文默认直接使用 `hah.xx`。只有当你在请求侧需要更细粒度 builder 或绑定入口时，才退到同契约的 `reqx.xx`。

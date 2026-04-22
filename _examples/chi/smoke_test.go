@@ -136,7 +136,7 @@ func TestDeleteRequiresActorHeader(t *testing.T) {
 	}
 }
 
-func TestHeartbeatAndPathValueBridge(t *testing.T) {
+func TestHeartbeatAndNativePathValueSupport(t *testing.T) {
 	handler := newRouter(newAccountStore())
 
 	heartbeatReq := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -152,7 +152,7 @@ func TestHeartbeatAndPathValueBridge(t *testing.T) {
 	handler.ServeHTTP(getRR, getReq)
 
 	if getRR.Code != http.StatusOK {
-		t.Fatalf("path bridge get status = %d, want %d", getRR.Code, http.StatusOK)
+		t.Fatalf("native pathvalue get status = %d, want %d", getRR.Code, http.StatusOK)
 	}
 
 	var fetched account
