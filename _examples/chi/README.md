@@ -9,7 +9,7 @@
 - 保留 `chi` 常用中间件：`RequestID`、`RealIP`、`Timeout`、`Heartbeat`
 - 用 `traceid.Middleware` 生成/透传 `TraceId`，并把它带到 `httplog` 和 `slog` 上下文
 - 用 `httplog/v3` 输出结构化 access log，并补 `request.id`
-- 在 handler 入口把 `chi.RouteContext` 显式桥接到 `net/http` `PathValue` / `Pattern` 契约
+- 直接使用 `chi` 原生写回到 `net/http` `PathValue` / `Pattern` 的路由匹配结果
 - `DELETE` 路由额外演示直接读取 header 后手写 header 校验
 
 主要路由：
@@ -24,12 +24,10 @@
 
 1. `middleware.RequestID` 生成 request ID，`traceid.Middleware` 生成或透传 `TraceId`。
 2. `httplog/v3` 输出结构化 request log，并记录 `request.id` / `trace.id`。
-3. handler 入口先把 `chi.RouteContext` 回填到 `net/http` 的 `PathValue` / `Pattern` 契约。
-   如果 router pattern 带自定义约束语法，应在这一步先归一化为 `net/http` wildcard 名称。
-4. handler 用 `hah.Path(...)` 读取 path，用 `hah.BindQuery(...)` / `hah.BindBody(...)` 处理 DTO 输入，再显式做最小请求校验。
-5. `DELETE` 路由额外演示直接读取 header 后的手写 header 校验。
-6. 当更深层已经明确要暴露稳定公共 HTTP 错误时，可以直接返回 `hah` 公共错误；失败路径统一走 `hah.WriteError(...)`。
-7. 成功路径通常走 `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)`；若调用方明确需要无响应体成功，也可以显式用 `hah.NoContent(...)`。当前示例的删除成功仍返回 envelope。
+3. handler 直接用 `hah.Path(...)` 读取 `chi` 已写回到 `r.PathValue(...)` 的 path 参数，用 `hah.BindQuery(...)` / `hah.BindBody(...)` 处理 DTO 输入，再显式做最小请求校验。
+4. `DELETE` 路由额外演示直接读取 header 后的手写 header 校验。
+5. 当更深层已经明确要暴露稳定公共 HTTP 错误时，可以直接返回 `hah` 公共错误；失败路径统一走 `hah.WriteError(...)`。
+6. 成功路径通常走 `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)`；若调用方明确需要无响应体成功，也可以显式用 `hah.NoContent(...)`。当前示例的删除成功仍返回 envelope。
 
 响应层观察点：
 
