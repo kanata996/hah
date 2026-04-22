@@ -538,7 +538,7 @@ func TestWriteErrorWriteFailure(t *testing.T) {
 		cause := errors.New("encode failed")
 
 		original := encodeErrorEnvelope
-		encodeErrorEnvelope = func(responseEnvelope) ([]byte, error) {
+		encodeErrorEnvelope = func(*Response) ([]byte, error) {
 			return nil, cause
 		}
 		t.Cleanup(func() {

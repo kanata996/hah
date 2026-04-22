@@ -124,6 +124,7 @@ func main() {
 - 用 `hah.BindQuery(...)` / `hah.BindBody(...)` 绑定 DTO
 - 用 `hah.InvalidRequest(...)` 补充显式请求规则
 - 用 `hah.WriteError(...)` / `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)` / `hah.NoContent(...)` 写回响应
+- 若要复用默认协议但改成自定义包络，先用 `hah.SuccessResponse(...)` / `hah.ErrorResponse(...)` 导出默认响应视图，再自行包装
 
 ## 公开 API 速览
 
@@ -149,6 +150,7 @@ DTO binding 与显式规则：
 - `hah.BadRequest(...)`、`hah.NotFound(...)`、`hah.Conflict(...)`、`hah.UnprocessableEntity(...)`、`hah.InternalServer(...)` 等快捷构造器适合在已明确公开错误语义的更深层直接返回
 - `hah.WriteError(...)` 会把任意错误收敛成稳定的公开错误对象，再写成统一 JSON error envelope
 - `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)` 会写默认成功 envelope：顶层固定 `code = 0`、`message = "success"`，业务数据放在可选 `data`
+- `hah.SuccessResponse(...)` / `hah.ErrorResponse(...)` 会导出同一套默认响应视图，便于调用方再包装成自己的 JSON 结构
 - `hah.NoContent(...)` 会显式写 `204 No Content`，同时清理冲突的 `Content-Type` / `Content-Length`
 - `hah.WriteError(...)` 会写默认错误 envelope：顶层 `code` 是五位业务错误码，未显式传入时按 `status * 100` 生成；顶层 `message` 直接来自 `hah.HTTPError.Detail()`
 - 默认错误 envelope 的 `error` 对象固定包含稳定的 `reason`；如果有 field errors，再按顺序附带 `details`

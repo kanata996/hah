@@ -20,6 +20,7 @@
 - 默认显式请求规则入口：`hah.InvalidRequest(...)`
 - 默认公共错误模型入口：`hah.HTTPError` 与常用构造器
 - 默认响应写回入口：`hah.WriteError(...)`、`hah.OK(...)`、`hah.Created(...)` 等
+- 默认响应导出入口：`hah.SuccessResponse(...)`、`hah.ErrorResponse(...)`
 
 因此：
 
@@ -48,6 +49,7 @@
 - `InvalidRequest(...)`
 - `FieldError` / `Code*` / `In*`
 - `HTTPError` 及根包错误构造器
+- `SuccessResponse(...)` / `ErrorResponse(...)`
 - `WriteError(...)` 与默认成功响应 helper
 
 其中 `Path / Query` 的 builder family 已经形成稳定心智模型，不轻易扩展新的 family。

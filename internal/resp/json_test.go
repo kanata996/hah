@@ -254,6 +254,53 @@ func TestJSONRejectsUnsupportedValue(t *testing.T) {
 	assertRecorderHasNoBodyOrContentType(t, rr)
 }
 
+func TestWriteResponseBoundaries(t *testing.T) {
+	t.Run("nil response is noop", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+
+		if err := writeResponse(rr, nil); err != nil {
+			t.Fatalf("writeResponse() error = %v", err)
+		}
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want recorder default %d", rr.Code, http.StatusOK)
+		}
+		if rr.Body.Len() != 0 {
+			t.Fatalf("body = %q, want empty", rr.Body.String())
+		}
+	})
+
+	t.Run("nil writer rejects non nil response", func(t *testing.T) {
+		err := writeResponse(nil, &Response{
+			Status:  http.StatusOK,
+			Code:    0,
+			Message: "success",
+		})
+		if !errors.Is(err, errNilResponseWriter) {
+			t.Fatalf("errors.Is(err, errNilResponseWriter) = false, err = %v", err)
+		}
+	})
+
+	t.Run("encode failure happens before first commit", func(t *testing.T) {
+		rr := httptest.NewRecorder()
+
+		err := writeResponse(rr, &Response{
+			Status:  http.StatusOK,
+			Code:    0,
+			Message: "success",
+			Data:    make(chan int),
+		})
+		_ = assertUnsupportedTypeError(t, err)
+		assertRecorderHasNoBodyOrContentType(t, rr)
+	})
+}
+
+func TestWriteJSONResponseRejectsNilWriter(t *testing.T) {
+	err := writeJSONResponse(nil, http.StatusOK, map[string]any{"id": "u_1"})
+	if !errors.Is(err, errNilResponseWriter) {
+		t.Fatalf("errors.Is(err, errNilResponseWriter) = false, err = %v", err)
+	}
+}
+
 func TestJSONBodyWritersReturnWrappedWriteError(t *testing.T) {
 	cause := errors.New("socket closed")
 	w := &failingWriter{cause: cause}

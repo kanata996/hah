@@ -38,6 +38,8 @@
 
 默认业务响应协议对外固定提供以下入口：
 
+- `SuccessResponse(status int, data any) (*Response, error)`
+- `ErrorResponse(err error, code ...int) (*Response, error)`
 - `OK(w http.ResponseWriter, data any) error`
 - `Accepted(w http.ResponseWriter, data any) error`
 - `Created(w http.ResponseWriter, data any) error`
@@ -46,6 +48,9 @@
 
 稳定规则：
 
+- `SuccessResponse` / `ErrorResponse` 只导出默认协议对应的响应视图，本身不写 `http.ResponseWriter`
+- `SuccessResponse` 目前只接受默认成功协议支持的状态码：`200` / `201` / `202`
+- `ErrorResponse(nil)` 是 no-op，返回 `nil, nil`
 - `OK` 固定写 `200 OK`
 - `Accepted` 固定写 `202 Accepted`
 - `Created` 固定写 `201 Created`
@@ -56,6 +61,8 @@
 - `WriteError` 传入多个第三参数属于调用错误
 
 `hah.JSON` 如继续保留，只作为 raw JSON escape hatch，不属于本文定义的默认业务协议。
+
+导出视图用于“复用默认协议语义，但由调用方决定最终外层结构”的场景；默认写回 helper 继续是推荐路径。
 
 ## 3. 通用写回边界
 

@@ -14,14 +14,7 @@ const (
 	maxExplicitErrorCode  = 99999
 )
 
-type errorBody struct {
-	Reason  string            `json:"reason"`
-	Details []errx.FieldError `json:"details,omitempty"`
-}
-
-var encodeErrorEnvelope = func(env responseEnvelope) ([]byte, error) {
-	return encodeJSON(env)
-}
+var encodeErrorEnvelope = func(response *Response) ([]byte, error) { return encodeJSON(response) }
 
 // WriteError 是 HTTP 错误写回的统一入口。
 func WriteError(w http.ResponseWriter, err error, code ...int) error {
@@ -29,30 +22,21 @@ func WriteError(w http.ResponseWriter, err error, code ...int) error {
 		return nil
 	}
 
-	topCode, topCodeSet, topCodeErr := normalizeTopCode(code)
-	if topCodeErr != nil {
-		return topCodeErr
-	}
-
 	if w == nil {
 		return errNilResponseWriter
 	}
 
-	httpErr := errx.NormalizeHTTPError(err)
-	if !topCodeSet {
-		topCode = httpErr.Status() * defaultErrorCodeScale
+	response, buildErr := ErrorResponse(err, code...)
+	if buildErr != nil {
+		return buildErr
 	}
 
-	body, encodeErr := encodeErrorEnvelope(responseEnvelope{
-		Code:    topCode,
-		Message: httpErr.Detail(),
-		Error:   newErrorBody(httpErr),
-	})
+	body, encodeErr := encodeErrorEnvelope(response)
 	if encodeErr != nil {
 		return encodeErr
 	}
 
-	return writePreparedJSONBytes(w, httpErr.Status(), jsonContentType, body)
+	return writePreparedJSONBytes(w, response.Status, jsonContentType, body)
 }
 
 func normalizeTopCode(code []int) (value int, ok bool, err error) {
@@ -69,8 +53,8 @@ func normalizeTopCode(code []int) (value int, ok bool, err error) {
 	}
 }
 
-func newErrorBody(httpErr *errx.HTTPError) *errorBody {
-	return &errorBody{
+func newErrorBody(httpErr *errx.HTTPError) *ErrorBody {
+	return &ErrorBody{
 		Reason:  httpErr.Code(),
 		Details: httpErr.Errors(),
 	}

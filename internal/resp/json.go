@@ -14,13 +14,6 @@ const (
 
 var errNilResponseWriter = errors.New("resp: response writer is nil")
 
-type responseEnvelope struct {
-	Code    int        `json:"code"`
-	Message string     `json:"message"`
-	Data    any        `json:"data,omitempty"`
-	Error   *errorBody `json:"error,omitempty"`
-}
-
 // JSON 写出 JSON 响应。
 func JSON(w http.ResponseWriter, status int, data any) error {
 	if w == nil {
@@ -70,4 +63,19 @@ func writeJSONResponse(w http.ResponseWriter, status int, payload any) error {
 		return err
 	}
 	return writePreparedJSONBytes(w, status, jsonContentType, body)
+}
+
+func writeResponse(w http.ResponseWriter, response *Response) error {
+	if response == nil {
+		return nil
+	}
+	if w == nil {
+		return errNilResponseWriter
+	}
+
+	body, err := encodeJSON(response)
+	if err != nil {
+		return err
+	}
+	return writePreparedJSONBytes(w, response.Status, jsonContentType, body)
 }

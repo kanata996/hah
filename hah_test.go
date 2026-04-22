@@ -245,6 +245,85 @@ func TestWriteError_DelegatesToResp(t *testing.T) {
 	}
 }
 
+func TestSuccessResponse_ExportsDefaultSuccessEnvelope(t *testing.T) {
+	response, err := SuccessResponse(http.StatusCreated, map[string]any{"id": "u_1"})
+	if err != nil {
+		t.Fatalf("SuccessResponse() error = %v", err)
+	}
+	if response.Status != http.StatusCreated {
+		t.Fatalf("Status = %d, want %d", response.Status, http.StatusCreated)
+	}
+	if response.Code != 0 {
+		t.Fatalf("Code = %d, want 0", response.Code)
+	}
+	if response.Message != "success" {
+		t.Fatalf("Message = %q, want success", response.Message)
+	}
+	if response.Error != nil {
+		t.Fatalf("Error = %#v, want nil", response.Error)
+	}
+
+	data, ok := response.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("Data = %#v, want map", response.Data)
+	}
+	if data["id"] != "u_1" {
+		t.Fatalf("Data[id] = %#v, want u_1", data["id"])
+	}
+}
+
+func TestSuccessResponse_RejectsUnsupportedStatus(t *testing.T) {
+	response, err := SuccessResponse(http.StatusNoContent, map[string]any{"id": "u_1"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if response != nil {
+		t.Fatalf("Response = %#v, want nil", response)
+	}
+}
+
+func TestErrorResponse_ExportsDefaultErrorEnvelope(t *testing.T) {
+	response, err := ErrorResponse(InvalidRequest(FieldError{
+		Field: "name",
+		In:    InBody,
+		Code:  CodeRequired,
+	}), 42201)
+	if err != nil {
+		t.Fatalf("ErrorResponse() error = %v", err)
+	}
+	if response.Status != http.StatusUnprocessableEntity {
+		t.Fatalf("Status = %d, want %d", response.Status, http.StatusUnprocessableEntity)
+	}
+	if response.Code != 42201 {
+		t.Fatalf("Code = %d, want 42201", response.Code)
+	}
+	if response.Message != "request contains invalid fields" {
+		t.Fatalf("Message = %q, want request contains invalid fields", response.Message)
+	}
+	if response.Error == nil {
+		t.Fatal("Error = nil, want value")
+	}
+	if response.Error.Reason != "invalid_request" {
+		t.Fatalf("Error.Reason = %q, want invalid_request", response.Error.Reason)
+	}
+	if len(response.Error.Details) != 1 {
+		t.Fatalf("len(Error.Details) = %d, want 1", len(response.Error.Details))
+	}
+	if got := response.Error.Details[0]; got.Field != "name" || got.In != InBody || got.Code != CodeRequired || got.Detail != "is required" {
+		t.Fatalf("Error.Details[0] = %#v", got)
+	}
+}
+
+func TestErrorResponse_NilErrorReturnsNil(t *testing.T) {
+	response, err := ErrorResponse(nil, 40001)
+	if err != nil {
+		t.Fatalf("ErrorResponse() error = %v, want nil", err)
+	}
+	if response != nil {
+		t.Fatalf("Response = %#v, want nil", response)
+	}
+}
+
 // OK 会通过根包 facade 写回标准 200 JSON 响应。
 func TestOK_DelegatesToResp(t *testing.T) {
 	rr := httptest.NewRecorder()

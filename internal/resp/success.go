@@ -36,9 +36,5 @@ func NoContent(w http.ResponseWriter) error {
 }
 
 func writeSuccess(w http.ResponseWriter, status int, data any) error {
-	return writeJSONResponse(w, status, responseEnvelope{
-		Code:    successTopCode,
-		Message: successMessage,
-		Data:    data,
-	})
+	return writeResponse(w, newSuccessResponse(status, data))
 }
