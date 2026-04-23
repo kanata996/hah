@@ -118,7 +118,7 @@ func main() {
 
 ## 上手路径
 
-主流程通常是四步：
+主流程通常是以下几步：
 
 - 用 `hah.Path(...)` / `hah.Query(...)` 读取单字段 path/query 参数
 - 用 `hah.BindQuery(...)` / `hah.BindBody(...)` 绑定 DTO
@@ -157,6 +157,13 @@ DTO binding 与显式规则：
 - 若 `hah.HTTPError` 未显式提供 `detail`，共享错误模型会基于公开 `reason` 生成默认短语，例如 `internal_error -> "internal error"`
 - `hah.JSON(...)` 仍是调用方指定状态码与原始 JSON body 的 escape hatch，不参与默认 envelope 协议
 - `hah.WriteError(...)` 的返回值表示响应边界自身异常，例如响应写出失败；生产代码通常至少要记录这个错误
+
+响应输出选型：
+
+- 默认成功/失败协议直接用 `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)` / `hah.NoContent(...)` / `hah.WriteError(...)`
+- 自定义成功 JSON body 时，调用方自行组 DTO 后用 `hah.JSON(...)` 写出
+- 自定义错误 JSON body 时，优先先用 `hah.NormalizeError(...)` 复用稳定错误语义，再映射到自己的 DTO 并用 `hah.JSON(...)` 写出
+- 只要不需要改变 JSON body 结构，继续使用默认响应 helper 通常更简单；完整响应侧指南见 [RESPONSES.md](./RESPONSES.md)
 
 默认错误 envelope 形状类似：
 
@@ -206,9 +213,11 @@ DTO binding 与显式规则：
 - 如果你需要统一的日志或指标策略，在调用方基于原始 error 和业务上下文自行处理
 - 默认带 body 的成功协议提供 `OK(...)` / `Accepted(...)` / `Created(...)`；无 payload 成功也允许继续返回 envelope
 - 只有显式调用 `NoContent(...)` 时，才会写 `204 No Content` 且不返回响应体
+- `NoContent(...)` 不适合自定义 envelope；需要响应体时应使用 `200` / `201` / `202` 加 `hah.JSON(...)` 或默认成功 helper
 - 默认错误协议不输出 `error.title` / `error.detail` / `error.code`；稳定错误类型统一看 `error.reason`
 - `WriteError(w, err)` 的默认顶层错误码固定按 `status * 100` 生成；`WriteError(w, err, code)` 只接受单个五位正整数业务码
 - `WriteError(...)` 会优先选择错误链中第一个可见的公共 `HTTPError`；若不存在，再按 `context canceled`、`deadline exceeded`、`internal error` 兜底
+- `NormalizeError(nil)` 返回 `nil`；自定义错误响应结构时，可稳定使用归一化后的 `Status()`、`Code()`、`Detail()`、`Errors()`
 - `HEAD` 场景沿用 `net/http` 默认语义：handler 正常写回，对外是否发送响应体由底层决定
 - 调用方应在开始写出响应前调用 `WriteError(...)`
 
@@ -234,6 +243,13 @@ tags, err := hah.Query(r, "tag").Values().Get()
 请求输入：
 
 - [`REQUESTS.md`](./REQUESTS.md)：以 `hah.xx` 为主路径的 request helper、binding、显式 post-bind validation 模式和常见组合方式
+
+响应输出：
+
+- [`RESPONSES.md`](./RESPONSES.md)：默认响应 helper、自定义 JSON 响应结构、`NormalizeError(...)` 复用公开错误语义的推荐路径
+
+公开 API：
+
 - [`docs/public-api-scope.md`](./docs/public-api-scope.md)：公开 API 的定位、非目标与演进约束
 
 ## 示例与命令
