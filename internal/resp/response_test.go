@@ -3,6 +3,7 @@ package resp
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"testing"
 
 	"github.com/kanata996/hah/internal/errx"
@@ -122,6 +123,42 @@ func TestErrorResponseDefaultsAndNilError(t *testing.T) {
 		response, err := ErrorResponse(nil, 40001)
 		if err != nil {
 			t.Fatalf("ErrorResponse() error = %v, want nil", err)
+		}
+		if response != nil {
+			t.Fatalf("Response = %#v, want nil", response)
+		}
+	})
+}
+
+func TestErrorResponseRejectsInvalidTopCode(t *testing.T) {
+	httpErr := errx.BadRequest("", "")
+
+	t.Run("non positive", func(t *testing.T) {
+		response, err := ErrorResponse(httpErr, 0)
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+		if response != nil {
+			t.Fatalf("Response = %#v, want nil", response)
+		}
+	})
+
+	for _, code := range []int{9999, 100000} {
+		t.Run("not five digits "+strconv.Itoa(code), func(t *testing.T) {
+			response, err := ErrorResponse(httpErr, code)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if response != nil {
+				t.Fatalf("Response = %#v, want nil", response)
+			}
+		})
+	}
+
+	t.Run("multiple values", func(t *testing.T) {
+		response, err := ErrorResponse(httpErr, 40001, 40002)
+		if err == nil {
+			t.Fatal("expected error, got nil")
 		}
 		if response != nil {
 			t.Fatalf("Response = %#v, want nil", response)

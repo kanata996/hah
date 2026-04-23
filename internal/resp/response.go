@@ -1,6 +1,7 @@
 package resp
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -22,12 +23,30 @@ type ErrorBody struct {
 	Details []errx.FieldError `json:"details,omitempty"`
 }
 
+const (
+	successTopCode = 0
+	successMessage = "success"
+)
+
+const (
+	defaultErrorCodeScale = 100
+	minExplicitErrorCode  = 10000
+	maxExplicitErrorCode  = 99999
+)
+
 // SuccessResponse 导出默认成功响应视图。
 func SuccessResponse(status int, data any) (*Response, error) {
-	if err := validateSuccessStatus(status); err != nil {
-		return nil, err
+	switch status {
+	case http.StatusOK, http.StatusAccepted, http.StatusCreated:
+		return &Response{
+			Status:  status,
+			Code:    successTopCode,
+			Message: successMessage,
+			Data:    data,
+		}, nil
+	default:
+		return nil, fmt.Errorf("resp: unsupported default success status %d", status)
 	}
-	return newSuccessResponse(status, data), nil
 }
 
 // ErrorResponse 导出默认错误响应视图。
@@ -50,24 +69,23 @@ func ErrorResponse(err error, code ...int) (*Response, error) {
 		Status:  httpErr.Status(),
 		Code:    topCode,
 		Message: httpErr.Detail(),
-		Error:   newErrorBody(httpErr),
+		Error: &ErrorBody{
+			Reason:  httpErr.Code(),
+			Details: httpErr.Errors(),
+		},
 	}, nil
 }
 
-func validateSuccessStatus(status int) error {
-	switch status {
-	case http.StatusOK, http.StatusAccepted, http.StatusCreated:
-		return nil
+func normalizeTopCode(code []int) (value int, ok bool, err error) {
+	switch len(code) {
+	case 0:
+		return 0, false, nil
+	case 1:
+		if code[0] < minExplicitErrorCode || code[0] > maxExplicitErrorCode {
+			return 0, false, fmt.Errorf("resp: invalid top-level error code %d", code[0])
+		}
+		return code[0], true, nil
 	default:
-		return fmt.Errorf("resp: unsupported default success status %d", status)
-	}
-}
-
-func newSuccessResponse(status int, data any) *Response {
-	return &Response{
-		Status:  status,
-		Code:    successTopCode,
-		Message: successMessage,
-		Data:    data,
+		return 0, false, errors.New("resp: WriteError accepts at most one top-level error code")
 	}
 }

@@ -26,7 +26,11 @@ func JSON(w http.ResponseWriter, status int, data any) error {
 		return fmt.Errorf("resp: JSON does not support status %d without a response body", status)
 	}
 
-	return writeJSONResponse(w, status, data)
+	body, err := encodeJSON(data)
+	if err != nil {
+		return err
+	}
+	return writeJSONBytes(w, status, body)
 }
 
 // encodeJSON 使用标准库编码 JSON。
@@ -40,42 +44,15 @@ func encodeJSON(data any) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// writePreparedJSONBytes 假定 writer 与 status 已校验完成，直接写出头和 body。
-func writePreparedJSONBytes(w http.ResponseWriter, status int, contentType string, body []byte) error {
+// writeJSONBytes 假定 writer、status 与 body 已校验完成，直接写出标准 JSON 响应。
+func writeJSONBytes(w http.ResponseWriter, status int, body []byte) error {
 	header := w.Header()
 	// 清掉外部预设的旧长度，让 net/http 按本次实际 body 重新决定最终 Content-Length。
 	header.Del("Content-Length")
-	header.Set("Content-Type", contentType)
+	header.Set("Content-Type", jsonContentType)
 	w.WriteHeader(status)
 	if _, err := w.Write(body); err != nil {
 		return fmt.Errorf("resp: write response failed: %w", err)
 	}
 	return nil
-}
-
-func writeJSONResponse(w http.ResponseWriter, status int, payload any) error {
-	if w == nil {
-		return errNilResponseWriter
-	}
-
-	body, err := encodeJSON(payload)
-	if err != nil {
-		return err
-	}
-	return writePreparedJSONBytes(w, status, jsonContentType, body)
-}
-
-func writeResponse(w http.ResponseWriter, response *Response) error {
-	if response == nil {
-		return nil
-	}
-	if w == nil {
-		return errNilResponseWriter
-	}
-
-	body, err := encodeJSON(response)
-	if err != nil {
-		return err
-	}
-	return writePreparedJSONBytes(w, response.Status, jsonContentType, body)
 }
