@@ -38,23 +38,21 @@
 
 默认业务响应协议对外固定提供以下入口：
 
-- `SuccessResponse(status int, data any) (*Response, error)`
-- `ErrorResponse(err error, code ...int) (*Response, error)`
 - `OK(w http.ResponseWriter, data any) error`
 - `Accepted(w http.ResponseWriter, data any) error`
 - `Created(w http.ResponseWriter, data any) error`
 - `NoContent(w http.ResponseWriter) error`
+- `NormalizeError(err error) *HTTPError`
 - `WriteError(w http.ResponseWriter, err error, code ...int) error`
 
 稳定规则：
 
-- `SuccessResponse` / `ErrorResponse` 只导出默认协议对应的响应视图，本身不写 `http.ResponseWriter`
-- `SuccessResponse` 目前只接受默认成功协议支持的状态码：`200` / `201` / `202`
-- `ErrorResponse(nil)` 是 no-op，返回 `nil, nil`
 - `OK` 固定写 `200 OK`
 - `Accepted` 固定写 `202 Accepted`
 - `Created` 固定写 `201 Created`
 - `NoContent` 固定写 `204 No Content`
+- `NormalizeError(nil)` 返回 `nil`
+- `NormalizeError(err)` 返回可公开暴露的稳定 `HTTPError`
 - `WriteError` 根据最终公开错误模型写出对应 `4xx` / `5xx`
 - `WriteError` 在未传第三个参数时使用默认顶层 `code`
 - `WriteError` 在传入单个第三参数时使用显式顶层 `code`
@@ -62,7 +60,7 @@
 
 `hah.JSON` 如继续保留，只作为 raw JSON escape hatch，不属于本文定义的默认业务协议。
 
-导出视图用于“复用默认协议语义，但由调用方决定最终外层结构”的场景；默认写回 helper 继续是推荐路径。
+如果调用方需要自定义错误响应结构，推荐使用 `NormalizeError(...)` 复用公开错误语义，再自行 `hah.JSON(...)` 写回。
 
 ## 3. 通用写回边界
 

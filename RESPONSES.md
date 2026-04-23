@@ -1,23 +1,23 @@
 # 响应输出指南
 
-这份文档聚焦 `hah` 的响应侧能力，尤其是“如何在保留默认错误/状态语义的前提下，输出你自己的 JSON 响应结构”。
+这份文档聚焦 `hah` 的响应侧能力，尤其是“如何在保留稳定错误语义的前提下，输出你自己的 JSON 响应结构”。
 
-`hah` 是 `net/http`-first 的设计。它不引入新的 handler 生命周期或 response context 抽象，响应侧仍然围绕标准库 `http.ResponseWriter` 组织 API。
+`hah` 是 `net/http`-first 的设计。它不引入新的 response context 抽象，响应侧仍然围绕标准库 `http.ResponseWriter` 组织 API。
 
 当前设计里：
 
 - `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)` / `hah.NoContent(...)` / `hah.WriteError(...)` 是默认响应侧 API
 - `hah.JSON(...)` 是 raw JSON escape hatch，不参与默认 envelope 协议
-- `hah.SuccessResponse(...)` / `hah.ErrorResponse(...)` 导出默认响应视图，适合拿来包装成自定义响应结构
+- `hah.NormalizeError(...)` 是自定义错误响应结构时复用公开错误语义的推荐入口
 
 ## 先看选型
 
 | 目标 | 推荐 API | 说明 |
 | --- | --- | --- |
 | 直接使用默认成功/失败协议 | `hah.OK` / `hah.Accepted` / `hah.Created` / `hah.NoContent` / `hah.WriteError` | 主路径，最简单，也最稳定 |
-| 自己决定整个 JSON body 形状 | `hah.JSON` | 只负责写 raw JSON，不提供默认 envelope 语义 |
-| 想保留默认 status / code / reason / details 语义，但改外层 JSON 结构 | `hah.SuccessResponse` / `hah.ErrorResponse` + `hah.JSON` | 自定义响应结构的推荐路径 |
-| 想给错误响应指定自定义顶层业务码 | `hah.ErrorResponse(err, code)` | `code` 只能传一个五位整数 |
+| 自己决定整个成功 JSON body 形状 | `hah.JSON` | 只负责写 raw JSON，不提供默认 success envelope |
+| 自定义错误响应结构，但想复用稳定错误语义 | `hah.NormalizeError` + `hah.JSON` | 推荐路径 |
+| 想继续使用默认错误 envelope | `hah.WriteError` | 直接复用默认错误协议 |
 
 ## 默认响应怎么用
 
@@ -64,53 +64,74 @@ _ = hah.JSON(w, http.StatusOK, map[string]any{
 
 ## 自定义响应结构
 
-如果你想输出自己的响应结构，但又不想重写默认错误收敛逻辑，推荐分三步：
+自定义响应结构时，建议把成功和失败分开看：
 
-1. 用 `hah.SuccessResponse(...)` 或 `hah.ErrorResponse(...)` 先拿到默认响应视图
-2. 把这个视图映射到你自己的 DTO
-3. 最终用 `hah.JSON(...)` 按 `response.Status` 写回
+1. 成功路径直接定义你自己的 DTO，然后 `hah.JSON(...)`
+2. 失败路径先用 `hah.NormalizeError(...)` 收敛错误，再映射到你自己的 DTO
 
-### 自定义成功/失败外层包络
+### 自定义成功响应
+
+成功路径通常不需要额外 helper，直接自己组 DTO：
 
 ```go
-type APIResponse struct {
-	Success bool               `json:"success"`
-	Code    int                `json:"code"`
-	Message string             `json:"message"`
-	Data    any                `json:"data,omitempty"`
-	Error   *hah.ResponseError `json:"error,omitempty"`
-	TraceID string             `json:"trace_id,omitempty"`
+type SuccessResponse struct {
+	Success bool `json:"success"`
+	Data    any  `json:"data,omitempty"`
+	TraceID string `json:"trace_id,omitempty"`
 }
 
 func writeSuccess(w http.ResponseWriter, status int, data any, traceID string) error {
-	base, err := hah.SuccessResponse(status, data)
-	if err != nil {
-		return err
-	}
-
-	return hah.JSON(w, base.Status, APIResponse{
+	return hah.JSON(w, status, SuccessResponse{
 		Success: true,
-		Code:    base.Code,
-		Message: base.Message,
-		Data:    base.Data,
+		Data:    data,
 		TraceID: traceID,
 	})
 }
+```
+
+这比先导出默认 success envelope 再拆开更直接，也更稳定。
+
+### 自定义错误响应
+
+错误路径推荐先归一化：
+
+```go
+type ErrorDetail struct {
+	Field  string `json:"field,omitempty"`
+	In     string `json:"in,omitempty"`
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
+}
+
+type ErrorResponse struct {
+	Success bool          `json:"success"`
+	Code    string        `json:"code"`
+	Message string        `json:"message"`
+	Details []ErrorDetail `json:"details,omitempty"`
+	TraceID string        `json:"trace_id,omitempty"`
+}
 
 func writeError(w http.ResponseWriter, err error, traceID string) error {
-	base, buildErr := hah.ErrorResponse(err)
-	if buildErr != nil {
-		return buildErr
-	}
-	if base == nil {
+	httpErr := hah.NormalizeError(err)
+	if httpErr == nil {
 		return nil
 	}
 
-	return hah.JSON(w, base.Status, APIResponse{
+	details := make([]ErrorDetail, len(httpErr.Errors()))
+	for i, item := range httpErr.Errors() {
+		details[i] = ErrorDetail{
+			Field:  item.Field,
+			In:     string(item.In),
+			Code:   string(item.Code),
+			Detail: item.Detail,
+		}
+	}
+
+	return hah.JSON(w, httpErr.Status(), ErrorResponse{
 		Success: false,
-		Code:    base.Code,
-		Message: base.Message,
-		Error:   base.Error,
+		Code:    httpErr.Code(),
+		Message: httpErr.Detail(),
+		Details: details,
 		TraceID: traceID,
 	})
 }
@@ -119,55 +140,26 @@ func writeError(w http.ResponseWriter, err error, traceID string) error {
 这个路径的好处是：
 
 - 你自己的 JSON 结构由你控制
-- 默认错误模型里的 `reason` / `details` 仍然复用 `hah` 的公开契约
-- HTTP 状态码仍然来自默认响应视图，不会在多个地方各写一套判断
+- `hah` 继续负责错误链归一化
+- `reason`、字段错误顺序、context 映射、unknown error 兜底等公开错误语义仍然稳定
+- HTTP 状态码仍然来自统一的公开错误模型
 
-### 直接嵌入默认响应视图
+## NormalizeError 的公开边界
 
-如果你只是想在默认 envelope 外面再包一层，也可以直接复用 `*hah.Response`：
+`hah.NormalizeError(...)` 当前公开语义是：
 
-```go
-type Envelope struct {
-	TraceID string        `json:"trace_id"`
-	Result  *hah.Response `json:"result"`
-}
+- `hah.NormalizeError(nil)` 返回 `nil`
+- 如果错误链中已经有公共 `*hah.HTTPError`，优先复用第一个可见值
+- `context.Canceled` 会归一化成 `499 client_closed_request`
+- `context.DeadlineExceeded` 会归一化成 `504 timeout`
+- 其他未知错误会归一化成 `500 internal_error`
 
-func writeWrappedSuccess(w http.ResponseWriter, data any, traceID string) error {
-	base, err := hah.SuccessResponse(http.StatusOK, data)
-	if err != nil {
-		return err
-	}
+归一化之后，你可以稳定地使用：
 
-	return hah.JSON(w, base.Status, Envelope{
-		TraceID: traceID,
-		Result:  base,
-	})
-}
-```
-
-这里要注意：
-
-- `hah.Response.Status` 只用于 HTTP 写回状态码，不参与 JSON 编码
-- 所以把 `*hah.Response` 直接放进自定义 DTO 是安全的，JSON 里不会多出一个 `status` 字段
-
-## 公开边界
-
-`hah.SuccessResponse(...)` / `hah.ErrorResponse(...)` 当前公开语义是：
-
-- `hah.SuccessResponse(status, data)` 目前只接受 `200` / `201` / `202`
-- `hah.ErrorResponse(nil)` 返回 `nil, nil`
-- `hah.ErrorResponse(err)` 默认把顶层 `code` 设为 `status * 100`
-- `hah.ErrorResponse(err, code)` 允许显式传一个五位错误码
-- `hah.ErrorResponse(err, code1, code2)` 属于调用错误
-- 顶层 `message` 直接来自共享错误模型的 `detail`
-- `error.reason` 是稳定公开语义；如果有字段级输入错误，继续放在 `error.details`
-
-如果你只是想“默认协议 + 自定义头部”，通常不需要自定义响应结构。直接先写 header，再调用默认 helper 即可：
-
-```go
-w.Header().Set("X-Trace-ID", traceID)
-_ = hah.OK(w, data)
-```
+- `httpErr.Status()`
+- `httpErr.Code()`
+- `httpErr.Detail()`
+- `httpErr.Errors()`
 
 ## 什么时候不要自定义
 
@@ -176,7 +168,7 @@ _ = hah.OK(w, data)
 - 你只是想返回默认的成功 envelope
 - 你只是想加几个响应头
 - 你并不需要改变 JSON body 结构
-- 你只是在 `200/201/202` 成功和统一错误 envelope 之间切换
+- 你希望直接沿用默认错误 envelope
 
 这时继续直接用 `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)` / `hah.WriteError(...)` 更简单。
 

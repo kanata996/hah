@@ -13,6 +13,16 @@ This project follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). V
 
 ## [Unreleased]
 
+## [v0.9.0] - 2026-04-23
+
+### Added
+
+- Added `hah.NormalizeError(...)` as the root-package public error-normalization primitive for callers that need custom error response structures without depending on the default JSON error envelope shape.
+
+### Documentation
+
+- Refreshed `README.md`, `RESPONSES.md`, `docs/public-api-scope.md`, and `docs/resp-design.md` to document the new recommendation: keep using the default response helpers for the common path, but prefer `NormalizeError(...)` plus `hah.JSON(...)` when writing custom response envelopes.
+
 ## [v0.8.6] - 2026-04-22
 
 ### Changed
