@@ -112,9 +112,19 @@ func InternalServer(code, detail string) *HTTPError {
 	return errx.InternalServer(code, detail)
 }
 
+// NormalizeError 收敛任意错误链，返回可公开暴露的 HTTPError。
+//
+// 对 nil 输入返回 nil。
+func NormalizeError(err error) *HTTPError {
+	if err == nil {
+		return nil
+	}
+	return errx.NormalizeHTTPError(err)
+}
+
 // WriteError 按统一错误对象写回响应。
-func WriteError(w http.ResponseWriter, err error, code ...int) error {
-	return resp.WriteError(w, err, code...)
+func WriteError(w http.ResponseWriter, err error, topCode ...int) error {
+	return resp.WriteError(w, err, topCode...)
 }
 
 // JSON 写回 JSON 响应。

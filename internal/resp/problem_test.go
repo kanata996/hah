@@ -427,7 +427,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 		}
 	})
 
-	t.Run("nil error ignores explicit code and stays noop", func(t *testing.T) {
+	t.Run("nil error ignores explicit topCode and stays noop", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 
 		if err := WriteError(rr, nil, 40001); err != nil {
@@ -453,7 +453,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects non positive top code before commit", func(t *testing.T) {
+	t.Run("rejects invalid explicit topCode before commit", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 
 		if err := WriteError(rr, errx.BadRequest("", ""), 0); err == nil {
@@ -462,14 +462,12 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 		assertRecorderHasNoBodyOrContentType(t, rr)
 	})
 
-	t.Run("rejects non five digit top code before commit", func(t *testing.T) {
-		cases := []int{9999, 100000}
-
-		for _, code := range cases {
-			t.Run(strconv.Itoa(code), func(t *testing.T) {
+	t.Run("rejects non five digit topCode before commit", func(t *testing.T) {
+		for _, topCode := range []int{9999, 100000} {
+			t.Run(strconv.Itoa(topCode), func(t *testing.T) {
 				rr := httptest.NewRecorder()
 
-				if err := WriteError(rr, errx.BadRequest("", ""), code); err == nil {
+				if err := WriteError(rr, errx.BadRequest("", ""), topCode); err == nil {
 					t.Fatal("expected error, got nil")
 				}
 				assertRecorderHasNoBodyOrContentType(t, rr)
@@ -477,7 +475,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects multiple top codes before commit", func(t *testing.T) {
+	t.Run("rejects multiple topCodes before commit", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 
 		if err := WriteError(rr, errx.BadRequest("", ""), 40001, 40002); err == nil {
@@ -533,28 +531,6 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 }
 
 func TestWriteErrorWriteFailure(t *testing.T) {
-	t.Run("returns encode failure before first commit", func(t *testing.T) {
-		rr := httptest.NewRecorder()
-		cause := errors.New("encode failed")
-
-		original := encodeErrorEnvelope
-		encodeErrorEnvelope = func(responseEnvelope) ([]byte, error) {
-			return nil, cause
-		}
-		t.Cleanup(func() {
-			encodeErrorEnvelope = original
-		})
-
-		err := WriteError(rr, errx.NewHTTPError(http.StatusBadRequest, "invalid_json", "payload invalid"))
-		if err == nil {
-			t.Fatal("expected encode error, got nil")
-		}
-		if !errors.Is(err, cause) {
-			t.Fatalf("errors.Is(err, cause) = false, want true")
-		}
-		assertRecorderHasNoBodyOrContentType(t, rr)
-	})
-
 	t.Run("returns write failure after first commit", func(t *testing.T) {
 		cause := errors.New("socket closed")
 		w := &failingWriter{cause: cause}

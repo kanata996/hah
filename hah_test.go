@@ -245,6 +245,69 @@ func TestWriteError_DelegatesToResp(t *testing.T) {
 	}
 }
 
+func TestNormalizeError_DelegatesToErrx(t *testing.T) {
+	t.Run("nil returns nil", func(t *testing.T) {
+		if got := NormalizeError(nil); got != nil {
+			t.Fatalf("NormalizeError(nil) = %#v, want nil", got)
+		}
+	})
+
+	t.Run("invalid request keeps public error semantics", func(t *testing.T) {
+		err := NormalizeError(InvalidRequest(FieldError{
+			Field: "name",
+			In:    InBody,
+			Code:  CodeRequired,
+		}))
+		if err == nil {
+			t.Fatal("NormalizeError() = nil, want value")
+		}
+		if err.Status() != http.StatusUnprocessableEntity {
+			t.Fatalf("Status() = %d, want %d", err.Status(), http.StatusUnprocessableEntity)
+		}
+		if err.Code() != "invalid_request" {
+			t.Fatalf("Code() = %q, want invalid_request", err.Code())
+		}
+		if err.Detail() != "request contains invalid fields" {
+			t.Fatalf("Detail() = %q, want request contains invalid fields", err.Detail())
+		}
+		if got := err.Errors(); len(got) != 1 || got[0].Field != "name" || got[0].In != InBody || got[0].Code != CodeRequired || got[0].Detail != "is required" {
+			t.Fatalf("Errors() = %#v", got)
+		}
+	})
+
+	t.Run("context deadline exceeded maps to timeout", func(t *testing.T) {
+		err := NormalizeError(context.DeadlineExceeded)
+		if err == nil {
+			t.Fatal("NormalizeError() = nil, want value")
+		}
+		if err.Status() != http.StatusGatewayTimeout {
+			t.Fatalf("Status() = %d, want %d", err.Status(), http.StatusGatewayTimeout)
+		}
+		if err.Code() != "timeout" {
+			t.Fatalf("Code() = %q, want timeout", err.Code())
+		}
+		if err.Detail() != "timeout" {
+			t.Fatalf("Detail() = %q, want timeout", err.Detail())
+		}
+	})
+
+	t.Run("wrapped unknown error becomes internal error", func(t *testing.T) {
+		err := NormalizeError(errors.New("db timeout"))
+		if err == nil {
+			t.Fatal("NormalizeError() = nil, want value")
+		}
+		if err.Status() != http.StatusInternalServerError {
+			t.Fatalf("Status() = %d, want %d", err.Status(), http.StatusInternalServerError)
+		}
+		if err.Code() != "internal_error" {
+			t.Fatalf("Code() = %q, want internal_error", err.Code())
+		}
+		if err.Detail() != "internal error" {
+			t.Fatalf("Detail() = %q, want internal error", err.Detail())
+		}
+	})
+}
+
 // OK 会通过根包 facade 写回标准 200 JSON 响应。
 func TestOK_DelegatesToResp(t *testing.T) {
 	rr := httptest.NewRecorder()

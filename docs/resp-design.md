@@ -42,6 +42,7 @@
 - `Accepted(w http.ResponseWriter, data any) error`
 - `Created(w http.ResponseWriter, data any) error`
 - `NoContent(w http.ResponseWriter) error`
+- `NormalizeError(err error) *HTTPError`
 - `WriteError(w http.ResponseWriter, err error, code ...int) error`
 
 稳定规则：
@@ -50,12 +51,16 @@
 - `Accepted` 固定写 `202 Accepted`
 - `Created` 固定写 `201 Created`
 - `NoContent` 固定写 `204 No Content`
+- `NormalizeError(nil)` 返回 `nil`
+- `NormalizeError(err)` 返回可公开暴露的稳定 `HTTPError`
 - `WriteError` 根据最终公开错误模型写出对应 `4xx` / `5xx`
 - `WriteError` 在未传第三个参数时使用默认顶层 `code`
 - `WriteError` 在传入单个第三参数时使用显式顶层 `code`
 - `WriteError` 传入多个第三参数属于调用错误
 
 `hah.JSON` 如继续保留，只作为 raw JSON escape hatch，不属于本文定义的默认业务协议。
+
+如果调用方需要自定义错误响应结构，推荐使用 `NormalizeError(...)` 复用公开错误语义，再自行 `hah.JSON(...)` 写回。
 
 ## 3. 通用写回边界
 

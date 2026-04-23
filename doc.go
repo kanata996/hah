@@ -19,6 +19,7 @@
 //   - 常用错误快捷构造：BadRequest、Unauthorized、Forbidden、NotFound、
 //     MethodNotAllowed、Conflict、UnprocessableEntity、TooManyRequests、
 //     InternalServer
+//   - 错误归一化入口：NormalizeError
 //   - 公开 field error 常量：Code*、In*
 //   - 错误响应入口：WriteError
 //   - 成功响应入口：JSON、OK、Accepted、Created、NoContent

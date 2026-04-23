@@ -7,6 +7,29 @@ const (
 	successMessage = "success"
 )
 
+type responseEnvelope struct {
+	Code    int        `json:"code"`
+	Message string     `json:"message"`
+	Data    any        `json:"data,omitempty"`
+	Error   *errorBody `json:"error,omitempty"`
+}
+
+func writeSuccess(w http.ResponseWriter, status int, data any) error {
+	if w == nil {
+		return errNilResponseWriter
+	}
+
+	body, err := encodeJSON(responseEnvelope{
+		Code:    successTopCode,
+		Message: successMessage,
+		Data:    data,
+	})
+	if err != nil {
+		return err
+	}
+	return writeJSONBytes(w, status, body)
+}
+
 // OK 写出 200 JSON 成功响应。
 func OK(w http.ResponseWriter, data any) error {
 	return writeSuccess(w, http.StatusOK, data)
@@ -33,12 +56,4 @@ func NoContent(w http.ResponseWriter) error {
 	header.Del("Content-Length")
 	w.WriteHeader(http.StatusNoContent)
 	return nil
-}
-
-func writeSuccess(w http.ResponseWriter, status int, data any) error {
-	return writeJSONResponse(w, status, responseEnvelope{
-		Code:    successTopCode,
-		Message: successMessage,
-		Data:    data,
-	})
 }
