@@ -2,24 +2,32 @@ package resp
 
 import "net/http"
 
-func writeResponse(w http.ResponseWriter, response *Response) error {
+const (
+	successTopCode = 0
+	successMessage = "success"
+)
+
+type responseEnvelope struct {
+	Code    int        `json:"code"`
+	Message string     `json:"message"`
+	Data    any        `json:"data,omitempty"`
+	Error   *errorBody `json:"error,omitempty"`
+}
+
+func writeSuccess(w http.ResponseWriter, status int, data any) error {
 	if w == nil {
 		return errNilResponseWriter
 	}
 
-	body, err := encodeJSON(response)
+	body, err := encodeJSON(responseEnvelope{
+		Code:    successTopCode,
+		Message: successMessage,
+		Data:    data,
+	})
 	if err != nil {
 		return err
 	}
-	return writeJSONBytes(w, response.Status, body)
-}
-
-func writeSuccess(w http.ResponseWriter, status int, data any) error {
-	response, err := SuccessResponse(status, data)
-	if err != nil {
-		return err
-	}
-	return writeResponse(w, response)
+	return writeJSONBytes(w, status, body)
 }
 
 // OK 写出 200 JSON 成功响应。
@@ -48,22 +56,4 @@ func NoContent(w http.ResponseWriter) error {
 	header.Del("Content-Length")
 	w.WriteHeader(http.StatusNoContent)
 	return nil
-}
-
-// WriteError 是 HTTP 错误写回的统一入口。
-func WriteError(w http.ResponseWriter, err error, code ...int) error {
-	if err == nil {
-		return nil
-	}
-
-	if w == nil {
-		return errNilResponseWriter
-	}
-
-	response, buildErr := ErrorResponse(err, code...)
-	if buildErr != nil {
-		return buildErr
-	}
-
-	return writeResponse(w, response)
 }
