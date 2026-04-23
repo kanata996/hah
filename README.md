@@ -124,7 +124,7 @@ func main() {
 - 用 `hah.BindQuery(...)` / `hah.BindBody(...)` 绑定 DTO
 - 用 `hah.InvalidRequest(...)` 补充显式请求规则
 - 用 `hah.WriteError(...)` / `hah.OK(...)` / `hah.Accepted(...)` / `hah.Created(...)` / `hah.NoContent(...)` 写回响应
-- 若要复用默认协议但改成自定义包络，先用 `hah.SuccessResponse(...)` / `hah.ErrorResponse(...)` 导出默认响应视图，再自行包装
+- 若要复用默认协议但改成自定义包络，先用 `hah.SuccessResponse(...)` / `hah.ErrorResponse(...)` 导出默认响应视图，再自行包装；完整示例见 [RESPONSES.md](./RESPONSES.md)
 
 ## 公开 API 速览
 
