@@ -123,8 +123,8 @@ func NormalizeError(err error) *HTTPError {
 }
 
 // WriteError 按统一错误对象写回响应。
-func WriteError(w http.ResponseWriter, err error, code ...int) error {
-	return resp.WriteError(w, err, code...)
+func WriteError(w http.ResponseWriter, err error, topCode ...int) error {
+	return resp.WriteError(w, err, topCode...)
 }
 
 // JSON 写回 JSON 响应。

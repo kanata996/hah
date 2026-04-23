@@ -9,9 +9,9 @@ import (
 )
 
 const (
-	defaultErrorCodeScale = 100
-	minExplicitErrorCode  = 10000
-	maxExplicitErrorCode  = 99999
+	defaultTopCodeScale = 100
+	minExplicitTopCode  = 10000
+	maxExplicitTopCode  = 99999
 )
 
 type errorBody struct {
@@ -20,12 +20,12 @@ type errorBody struct {
 }
 
 // WriteError 是 HTTP 错误写回的统一入口。
-func WriteError(w http.ResponseWriter, err error, code ...int) error {
+func WriteError(w http.ResponseWriter, err error, topCode ...int) error {
 	if err == nil {
 		return nil
 	}
 
-	topCode, topCodeSet, topCodeErr := normalizeTopCode(code)
+	resolvedTopCode, topCodeSet, topCodeErr := normalizeTopCode(topCode)
 	if topCodeErr != nil {
 		return topCodeErr
 	}
@@ -36,11 +36,11 @@ func WriteError(w http.ResponseWriter, err error, code ...int) error {
 
 	httpErr := errx.NormalizeHTTPError(err)
 	if !topCodeSet {
-		topCode = httpErr.Status() * defaultErrorCodeScale
+		resolvedTopCode = httpErr.Status() * defaultTopCodeScale
 	}
 
 	body, encodeErr := encodeJSON(responseEnvelope{
-		Code:    topCode,
+		Code:    resolvedTopCode,
 		Message: httpErr.Detail(),
 		Error: &errorBody{
 			Reason:  httpErr.Code(),
@@ -54,15 +54,15 @@ func WriteError(w http.ResponseWriter, err error, code ...int) error {
 	return writeJSONBytes(w, httpErr.Status(), body)
 }
 
-func normalizeTopCode(code []int) (value int, ok bool, err error) {
-	switch len(code) {
+func normalizeTopCode(topCode []int) (value int, ok bool, err error) {
+	switch len(topCode) {
 	case 0:
 		return 0, false, nil
 	case 1:
-		if code[0] < minExplicitErrorCode || code[0] > maxExplicitErrorCode {
-			return 0, false, fmt.Errorf("resp: invalid top-level error code %d", code[0])
+		if topCode[0] < minExplicitTopCode || topCode[0] > maxExplicitTopCode {
+			return 0, false, fmt.Errorf("resp: invalid top-level error code %d", topCode[0])
 		}
-		return code[0], true, nil
+		return topCode[0], true, nil
 	default:
 		return 0, false, errors.New("resp: WriteError accepts at most one top-level error code")
 	}

@@ -427,7 +427,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 		}
 	})
 
-	t.Run("nil error ignores explicit code and stays noop", func(t *testing.T) {
+	t.Run("nil error ignores explicit topCode and stays noop", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 
 		if err := WriteError(rr, nil, 40001); err != nil {
@@ -453,7 +453,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects invalid explicit top code before commit", func(t *testing.T) {
+	t.Run("rejects invalid explicit topCode before commit", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 
 		if err := WriteError(rr, errx.BadRequest("", ""), 0); err == nil {
@@ -462,12 +462,12 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 		assertRecorderHasNoBodyOrContentType(t, rr)
 	})
 
-	t.Run("rejects non five digit top code before commit", func(t *testing.T) {
-		for _, code := range []int{9999, 100000} {
-			t.Run(strconv.Itoa(code), func(t *testing.T) {
+	t.Run("rejects non five digit topCode before commit", func(t *testing.T) {
+		for _, topCode := range []int{9999, 100000} {
+			t.Run(strconv.Itoa(topCode), func(t *testing.T) {
 				rr := httptest.NewRecorder()
 
-				if err := WriteError(rr, errx.BadRequest("", ""), code); err == nil {
+				if err := WriteError(rr, errx.BadRequest("", ""), topCode); err == nil {
 					t.Fatal("expected error, got nil")
 				}
 				assertRecorderHasNoBodyOrContentType(t, rr)
@@ -475,7 +475,7 @@ func TestWriteErrorResponseBoundaries(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects multiple top codes before commit", func(t *testing.T) {
+	t.Run("rejects multiple topCodes before commit", func(t *testing.T) {
 		rr := httptest.NewRecorder()
 
 		if err := WriteError(rr, errx.BadRequest("", ""), 40001, 40002); err == nil {
